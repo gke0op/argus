@@ -1,141 +1,214 @@
 // ============================================================================
-// ARGUS GPU PROTOTYPE // src/gpu_bench.zig
+// ARGUS GPU // src/gpu_bench.zig
 //
-// Headless CPU-vs-GPU benchmark for themes/Opus_Black_Hole.zig at 1920x1200:
-// each frame steps the theme once on the CPU, then draws it with the theme's own
-// `draw()` and with the Metal kernel, timing both and diffing the two frames.
+// Headless check of Opus_Black_Hole's GPU path against the theme's own CPU path:
+//   1. Shadow edge: the GPU's f32 geodesics bisected against Bardeen's analytic
+//      critical curve (the theme's CPU test does the same in f64).
+//   2. 1920x1200: CPU trace + draw() vs GPU meter + trace + shade, same step() state;
+//      reports exposure, pixel agreement, and timings.
+//   3. Native size (--native WxH, default 3024x1964): GPU trace and per-frame times.
+// Frames go to /tmp/argus_bh_{cpu,gpu,native}.rgba (RGBA8) for a look.
 //
-//   make gpu-bench [FRAMES=240]
+//   make gpu-bench [GPU_FRAMES=120]
 // ============================================================================
 
 const std = @import("std");
 const theme = @import("theme");
 const mtl = @import("gpu/metal.zig");
 const bt = @import("gpu/bh_tables.zig");
+const bg = @import("gpu/bh_gpu.zig");
 
 const W: usize = 1920;
 const H: usize = 1200;
-const MSL = @embedFile("gpu/opus_black_hole.metal");
 
-fn usSince(io: std.Io, t0: std.Io.Timestamp) f64 {
+fn msSince(io: std.Io, t0: std.Io.Timestamp) f64 {
     const ns = t0.durationTo(std.Io.Clock.awake.now(io)).nanoseconds;
-    return @as(f64, @floatFromInt(@max(@as(i96, 0), ns))) / 1000.0;
+    return @as(f64, @floatFromInt(@max(@as(i96, 0), ns))) / 1e6;
+}
+
+fn gpuMs(cb: mtl.Id) f64 {
+    return (mtl.msg(f64, cb, "GPUEndTime", .{}) - mtl.msg(f64, cb, "GPUStartTime", .{})) * 1e3;
+}
+
+fn saveRgba(path: []const u8, px: []const u32) void {
+    var buf: [256]u8 = undefined;
+    const z = std.fmt.bufPrintSentinel(&buf, "{s}", .{path}, 0) catch return;
+    const f = std.c.fopen(z, "wb") orelse return;
+    defer _ = std.c.fclose(f);
+    _ = std.c.fwrite(std.mem.sliceAsBytes(px).ptr, 4, px.len, f);
+}
+
+/// Traces at w x h and shades one sRGB frame into `out` (w*h RGBA8). Returns timings.
+fn gpuFrame(st: *theme.State, w: u32, h: u32, frames: usize, out: []u32, io: std.Io) !struct { meter_ms: f64, trace_ms: f64, shade_ms: f64, hdr_ms: f64, exposure: f32 } {
+    var stat: bt.Static = undefined;
+    bt.fillStatic(st, &stat);
+    var params: bt.TraceParams = undefined;
+    bt.fillTrace(st, w, h, &params);
+    var e = try bg.Engine.init(&stat, params, bt.noiseBytes(st), bt.ttabBytes(st));
+    defer e.deinit();
+
+    var t0 = std.Io.Clock.awake.now(io);
+    const expo = e.meter();
+    const meter_ms = msSince(io, t0);
+    t0 = std.Io.Clock.awake.now(io);
+    e.startTrace(16);
+    e.waitTrace();
+    const trace_ms = msSince(io, t0);
+    if (e.failed) return error.GpuTraceFailed;
+
+    const dev = e.k.dev;
+    const queue = mtl.msg(mtl.Id, dev, "newCommandQueue", .{});
+    defer mtl.release(queue);
+    const tex8 = mtl.newTexture(dev, mtl.PIXEL_RGBA8, w, h, mtl.STORAGE_SHARED);
+    defer mtl.release(tex8);
+    const tex16 = mtl.newTexture(dev, mtl.PIXEL_RGBA16F, w, h, mtl.STORAGE_PRIVATE);
+    defer mtl.release(tex16);
+
+    var frame: bt.Frame = undefined;
+    var shade_ms: f64 = 0;
+    var hdr_ms: f64 = 0;
+    for (0..frames) |f| {
+        const pool = mtl.poolPush();
+        defer mtl.poolPop(pool);
+        if (f > 0) st.step(0.008);
+        bt.fillFrame(st, &frame);
+        const hdr = f % 2 == 1; // alternate the HDR (16-bit float) and sRGB paths
+        const cb = mtl.msg(mtl.Id, queue, "commandBuffer", .{});
+        e.encodeShade(cb, &frame, if (hdr) tex16 else tex8, w, h, if (hdr) 4.0 else 1.0, !hdr);
+        mtl.msg(void, cb, "commit", .{});
+        mtl.msg(void, cb, "waitUntilCompleted", .{});
+        if (hdr) hdr_ms += gpuMs(cb) else shade_ms += gpuMs(cb);
+    }
+    // Final sRGB frame for comparison / viewing, at the last step state.
+    {
+        const pool = mtl.poolPush();
+        defer mtl.poolPop(pool);
+        const cb = mtl.msg(mtl.Id, queue, "commandBuffer", .{});
+        e.encodeShade(cb, &frame, tex8, w, h, 1.0, true);
+        mtl.msg(void, cb, "commit", .{});
+        mtl.msg(void, cb, "waitUntilCompleted", .{});
+        mtl.msg(void, tex8, "getBytes:bytesPerRow:fromRegion:mipmapLevel:", .{
+            @as(*anyopaque, @ptrCast(out.ptr)), @as(usize, w) * 4, mtl.MTLRegion{ .x = 0, .y = 0, .z = 0, .w = w, .h = h, .d = 1 }, @as(usize, 0),
+        });
+    }
+    const half: f64 = @floatFromInt(@max(frames / 2, 1));
+    return .{ .meter_ms = meter_ms, .trace_ms = trace_ms, .shade_ms = shade_ms / half, .hdr_ms = hdr_ms / half, .exposure = expo };
+}
+
+/// Bardeen (1973) critical curve, as in the theme's test.
+fn bardeen(a: f64, incl: f64, r: f64) ?[2]f64 {
+    const lam = -(r * r * (r - 3.0) + a * a * (r + 1.0)) / (a * (r - 1.0));
+    const eta = r * r * r * (4.0 * a * a - r * (r - 3.0) * (r - 3.0)) / (a * a * (r - 1.0) * (r - 1.0));
+    const ci = @cos(incl);
+    const si = @sin(incl);
+    const b2 = eta + a * a * ci * ci - lam * lam * ci * ci / (si * si);
+    if (b2 < 0) return null;
+    return .{ -lam / si, @sqrt(b2) };
+}
+
+fn shadowEdge(st: *theme.State) !f64 {
+    var stat: bt.Static = undefined;
+    bt.fillStatic(st, &stat);
+    var params: bt.TraceParams = undefined;
+    bt.fillTrace(st, 64, 64, &params);
+    var e = try bg.Engine.init(&stat, params, bt.noiseBytes(st), bt.ttabBytes(st));
+    defer e.deinit();
+    const a = theme.SPIN;
+    const r1 = theme.photonOrbit(a, true);
+    const r2 = theme.photonOrbit(a, false);
+    var pts: [11][2]f64 = undefined;
+    var lo: [11]f64 = undefined;
+    var hi: [11]f64 = undefined;
+    var n: usize = 0;
+    for (1..12) |k| {
+        const r = r1 + (r2 - r1) * @as(f64, @floatFromInt(k)) / 12.0;
+        const ab = bardeen(a, theme.INCL, r) orelse continue;
+        if (ab[1] < 0.3) continue;
+        pts[n] = ab;
+        lo[n] = 0.0;
+        hi[n] = ab[1] + 3.0;
+        n += 1;
+    }
+    var ab_buf: [11][2]f32 = undefined;
+    var kinds: [11]u32 = undefined;
+    for (0..40) |_| {
+        for (0..n) |i| ab_buf[i] = .{ @floatCast(pts[i][0]), @floatCast(0.5 * (lo[i] + hi[i])) };
+        e.probe(ab_buf[0..n], kinds[0..n]);
+        for (0..n) |i| {
+            if (kinds[i] == 2) lo[i] = 0.5 * (lo[i] + hi[i]) else hi[i] = 0.5 * (lo[i] + hi[i]);
+        }
+    }
+    var worst: f64 = 0;
+    for (0..n) |i| worst = @max(worst, @abs(0.5 * (lo[i] + hi[i]) - pts[i][1]));
+    std.debug.print(" shadow edge (GPU f32)       : {d} points, worst |beta - Bardeen| = {e:.2} M\n", .{ n, worst });
+    return worst;
 }
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const alloc = std.heap.page_allocator;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    var frames: usize = 240;
-    if (args.len > 2 and std.mem.eql(u8, args[1], "--frames")) frames = try std.fmt.parseInt(usize, args[2], 10);
-
-    var t0 = std.Io.Clock.awake.now(io);
-    const st = try theme.State.init(alloc, W, H, 1.0);
-    defer st.deinit(alloc);
-    const init_ms = usSince(io, t0) / 1000.0;
-
-    t0 = std.Io.Clock.awake.now(io);
-    const k = try mtl.Kernel.init(MSL, "bh_to_buffer");
-    const pipe_ms = usSince(io, t0) / 1000.0;
-
-    // Upload once: per-pixel records, background, row ranges, noise, static tables.
-    t0 = std.Io.Clock.awake.now(io);
-    const pix = bt.pixelBuffers(st);
-    var bufs: [5]mtl.Id = undefined;
-    for (pix, 0..) |bytes, i| bufs[i] = k.bufferCopy(bytes);
-    const stat_buf = k.bufferNew(@sizeOf(bt.Static));
-    bt.fillStatic(st, @ptrCast(@alignCast(mtl.contents(stat_buf))));
-    const out_buf = k.bufferNew(W * H * 4);
-    const upload_ms = usSince(io, t0) / 1000.0;
-    var upload_bytes: usize = @sizeOf(bt.Static);
-    for (pix) |b| upload_bytes += b.len;
-
-    const cpu_buf = try alloc.alloc(u32, W * H);
-    defer alloc.free(cpu_buf);
-    @memset(cpu_buf, 0);
-    const gpu_px: [*]const u32 = @ptrCast(@alignCast(mtl.contents(out_buf)));
-    const group = k.groupSize();
-    var frame: bt.Frame = undefined;
-
-    var cpu_us: f64 = 0;
-    var gpu_wall_us: f64 = 0;
-    var gpu_exec_us: f64 = 0;
-    var gpu_cpu_us: f64 = 0;
-    var diff_px: u64 = 0;
-    var diff_gt1: u64 = 0;
-    var max_diff: u32 = 0;
-
-    for (0..frames + 10) |f| {
-        st.step(0.008);
-        const timed = f >= 10; // first frames warm caches and the GPU clock
-
-        t0 = std.Io.Clock.awake.now(io);
-        st.draw(cpu_buf, W);
-        const c_us = usSince(io, t0);
-
-        const pool = mtl.poolPush();
-        t0 = std.Io.Clock.awake.now(io);
-        bt.fillFrame(st, &frame);
-        const cb = mtl.msg(mtl.Id, k.queue, "commandBuffer", .{});
-        const enc = mtl.msg(mtl.Id, cb, "computeCommandEncoder", .{});
-        mtl.msg(void, enc, "setComputePipelineState:", .{k.pso});
-        for (bufs, 0..) |b, i| mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ b, @as(usize, 0), i });
-        mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ stat_buf, @as(usize, 0), @as(usize, 5) });
-        mtl.msg(void, enc, "setBytes:length:atIndex:", .{ @as(*const anyopaque, &frame), @as(usize, @sizeOf(bt.Frame)), @as(usize, 6) });
-        mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ out_buf, @as(usize, 0), @as(usize, 7) });
-        mtl.msg(void, enc, "dispatchThreads:threadsPerThreadgroup:", .{ mtl.MTLSize{ .w = W, .h = H, .d = 1 }, group });
-        mtl.msg(void, enc, "endEncoding", .{});
-        mtl.msg(void, cb, "commit", .{});
-        const enc_us = usSince(io, t0);
-        mtl.msg(void, cb, "waitUntilCompleted", .{});
-        const g_wall = usSince(io, t0);
-        const g_exec = (mtl.msg(f64, cb, "GPUEndTime", .{}) - mtl.msg(f64, cb, "GPUStartTime", .{})) * 1e6;
-        mtl.poolPop(pool);
-
-        if (!timed) continue;
-        cpu_us += c_us;
-        gpu_wall_us += g_wall;
-        gpu_exec_us += g_exec;
-        gpu_cpu_us += enc_us;
-        for (0..W * H) |i| {
-            const a = cpu_buf[i];
-            const b = gpu_px[i];
-            if (a == b) continue;
-            diff_px += 1;
-            var worst: u32 = 0;
-            inline for (0..3) |ch| {
-                const ca: i32 = @intCast((a >> (8 * ch)) & 0xFF);
-                const cg: i32 = @intCast((b >> (8 * ch)) & 0xFF);
-                worst = @max(worst, @abs(ca - cg));
-            }
-            if (worst > 1) diff_gt1 += 1;
-            max_diff = @max(max_diff, worst);
+    var frames: usize = 120;
+    var nw: u32 = 3024;
+    var nh: u32 = 1964;
+    var i: usize = 1;
+    while (i + 1 < args.len) : (i += 2) {
+        if (std.mem.eql(u8, args[i], "--frames")) frames = try std.fmt.parseInt(usize, args[i + 1], 10);
+        if (std.mem.eql(u8, args[i], "--native")) {
+            const s = args[i + 1];
+            const x = std.mem.indexOfScalar(u8, s, 'x') orelse return error.BadSize;
+            nw = try std.fmt.parseInt(u32, s[0..x], 10);
+            nh = try std.fmt.parseInt(u32, s[x + 1 ..], 10);
         }
     }
 
-    const n: f64 = @floatFromInt(frames);
-    const px_total: f64 = n * @as(f64, @floatFromInt(W * H));
-    std.debug.print(
-        \\========================================================================
-        \\ ARGUS GPU PROTOTYPE // Opus_Black_Hole 1920x1200, {d} frames (M3)
-        \\========================================================================
-        \\ theme init (CPU ray trace)  : {d:.0} ms
-        \\ Metal compile + pipeline    : {d:.1} ms
-        \\ one-time upload             : {d:.1} ms ({d:.1} MB)
-        \\ CPU draw()                  : {d:.3} ms/frame
-        \\ GPU kernel (GPU time)       : {d:.3} ms/frame
-        \\ GPU frame, wall (enc+wait)  : {d:.3} ms/frame
-        \\ GPU frame, CPU side (encode): {d:.3} ms/frame
-        \\ pixels differing CPU vs GPU : {d:.4}% (>1 level: {d:.4}%), max channel diff {d}
-        \\========================================================================
-        \\
-    , .{
-        frames,                              init_ms,                            pipe_ms,
-        upload_ms,                           @as(f64, @floatFromInt(upload_bytes)) / 1e6,
-        cpu_us / n / 1000.0,                 gpu_exec_us / n / 1000.0,
-        gpu_wall_us / n / 1000.0,            gpu_cpu_us / n / 1000.0,
-        @as(f64, @floatFromInt(diff_px)) / px_total * 100.0,
-        @as(f64, @floatFromInt(diff_gt1)) / px_total * 100.0,
-        max_diff,
+    std.debug.print("========================================================================\n ARGUS GPU // Opus_Black_Hole GPU trace vs CPU\n------------------------------------------------------------------------\n", .{});
+    var t0 = std.Io.Clock.awake.now(io);
+    const st = try theme.State.init(alloc, W, H, 1.0);
+    defer st.deinit(alloc);
+    std.debug.print(" CPU init (trace) 1920x1200  : {d:.0} ms, exposure {d:.4}\n", .{ msSince(io, t0), st.exposure });
+
+    const edge = try shadowEdge(st);
+
+    // CPU frame at the bench's start state.
+    const cpu = try alloc.alloc(u32, W * H);
+    defer alloc.free(cpu);
+    t0 = std.Io.Clock.awake.now(io);
+    st.draw(cpu, W);
+    const cpu_draw_ms = msSince(io, t0);
+
+    // GPU at 1920x1200, single frame at the same state (frames = 1: no stepping).
+    const gpu = try alloc.alloc(u32, W * H);
+    defer alloc.free(gpu);
+    const g1 = try gpuFrame(st, W, H, 1, gpu, io);
+    var close: u64 = 0;
+    var sum_abs: f64 = 0;
+    for (cpu, gpu) |a, b| {
+        var worst: i32 = 0;
+        inline for (0..3) |ch| {
+            const d: i32 = @as(i32, @intCast((a >> (8 * ch)) & 0xFF)) - @as(i32, @intCast((b >> (8 * ch)) & 0xFF));
+            worst = @max(worst, @as(i32, @intCast(@abs(d))));
+            sum_abs += @floatFromInt(@abs(d));
+        }
+        if (worst <= 8) close += 1;
+    }
+    saveRgba("/tmp/argus_bh_cpu.rgba", cpu);
+    saveRgba("/tmp/argus_bh_gpu.rgba", gpu);
+    std.debug.print(" exposure CPU / GPU          : {d:.4} / {d:.4}\n", .{ st.exposure, g1.exposure });
+    std.debug.print(" 1920x1200 GPU meter / trace : {d:.1} ms / {d:.1} ms   (CPU draw {d:.2} ms)\n", .{ g1.meter_ms, g1.trace_ms, cpu_draw_ms });
+    std.debug.print(" CPU vs GPU pixels within 8  : {d:.3}%, mean |diff| {d:.3} levels/channel\n", .{
+        @as(f64, @floatFromInt(close)) / @as(f64, W * H) * 100.0, sum_abs / @as(f64, W * H * 3),
     });
+
+    // Native size: trace + per-frame shading.
+    const nat = try alloc.alloc(u32, @as(usize, nw) * nh);
+    defer alloc.free(nat);
+    const g2 = try gpuFrame(st, nw, nh, frames, nat, io);
+    saveRgba("/tmp/argus_bh_native.rgba", nat);
+    std.debug.print(" {d}x{d} GPU meter / trace  : {d:.1} ms / {d:.1} ms (2x2 samples per pixel)\n", .{ nw, nh, g2.meter_ms, g2.trace_ms });
+    std.debug.print(" {d}x{d} shade sRGB / HDR   : {d:.3} / {d:.3} ms GPU per frame ({d} frames)\n", .{ nw, nh, g2.shade_ms, g2.hdr_ms, frames });
+    std.debug.print(" traced image memory         : {d:.1} MB\n========================================================================\n", .{
+        @as(f64, @floatFromInt(@as(usize, nw) * nh * bt.BYTES_PER_PIXEL)) / 1e6,
+    });
+    if (edge > 0.01) return error.ShadowEdge;
 }
