@@ -58,7 +58,7 @@ pub inline fn scaleRGB(c: u32, scale_256: u32) u32 {
 
 /// Linearly interpolates between `c0` and `c1` using fixed-point `t_256` in `[0..256]`.
 pub inline fn lerpRGB(c0: u32, c1: u32, t_256: u32) u32 {
-    const t = @min(@as(u32, 256), t_256);
+    const t: u32 = @min(@as(u32, 256), t_256); // typed: a comptime t_256 would narrow @min to u8
     const inv = 256 - t;
     const r: u8 = @intCast(((c0 & 0xFF) * inv + (c1 & 0xFF) * t) >> 8);
     const g: u8 = @intCast((((c0 >> 8) & 0xFF) * inv + ((c1 >> 8) & 0xFF) * t) >> 8);
