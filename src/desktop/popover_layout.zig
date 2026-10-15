@@ -55,13 +55,16 @@ pub const ROW_A_Y: f64 = 40.0; // top of the first control row
 pub const ROW_B_Y: f64 = 66.0; // top of the second
 pub const ROW_H: f64 = 22.0;
 
+// Mini preview of the selected Space, the same size as a strip thumbnail: clicking it goes back.
+pub const preview = Rect{ .x = 16, .y = ROW_A_Y - 2, .w = 80, .h = 50 };
+
 // Left block: the selected Space's theme, and speed.
-pub const LX: f64 = 18.0;
-pub const space_btn = Rect{ .x = LX - 4, .y = ROW_A_Y, .w = 74, .h = ROW_H };
-pub const stepper = Rect{ .x = LX + 74, .y = ROW_A_Y, .w = 244, .h = ROW_H };
+pub const LX: f64 = 108.0;
+pub const space_btn = Rect{ .x = LX - 4, .y = ROW_A_Y, .w = 62, .h = ROW_H };
+pub const stepper = Rect{ .x = LX + 62, .y = ROW_A_Y, .w = 172, .h = ROW_H };
 pub const stepper_prev = Rect{ .x = stepper.x, .y = stepper.y, .w = 32, .h = stepper.h };
 pub const stepper_next = Rect{ .x = stepper.x + stepper.w - 32, .y = stepper.y, .w = 32, .h = stepper.h };
-pub const slider = Rect{ .x = LX + 82, .y = ROW_B_Y, .w = 196, .h = ROW_H };
+pub const slider = Rect{ .x = LX + 62, .y = ROW_B_Y, .w = 140, .h = ROW_H };
 pub const BLOCK_RULE_X: f64 = 352.0;
 
 // Right block: a 2x2 grid of switches, each cell clickable as a whole.
@@ -133,7 +136,7 @@ pub fn hitSpaces(x: f64, y: f64, n_spaces: usize, paused: bool) ?Hit {
 }
 
 pub fn hitSettings(x: f64, y: f64) ?Hit {
-    if (back_btn.contains(x, y)) return .back;
+    if (back_btn.contains(x, y) or preview.contains(x, y)) return .back;
     if (quit_btn.contains(x, y)) return .quit;
     if (space_btn.contains(x, y)) return .next_space;
     if (stepper_prev.contains(x, y)) return .prev_theme;
@@ -219,6 +222,8 @@ test "popover layout: every control hits where it is drawn, inside the box" {
     try std.testing.expectEqual(Hit.toggle_pause, hitSpaces(W - 100, 18, 8, true).?);
 
     try std.testing.expectEqual(Hit.back, hitSettings(30, 18).?);
+    try std.testing.expectEqual(Hit.back, hitSettings(preview.x + preview.w * 0.5, preview.y + preview.h * 0.5).?);
+    try std.testing.expect(preview.x + preview.w < space_btn.x and preview.y + preview.h <= SPACES_H - 8);
     try std.testing.expectEqual(Hit.quit, hitSettings(W - 20, 18).?);
     try std.testing.expectEqual(Hit.next_space, hitSettings(LX + 10, ROW_A_Y + 10).?);
     try std.testing.expectEqual(Hit.prev_theme, hitSettings(stepper.x + 10, ROW_A_Y + 10).?);

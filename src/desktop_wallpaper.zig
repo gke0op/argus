@@ -939,6 +939,12 @@ const MacBridge = struct {
         }
         self.drawLabel(ctx, H, W - 20.0, 11.5, "Quit", self.dict_small, C_MUTED, .right);
 
+        // Mini preview of the selected Space (click to go back), like its strip thumbnail.
+        const pv = pl.preview;
+        self.drawSpaceThumbnail(ctx, H, pv.x, pv.y, pv.w, pv.h, sp);
+        self.strokeR(ctx, H, .{ .x = pv.x - 1.0, .y = pv.y - 1.0, .w = pv.w + 2.0, .h = pv.h + 2.0 }, 5.0, 1.2, .{ 0.92, 0.94, 0.98, 0.95 });
+        self.drawLabel(ctx, H, pv.x + 5.5, pv.y + 4.0, romanNumeral(sp.index_1based), self.dict_small, .{ 1.0, 1.0, 1.0, 1.0 }, .left);
+
         // Row A, left: which Space (click to move on), and its theme stepper ‹ Name ›
         var sp_buf: [16]u8 = undefined;
         const sp_txt = std.fmt.bufPrint(&sp_buf, "Space {s}", .{romanNumeral(sp.index_1based)}) catch "Space";
@@ -951,12 +957,13 @@ const MacBridge = struct {
         self.chevron(ctx, H, st.x + 11.0, st.y + st.h * 0.5, true, C_MUTED);
         self.chevron(ctx, H, st.x + st.w - 16.0, st.y + st.h * 0.5, false, C_MUTED);
         var name_buf: [64]u8 = undefined;
-        const name: []const u8 = switch (sp.mode) {
+        var name: []const u8 = switch (sp.mode) {
             .custom_shader => displayName(std.Io.Dir.path.basename(sp.getPath()), &name_buf),
             .picture => "Picture",
             .passthrough => "macOS Default",
         };
         const name_dict = if (self.textWidth(name, self.dict_body) > st.w - 64.0) self.dict_small else self.dict_body;
+        name = self.fitText(name, name_dict, st.w - 56.0, &name_buf);
         self.drawLabel(ctx, H, st.x + st.w * 0.5, st.y + @as(f64, if (name_dict == self.dict_body) 4.5 else 5.5), name, name_dict, C_TITLE, .center);
 
         // Row B, left: speed in five detents
@@ -978,6 +985,22 @@ const MacBridge = struct {
         self.switchCell(ctx, H, pl.cell(1, 0), "Smooth swipes", self.warm_neighbors);
         self.switchCell(ctx, H, pl.cell(0, 1), "Live reload", self.hot_reload);
         self.switchCell(ctx, H, pl.cell(1, 1), "Open at login", self.launch_at_login);
+    }
+
+    /// `text` shortened with an ellipsis (copied into `buf`) until it fits `max_w` points.
+    fn fitText(self: *MacBridge, text: []const u8, dict: ?*anyopaque, max_w: f64, buf: *[64]u8) []const u8 {
+        if (self.textWidth(text, dict) <= max_w) return text;
+        var n = @min(text.len, buf.len - 3);
+        while (n > 1) : (n -= 1) {
+            // Never cut inside a UTF-8 sequence.
+            if (n < text.len and (text[n] & 0xC0) == 0x80) continue;
+            std.mem.copyForwards(u8, buf[0..n], text[0..n]);
+            const trimmed = std.mem.trimEnd(u8, buf[0..n], " ");
+            @memcpy(buf[trimmed.len .. trimmed.len + 3], "\xe2\x80\xa6");
+            const s = buf[0 .. trimmed.len + 3];
+            if (self.textWidth(s, dict) <= max_w) return s;
+        }
+        return text[0..0];
     }
 
     fn switchCell(self: *MacBridge, ctx: ?*anyopaque, H: f64, r: pl.Rect, text: []const u8, on: bool) void {
