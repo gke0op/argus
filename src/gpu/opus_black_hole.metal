@@ -27,21 +27,14 @@ constant uint NSPOT = 6;
 constant uint EMIT_N = 1024;
 constant float EMIT_X0 = -7.0f;
 constant float EMIT_X1 = 4.0f;
-constant float TURB_SIGMA = 0.2f; // rms of ln(dissipation): thermal thin disk, as the theme
 constant float NOISE_STD = 40.0f;  // noise table byte levels per standard deviation
-constant float PEAK_T = 1.1388f;    // e^(2.6 sigma / 4): turbulence at +2.6 sigma raises T by this, as the theme
 constant uint NR = 2048;           // turbulence rows
 constant uint N_OCT = 2;           // turbulence octaves, amplitude 2^(-5j/6)
 constant uint NBAND = 12;          // turbulence lifetime bands
 constant float OCT_AMP[N_OCT] = {1.0f, 0.5612310f};
 constant float OCT_NORM = 1.1467259f; // sqrt(sum of OCT_AMP^2)
-// Neighbour correlations of each octave's plane (rows, phase cells), for variance-preserving
-// interpolation; and the footprint filter's cell constants (box average of the rendered field).
-// Fitted to the planes (notes: opus-audit2-turbulence-fit.md); re-fit if the eddy shape changes.
-constant float RHO_ROW[N_OCT] = {0.40f, 0.26f};
-constant float RHO_PH[N_OCT] = {0.31f, 0.0f};
-constant float FOOT_CR[N_OCT] = {0.865f, 1.284f};
-constant float FOOT_CP[N_OCT] = {1.513f, 2.039f};
+// The footprint filter's cell constants and the planes' neighbour correlations (for
+// variance-preserving interpolation) come from the theme (Static.foot_* / rho_*).
 constant uint BB_N = 1024;
 constant float BB_TMIN = 300.0f;
 constant float BB_TMAX = 80000.0f;
@@ -122,6 +115,11 @@ struct Static {
     float om_row[NR];           // Omega at each turbulence row
     float cell_r0;              // octave-0 eddy cell: radial bins
     float cell_p0;              // octave-0 eddy cell: azimuth, Q16
+    float turb_sigma;           // rms of ln(dissipation): the theme's TURB_SIGMA
+    float rho_row[N_OCT];       // neighbour correlation of each noise plane, measured by the theme
+    float rho_ph[N_OCT];
+    float foot_cr[N_OCT];       // footprint filter cell constants, from the theme
+    float foot_cp[N_OCT];
     uchar srgb[4096];
 };
 
@@ -571,7 +569,8 @@ static void addSample(thread Px& px, constant TraceParams& P, constant Static& s
     if (h0.r > SPOT_RMAX) {
         // Visible brightening by turbulence at +2.6 sigma (large on the Wien side of cool gas).
         const float y0 = luma(smp.rgb);
-        const float boost = y0 > 0.0f ? max(luma(bbLookup(st, smp.tobs * PEAK_T)) / y0, 1.0f) : 1.0f;
+        const float peak_t = exp(2.6f * st.turb_sigma / 4.0f); // T at +2.6 sigma of the dissipation
+        const float boost = y0 > 0.0f ? max(luma(bbLookup(st, smp.tobs * peak_t)) / y0, 1.0f) : 1.0f;
         const bool dim = y0 * emitFrac(P, ttab, alpha, h0) * P.exposure * boost < EMIT_FLOOR;
         if (tau < TAU_MIN || dim) {
             // Too thin or too cool to show even when stirred: baked at its mean opacity.
@@ -827,9 +826,9 @@ static float turbOctave(device const uchar* noise, constant Static& st, constant
                 const float pc = (qf - 65536.0f * floor(qf / 65536.0f)) / 64.0f;
                 const uint p0 = min(uint(pc), NP - 1);
                 const uint p1 = (p0 + 1) & (NP - 1);
-                v[rr] = vmix(float(plane[row * NP + p0]) - 128.0f, float(plane[row * NP + p1]) - 128.0f, pc - float(p0), RHO_PH[j]);
+                v[rr] = vmix(float(plane[row * NP + p0]) - 128.0f, float(plane[row * NP + p1]) - 128.0f, pc - float(p0), st.rho_ph[j]);
             }
-            g += wb * t.w * vmix(v[0], v[1], tr, RHO_ROW[j]);
+            g += wb * t.w * vmix(v[0], v[1], tr, st.rho_row[j]);
         }
     }
     return g / NOISE_STD;
@@ -871,14 +870,14 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
         const float sc = float(1u << j);
         const float er = frf * sc / st.cell_r0;
         const float ep = fpf * sc / st.cell_p0;
-        const float a = OCT_AMP[j] / OCT_NORM * rsqrt(sqrt((1.0f + er * er / (FOOT_CR[j] * FOOT_CR[j])) * (1.0f + ep * ep / (FOOT_CP[j] * FOOT_CP[j]))));
-        if (a * TURB_SIGMA < 0.002f) continue;
+        const float a = OCT_AMP[j] / OCT_NORM * rsqrt(sqrt((1.0f + er * er / (st.foot_cr[j] * st.foot_cr[j])) * (1.0f + ep * ep / (st.foot_cp[j] * st.foot_cp[j]))));
+        if (a * st.turb_sigma < 0.002f) continue;
         const float sb = mix(st.sband[j][b0], st.sband[j][min(b0 + 1, R_BINS - 1)], tb);
         G += a * turbOctave(noise, st, fr, j, rc.phi, r0, trow, sb);
         var += a * a;
     }
     // Log-normal dissipation with its mean kept at 1; the gas's temperature follows it, T ~ eps^(1/4).
-    const float eps = exp(TURB_SIGMA * G - 0.5f * TURB_SIGMA * TURB_SIGMA * var);
+    const float eps = exp(st.turb_sigma * G - 0.5f * st.turb_sigma * st.turb_sigma * var);
     const float tturb = tobs * sqrt(sqrt(eps));
     float k = exposure;
 

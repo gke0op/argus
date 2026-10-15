@@ -9,7 +9,7 @@ working with Ekmel Ozdemir, who directed the project and holds the copyright:
 
 - **Argon** (Google Gemini): the wallpaper engine, the theme SDK, the headless
   harness, the benchmark, `themes/Argon_Black_Hole.zig`, and `themes/Echo.zig`.
-- **Claude Opus** (Anthropic): `themes/Opus_Quasar.zig`, audits, and the
+- **Claude Opus** (Anthropic): `themes/Opus_Quasar.zig`, `themes/Opus_Gargantua.zig`, audits, and the
   extraction of this repository.
 
 Themes added for this release:

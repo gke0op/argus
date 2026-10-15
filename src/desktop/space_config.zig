@@ -166,7 +166,14 @@ pub var gpu_ports = true;
 /// Set by the app: compiles a `.metal` theme source and reports whether it is loadable, so a
 /// broken edit never replaces a working theme. Null (tests, harness) accepts any source.
 pub var metal_validate: ?*const fn (src: []const u8, label: []const u8) bool = null;
-const GPU_PORT_THEME = "Opus_Quasar.zig";
+// Themes built on the Kerr-disk engine (src/gpu/bh_*), drawn by its GPU path.
+const GPU_PORT_THEMES = [_][]const u8{ "Opus_Quasar.zig", "Opus_Gargantua.zig" };
+
+fn isGpuPortTheme(path: []const u8) bool {
+    const base = std.Io.Dir.path.basename(path);
+    for (GPU_PORT_THEMES) |t| if (std.mem.eql(u8, base, t)) return true;
+    return false;
+}
 const GPU_PORT_ROOT = "-Mroot=src/gpu/bh_export.zig";
 
 /// Themes that were renamed: a saved Space that names the old file loads the new one from the
@@ -309,7 +316,7 @@ pub const SpaceConfig = struct {
             self.dylib_gen,
         }, 0) catch return false;
 
-        const gpu_port = gpu_ports and std.mem.eql(u8, std.Io.Dir.path.basename(path), GPU_PORT_THEME);
+        const gpu_port = gpu_ports and isGpuPortTheme(path);
 
         // Content-addressed verified .dylib cache: hash source content so unchanged shaders
         // across app restarts or multiple Spaces skip `zig build-lib` and `--verify-dylib`!

@@ -12,7 +12,7 @@
 const theme = @import("theme");
 const bt = @import("bh_tables.zig");
 
-pub const argus_gpu_traces_opus_quasar = true;
+pub const argus_gpu_traces_kerr_disk = true;
 
 comptime {
     _ = theme; // pulls in the theme's sdk.exportTheme(State)
