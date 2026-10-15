@@ -170,6 +170,7 @@ pub const Presenter = struct {
         const fill_static: StaticFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_static") orelse return null));
         const fill_trace: TraceFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_trace_params") orelse return null));
         const tables: TablesFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_tables") orelse return null));
+        mtl.load() catch return null; // nativeSize messages AppKit before the engine loads Metal
 
         const size = nativeSize(host_layer, w, h);
         var stat: bt.Static = undefined;
