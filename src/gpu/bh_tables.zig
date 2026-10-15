@@ -19,22 +19,25 @@ pub const NSPOT = 6;
 pub const EMIT_N = 1024;
 pub const BB_N = 1024;
 pub const PT_N = 4096;
+pub const NR = 2048; // turbulence rows
+pub const N_OCT = 3; // turbulence octaves
+pub const NBAND = 12; // turbulence lifetime bands
+
+/// One generation of eddies (mirrors the theme's TurbGen and `struct TurbGen`).
+pub const TurbGen = extern struct { w: f32, age_q: f32, rowoff: u32, phoff: u32 };
 /// Samples per pixel side in the GPU trace (2 -> 4 samples per pixel).
 pub const SS: u32 = 2;
 /// Exposure metering grid width (the theme meters on the same 192-wide grid).
 pub const METER_W: u32 = 192;
 
 pub const Frame = extern struct {
-    gshift: [2][R_BINS]u16,
-    grow: [2][R_BINS]u16,
+    gen: [N_OCT][NBAND][2]TurbGen,
     spot_mask: [R_BINS]u8,
     spot_rb: [NSPOT]f32,
     spot_wr: [NSPOT]f32,
     spot_wp: [NSPOT]f32,
     spot_amp: [NSPOT]f32,
     spot_q: [NSPOT]u16,
-    gw: [2]f32,
-    gnorm: f32,
     exposure: f32,
     width: u32,
     height: u32,
@@ -43,11 +46,15 @@ pub const Frame = extern struct {
 };
 
 pub const Static = extern struct {
-    tau_tab: [R_BINS]f32,
-    lntau_tab: [R_BINS]f32,
+    lntau_tab: [R_BINS]f32, // ln vertical extinction depth per radial bin
+    lnem_tab: [R_BINS]f32, // ln vertical thermalisation depth per radial bin
     emit_tab: [EMIT_N + 1]f32,
     lin8: [256]f32,
     bb: [BB_N][3]f32,
+    sband: [N_OCT][R_BINS]f32, // log2(eddy lifetime / L0) per octave and radial bin
+    om_row: [NR]f32, // Omega at each turbulence row
+    cell_r0: f32, // octave-0 eddy cell: radial bins
+    cell_p0: f32, // octave-0 eddy cell: azimuth, Q16
     srgb: [4096]u8,
 };
 
@@ -95,25 +102,33 @@ pub const OutMode = enum(u32) {
 };
 
 pub fn fillStatic(st: anytype, out: *Static) void {
-    out.tau_tab = st.tau_tab;
     out.lntau_tab = st.lntau_tab;
+    out.lnem_tab = st.lnem_tab;
     out.emit_tab = st.emit_tab;
     out.lin8 = st.lin8;
     out.bb = st.bb;
+    out.sband = st.sband;
+    out.om_row = st.om_row;
+    out.cell_r0 = st.cell_r0;
+    out.cell_p0 = st.cell_p0;
     out.srgb = st.srgb;
 }
 
 pub fn fillFrame(st: anytype, out: *Frame) void {
-    out.gshift = st.gshift;
-    out.grow = st.grow;
+    for (0..N_OCT) |j| {
+        for (0..NBAND) |n| {
+            for (0..2) |g| {
+                const t = st.gen[j][n][g];
+                out.gen[j][n][g] = .{ .w = t.w, .age_q = t.age_q, .rowoff = t.rowoff, .phoff = t.phoff };
+            }
+        }
+    }
     out.spot_mask = st.spot_mask;
     out.spot_rb = st.spot_rb;
     out.spot_wr = st.spot_wr;
     out.spot_wp = st.spot_wp;
     out.spot_amp = st.spot_amp;
     out.spot_q = st.spot_q;
-    out.gw = st.gw;
-    out.gnorm = st.gnorm;
     out.exposure = st.exposure;
     out.width = @intCast(st.w);
     out.height = @intCast(st.h);
@@ -172,13 +187,14 @@ pub fn exposureFrom(lum: []const f32, target: f64) f32 {
     return 1.0;
 }
 
-/// The theme's turbulence noise (R_BINS x NP bytes) and temperature table (PT_N floats).
+/// The theme's turbulence noise (N_OCT x NR x NP bytes).
 pub fn noiseBytes(st: anytype) []const u8 {
     return std.mem.sliceAsBytes(&st.noise);
 }
 
+/// The computed disk: temperature, ln extinction depth, ln thermalisation depth (3 x PT_N floats).
 pub fn ttabBytes(st: anytype) []const u8 {
-    return std.mem.sliceAsBytes(&st.ttab);
+    return std.mem.sliceAsBytes(&st.dtab);
 }
 
 /// Bytes per traced pixel kept on the GPU: record (6) + background (4, RGB9E5) + the share of

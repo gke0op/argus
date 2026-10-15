@@ -27,10 +27,14 @@ constant uint NSPOT = 6;
 constant uint EMIT_N = 1024;
 constant float EMIT_X0 = -7.0f;
 constant float EMIT_X1 = 4.0f;
-constant float TURB_SIGMA = 0.5f; // log-normal emissivity, as the theme
+constant float TURB_SIGMA = 0.2f; // rms of ln(dissipation): thermal thin disk, as the theme
 constant float NOISE_STD = 40.0f;  // noise table byte levels per standard deviation
-constant float PEAK_BOOST = 3.0f;  // exp(2.6 sigma - sigma^2/2): how far turbulence brightens gas, as the theme
-constant float TAU_NOISE = 1.2f;
+constant float PEAK_BOOST = 3.0f;  // how far turbulence can brighten gas in the visible, as the theme
+constant uint NR = 2048;           // turbulence rows
+constant uint N_OCT = 3;           // turbulence octaves, amplitude 2^(-5j/6)
+constant uint NBAND = 12;          // turbulence lifetime bands
+constant float OCT_AMP[N_OCT] = {1.0f, 0.5612310f, 0.3149803f};
+constant float OCT_NORM = 1.1892071f; // sqrt(sum of OCT_AMP^2)
 constant uint BB_N = 1024;
 constant float BB_TMIN = 300.0f;
 constant float BB_TMAX = 80000.0f;
@@ -40,8 +44,6 @@ constant float OBS_R = 1000.0f;
 constant float T_REF = 1012.4292161968444f; // OBS_R + 2 ln(OBS_R / 2)
 constant float K_NEAR = 0.08f;
 constant uint MAX_STEPS = 40000;
-constant float R_C = 5.0f;
-constant float TAU0 = 220.0f;
 // Gas denser than this is drawn opaque. The theme uses TAU_THICK * e^TAU_NOISE = 16.6, which
 // hides a leak of e^-5 behind stirred gas: fine against the sky, but here light is composited
 // before tone mapping and the inner disk behind can be ~50x display white, so a leak that size
@@ -74,22 +76,27 @@ struct Rec {
 };
 static_assert(sizeof(Rec) == 6, "Rec must stay 6 bytes");
 constant uint COV_MAX = 15;
-constant uint FR_MAX = 31;  // saturated: texture is filtered to ~6% and hot spots are unresolved
+constant uint FR_MAX = 31;  // footprint code: quarter bins up to 4 bins, then whole bins; 31 = 19 bins, saturated
 constant uint FP_MAX = 127; // saturated: the pixel spans too much azimuth to resolve a hot spot
 constant uint REFINE = 8;   // photon-ring pixels: REFINE x REFINE samples instead of 2 x 2
 
+// One generation of eddies: weight now, age (Q16 phase per unit Omega), offsets into its plane.
+struct TurbGen {
+    float w;
+    float age_q;
+    uint rowoff;
+    uint phoff;
+};
+
 // Per-frame tables written by the theme's step().
 struct Frame {
-    ushort gshift[2][R_BINS];
-    ushort grow[2][R_BINS];
+    TurbGen gen[N_OCT][NBAND][2];
     uchar spot_mask[R_BINS];
     float spot_rb[NSPOT];
     float spot_wr[NSPOT];
     float spot_wp[NSPOT];
     float spot_amp[NSPOT];
     ushort spot_q[NSPOT];
-    float gw[2];
-    float gnorm;
     float exposure;
     uint width;
     uint height;
@@ -99,11 +106,15 @@ struct Frame {
 
 // Static tables built once by the theme's init().
 struct Static {
-    float tau_tab[R_BINS];
-    float lntau_tab[R_BINS];
+    float lntau_tab[R_BINS]; // ln vertical extinction depth per radial bin
+    float lnem_tab[R_BINS];  // ln vertical thermalisation depth per radial bin
     float emit_tab[EMIT_N + 1];
     float lin8[256];
     float bb[BB_N][3];
+    float sband[N_OCT][R_BINS]; // log2(eddy lifetime / L0) per octave and radial bin
+    float om_row[NR];           // Omega at each turbulence row
+    float cell_r0;              // octave-0 eddy cell: radial bins
+    float cell_p0;              // octave-0 eddy cell: azimuth, Q16
     uchar srgb[4096];
 };
 
@@ -318,7 +329,15 @@ static Hit traceNext(constant TraceParams& P, thread Ray& ray, bool with_disk) {
 
 // ---------------------------------------------------------------- disk physics (theme port)
 
-static float opticalDepth(float r) { return TAU0 * (R_C / r) * exp(-r / R_C); }
+// The computed disk (theme diskProfile): ttab holds [T_s | ln tau_ext | ln tau_*] on the log-r grid.
+static float lnTab(constant TraceParams& P, device const float* tab, float r) {
+    const float x = clamp(log(r / P.r_in) / P.lnt_span * float(PT_N - 1), 0.0f, float(PT_N - 1) - 0.001f);
+    const uint xi = uint(x);
+    const float f = x - float(xi);
+    return tab[xi] * (1.0f - f) + tab[xi + 1] * f;
+}
+static float tauExt(constant TraceParams& P, device const float* ttab, float r) { return exp(lnTab(P, ttab + PT_N, r)); }
+static float tauEm(constant TraceParams& P, device const float* ttab, float r) { return exp(lnTab(P, ttab + 2 * PT_N, r)); }
 
 constant float MU_MIN = 0.0067f;  // grazing limit for 1/mu, as the theme
 constant float LMU_SCALE = 51.0f; // ln(1/mu) per byte level
@@ -342,8 +361,13 @@ static float lnInvMu(constant TraceParams& P, float alpha, Hit h) {
     return -log(clamp(g * fabs(h.pth) / h.r, MU_MIN, 1.0f));
 }
 
-static float slantTau(constant TraceParams& P, float alpha, Hit h) {
-    return opticalDepth(h.r) * exp(lnInvMu(P, alpha, h));
+static float slantTau(constant TraceParams& P, device const float* ttab, float alpha, Hit h) {
+    return tauExt(P, ttab, h.r) * exp(lnInvMu(P, alpha, h));
+}
+
+// Fraction of a blackbody the gas emits along the line of sight: 1 - e^(-tau_* / mu).
+static float emitFrac(constant TraceParams& P, device const float* ttab, float alpha, Hit h) {
+    return 1.0f - exp(-tauEm(P, ttab, h.r) * exp(lnInvMu(P, alpha, h)));
 }
 
 static float temperature(constant TraceParams& P, device const float* ttab, float r) {
@@ -478,9 +502,9 @@ static float3 behind(constant TraceParams& P, constant Static& st, device const 
             acc += tr * sky(P, st, b.dir, foot[i + 1]);
             break;
         }
-        const float tau = slantTau(P, alpha, b);
+        const float tau = slantTau(P, ttab, alpha, b);
         const Sample s = shadeDisk(P, st, ttab, alpha, b.r, b.ph, b.t);
-        acc += tr * s.rgb * (P.exposure * (1.0f - exp(-tau)));
+        acc += tr * s.rgb * (P.exposure * emitFrac(P, ttab, alpha, b));
         tr *= exp(-tau);
     }
     return acc;
@@ -523,11 +547,11 @@ static void addSample(thread Px& px, constant TraceParams& P, constant Static& s
     }
     if (h0.kind != KIND_DISK) return;
     const float lmu = lnInvMu(P, alpha, h0);
-    const float tau = opticalDepth(h0.r) * exp(lmu);
+    const float tau = tauExt(P, ttab, h0.r) * exp(lmu);
     const Sample smp = shadeDisk(P, st, ttab, alpha, h0.r, h0.ph, h0.t);
     if (h0.r > SPOT_RMAX) {
-        const bool dim = luma(smp.rgb) * P.exposure * PEAK_BOOST < EMIT_FLOOR;
-        if (tau * exp(TAU_NOISE) < TAU_MIN || dim) {
+        const bool dim = luma(smp.rgb) * emitFrac(P, ttab, alpha, h0) * P.exposure * PEAK_BOOST < EMIT_FLOOR;
+        if (tau < TAU_MIN || dim) {
             // Too thin or too cool to show even when stirred: baked at its mean opacity.
             if (tau < TAU_BEHIND) px.bg += exp(-tau) * behind(P, st, ttab, alpha, h1, h2, foot);
             return;
@@ -590,7 +614,7 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
             const Hit pv = hits[s][i - 1];
             // Fetch a little past the threshold: whether the pixel counts as translucent is
             // decided below from its record, exactly as bh_shade decides it.
-            if (pv.kind != KIND_DISK || slantTau(P, ab.x, pv) >= 2.0f * TAU_BEHIND) break;
+            if (pv.kind != KIND_DISK || slantTau(P, ttab, ab.x, pv) >= 2.0f * TAU_BEHIND) break;
             hits[s][i] = traceNext(P, ray, true);
         }
     }
@@ -652,7 +676,7 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
                 h[c][1] = hitNone();
                 h[c][2] = hitNone();
                 for (uint l = 1; l < 3; l++) {
-                    if (h[c][l - 1].kind != KIND_DISK || slantTau(P, ab.x, h[c][l - 1]) >= 2.0f * TAU_BEHIND) break;
+                    if (h[c][l - 1].kind != KIND_DISK || slantTau(P, ttab, ab.x, h[c][l - 1]) >= 2.0f * TAU_BEHIND) break;
                     h[c][l] = traceNext(P, ray, true);
                 }
                 if (c > 0) {
@@ -724,7 +748,7 @@ kernel void bh_footprint(constant TraceParams& P [[buffer(0)]],
         const Rec rj = recs[j];
         if ((rj.meta & COV_MAX) == 0) continue;
         const ushort tq_j = tq[j];
-        const uint dr = (uint(abs(int(rj.rbin) - int(ri.rbin))) + R_FRAC - 1) / R_FRAC;
+        const uint dr = (uint(abs(int(rj.rbin) - int(ri.rbin))) + R_FRAC / 4 - 1) / (R_FRAC / 4); // quarter bins
         const ushort hit_i = ushort(ri.phi + ushort(tq_i << 6));
         const ushort hit_j = ushort(rj.phi + ushort(tq_j << 6));
         const int d_hit = int(as_type<short>(ushort(hit_j - hit_i)));
@@ -732,32 +756,54 @@ kernel void bh_footprint(constant TraceParams& P [[buffer(0)]],
         fr = max(fr, dr);
         fp = max(fp, uint(abs(d_hit - d_tq * 64)));
     }
-    recs[i].meta = ushort(cov | (min(fr, FR_MAX) << 4) | (min((fp + 63) / 64, FP_MAX) << 9));
+    const uint frc = fr <= 16 ? fr : min(12 + (fr + 3) / 4, FR_MAX);
+    recs[i].meta = ushort(cov | (frc << 4) | (min((fp + 63) / 64, FP_MAX) << 9));
 }
 
 // ---------------------------------------------------------------- per-frame shading
 
-// Turbulence planes (2 x R_BINS x NP bytes: coarse eddies, fine detail) for generation g at pixel phase phi (Q16) and
-// radial position rbf (bins): bilinear over the two nearest bins and phase cells, centred at 0.
-static float2 noiseBilinear(device const uchar* noise, constant Frame& fr, uint g, ushort phi, float rbf) {
-    const float xr = clamp(rbf - 0.5f, 0.0f, float(R_BINS - 1));
-    const uint b0 = uint(xr);
-    const uint b1 = min(b0 + 1, R_BINS - 1);
-    const float tr = xr - float(b0);
-    float2 v[2];
-    for (uint k = 0; k < 2; k++) {
-        const uint b = k == 0 ? b0 : b1;
-        const ushort q = ushort(phi - fr.gshift[g][b]);
-        const uint p0 = q >> 6;
-        const uint p1 = (p0 + 1) & (NP - 1);
-        const float tp = float(q & 63u) / 64.0f;
-        const uint row = fr.grow[g][b] * NP;
-        constexpr uint PLANE = R_BINS * NP;
-        const float2 a = float2(float(noise[row + p0]), float(noise[PLANE + row + p0]));
-        const float2 c = float2(float(noise[row + p1]), float(noise[PLANE + row + p1]));
-        v[k] = mix(a, c, tp);
+// 1 - exp(-e^x) from the table: emitted (or blocked) fraction for a log optical depth x.
+static float oneMinusExpExp(constant Static& st, float x) {
+    const float xi = clamp((x - EMIT_X0) * (float(EMIT_N) / (EMIT_X1 - EMIT_X0)), 0.0f, float(EMIT_N) - 0.001f);
+    const uint ii = uint(xi);
+    return st.emit_tab[ii] + (st.emit_tab[ii + 1] - st.emit_tab[ii]) * (xi - float(ii));
+}
+
+// Radial footprint in bins from its 5-bit code (quarter bins up to 4 bins, then whole bins).
+static float frBins(uint code) {
+    return code <= 16 ? float(code) * 0.25f : float(code) - 12.0f;
+}
+
+// Octave j of the turbulence at pixel phase phi (Q16), row position p (rows, bilinear between
+// rows r0 and r0 + 1 at weight tr), lifetime band position sb: two bands blended across radius,
+// each two staggered generations, every generation advected at its own row's Omega since birth.
+// Unit variance before the bilinear filter.
+static float turbOctave(device const uchar* noise, constant Static& st, constant Frame& fr, uint j,
+                        ushort phi, uint r0, float tr, float sb) {
+    device const uchar* plane = noise + j * NR * NP;
+    const uint n0 = min(uint(sb), NBAND - 2);
+    const float beta = clamp(sb - float(n0), 0.0f, 1.0f);
+    const uint r1 = min(r0 + 1, NR - 1);
+    const float om0 = st.om_row[r0];
+    const float om1 = st.om_row[r1];
+    float g = 0.0f;
+    for (uint kk = 0; kk < 2; kk++) {
+        const float wb = kk == 0 ? cos(0.5f * M_PI_F * beta) : sin(0.5f * M_PI_F * beta);
+        for (uint gi = 0; gi < 2; gi++) {
+            const TurbGen t = fr.gen[j][n0 + kk][gi];
+            float v[2];
+            for (uint rr = 0; rr < 2; rr++) {
+                const uint row = ((rr == 0 ? r0 : r1) + t.rowoff) & (NR - 1);
+                const float qf = float(ushort(phi - ushort(t.phoff))) - (rr == 0 ? om0 : om1) * t.age_q;
+                const float pc = (qf - 65536.0f * floor(qf / 65536.0f)) / 64.0f;
+                const uint p0 = min(uint(pc), NP - 1);
+                const uint p1 = (p0 + 1) & (NP - 1);
+                v[rr] = mix(float(plane[row * NP + p0]), float(plane[row * NP + p1]), pc - float(p0));
+            }
+            g += wb * t.w * (mix(v[0], v[1], tr) - 128.0f);
+        }
     }
-    return mix(v[0], v[1], tr) - 128.0f;
+    return g / NOISE_STD;
 }
 
 // One pixel of the theme's draw(), composited before tone mapping (light adds in linear).
@@ -780,35 +826,41 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     const float L = -((float(x) + 0.5f - 0.5f * float(P.width)) * P.mpp) * P.sin_i;
     const Orbit o = orbitAt(P.a, r);
     const float tobs = temperature(P, ttab, r) / (o.ut * (1.0f - o.om * L));
-    const float3 rgb = bbLookup(st, tobs);
-    // Turbulence, two channels per cell (coarse eddies, fine detail), interpolated between the
-    // two nearest radial bins (each rotated by its own Omega) and the two nearest phase cells.
-    const float2 na = noiseBilinear(noise, fr, 0, rc.phi, rbf);
-    const float2 nb = noiseBilinear(noise, fr, 1, rc.phi, rbf);
-    const float frf = float(fr_q);
+    // MRI turbulence (k^(-11/3), 3 octaves), each octave filtered by the pixel's footprint on the
+    // disk; octaves the footprint averages below 0.2% are skipped.
+    const float frf = frBins(fr_q);
     const float fpf = float(fp_q) * 64.0f;
-    const float tex_c = 1.0f / (1.0f + (frf * frf) / 36.0f + (fpf * fpf) / 4000000.0f);
-    const float tex_f = 1.0f / (1.0f + (frf * frf) / 2.25f + (fpf * fpf) / 250000.0f);
-    const float ms = fr.gnorm / NOISE_STD;
-    const float mc = (fr.gw[0] * na.x + fr.gw[1] * nb.x) * ms;
-    const float mf = (fr.gw[0] * na.y + fr.gw[1] * nb.y) * ms;
-    const float m = (tex_c * mc + tex_f * mf) * 0.70710678f;
-    const float vm = 0.5f * (tex_c * tex_c + tex_f * tex_f);
-    // MRI-like turbulence, log-normal with its mean kept at 1.
-    float k = exp(TURB_SIGMA * m - 0.5f * TURB_SIGMA * TURB_SIGMA * vm) * exposure;
-
-    // Line-of-sight optical depth: vertical tau times 1/mu, kept as a log.
-    const float lt_los = st.lntau_tab[rb] + float(lmuq[i]) / LMU_SCALE;
-    const bool thin = lt_los < log(TAU_BEHIND);
-    float emit = 1.0f;
-    if (thin) {
-        const float nt = clamp(0.33f * m, -1.0f, 1.0f); // column density: tau * e^(1.2 nt)
-        const float xi = clamp((lt_los + TAU_NOISE * nt - EMIT_X0) * (float(EMIT_N) / (EMIT_X1 - EMIT_X0)), 0.0f, float(EMIT_N) - 0.001f);
-        const uint ii = uint(xi);
-        const float fr_e = xi - float(ii);
-        emit = st.emit_tab[ii] + (st.emit_tab[ii + 1] - st.emit_tab[ii]) * fr_e;
-        k *= emit;
+    const float prow = clamp(rbf * (float(NR) / float(R_BINS)) - 0.5f, 0.0f, float(NR - 1));
+    const uint r0 = uint(prow);
+    const float trow = prow - float(r0);
+    const float xb = clamp(rbf - 0.5f, 0.0f, float(R_BINS - 1) - 0.001f);
+    const uint b0 = uint(xb);
+    const float tb = xb - float(b0);
+    float G = 0.0f;
+    float var = 0.0f;
+    for (uint j = 0; j < N_OCT; j++) {
+        const float sc = float(1u << j);
+        const float er = frf * sc / st.cell_r0;
+        const float ep = fpf * sc / st.cell_p0;
+        const float a = OCT_AMP[j] / (OCT_NORM * (1.0f + er * er + ep * ep));
+        if (a * TURB_SIGMA < 0.002f) continue;
+        const float sb = mix(st.sband[j][b0], st.sband[j][min(b0 + 1, R_BINS - 1)], tb);
+        G += a * turbOctave(noise, st, fr, j, rc.phi, r0, trow, sb);
+        var += a * a;
     }
+    // Log-normal dissipation with its mean kept at 1; the gas's temperature follows it, T ~ eps^(1/4).
+    const float eps = exp(TURB_SIGMA * G - 0.5f * TURB_SIGMA * TURB_SIGMA * var);
+    const float tturb = tobs * sqrt(sqrt(eps));
+    float k = exposure;
+
+    // The gas emits 1 - e^(-tau_*/mu) of a blackbody at its source temperature and lets
+    // e^(-tau_ext/mu) of what lies behind through (line of sight: vertical depth / mu).
+    const float lmu_f = float(lmuq[i]) / LMU_SCALE;
+    const float lt_los = st.lntau_tab[rb] + lmu_f;
+    const bool thin = lt_los < log(TAU_BEHIND);
+    const float emit = oneMinusExpExp(st, st.lnem_tab[rb] + lmu_f);
+    const float trans = 1.0f - oneMinusExpExp(st, lt_los);
+    k *= emit;
 
     float3 spot_rgb = float3(0.0f);
     float spot_scale = 0.0f;
@@ -835,19 +887,19 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
             if (q < 1.0f) boost += fr.spot_amp[j] * (1.0f - q) * (1.0f - q) * fr.spot_wr[j] * fr.spot_wp[j] / sqrt(wr2 * wp2);
         }
         if (boost > 1e-3f && tobs > 0.0f) {
-            spot_rgb = bbLookup(st, tobs * sqrt(sqrt(1.0f + boost)));
+            spot_rgb = bbLookup(st, tturb * sqrt(sqrt(1.0f + boost)));
             spot_scale = 1.0f;
         } else {
             k *= 1.0f + boost;
         }
     }
 
-    const float3 c = spot_scale > 0.0f ? spot_rgb * spot_scale * k : rgb * k;
+    const float3 c = (spot_scale > 0.0f ? spot_rgb : bbLookup(st, tturb)) * k;
     const float cov = float(ns) / float(COV_MAX);
     // bg holds the light beside the disk samples and, under translucent gas, what lies behind it;
     // only the second part (share f) is dimmed by the gas.
     const float f = float(bfrac[i]) / 255.0f;
-    return thin ? cov * c + (1.0f - f * emit) * bgv : cov * c + bgv;
+    return thin ? cov * c + (1.0f - f * (1.0f - trans)) * bgv : cov * c + bgv;
 }
 
 static float srgbEncode(float v) {
