@@ -48,7 +48,7 @@ fn runMetal(theme: *metal_theme.Theme, out: mtl.Id, frames: usize, first: ?[]f32
     return .{ .ok = true, .gpu_us_avg = total / @as(f64, @floatFromInt(@max(1, frames - 1))), .gpu_us_worst = worst };
 }
 
-const Profile = struct { frame_us: f64 = 0, draw_us: f64 = 0 };
+const Profile = struct { frame_us: f64 = 0, draw_us: f64 = 0, paced_us: f64 = 0 };
 
 fn gpuUs(cb: mtl.Id) f64 {
     return (mtl.msg(f64, cb, "GPUEndTime", .{}) - mtl.msg(f64, cb, "GPUStartTime", .{})) * 1e6;
@@ -80,7 +80,35 @@ fn profileMetal(theme: *metal_theme.Theme, frames: usize) Profile {
     }
     std.mem.sort(f64, whole[0..n], {}, std.sort.asc(f64));
     std.mem.sort(f64, draw[0..n], {}, std.sort.asc(f64));
-    return .{ .frame_us = whole[n / 2], .draw_us = draw[n / 2] };
+
+    // The app draws one frame every 33 ms, and the GPU doesn't raise its clock for such a
+    // light periodic load: the same frame then takes ~1.9x as long as back-to-back (M3).
+    // Time 45 frames paced like the app, so the report shows the live cost too.
+    var paced: [45]f64 = undefined;
+    for (&paced) |*v| {
+        const t0 = nowNs();
+        const pool = mtl.poolPush();
+        defer mtl.poolPop(pool);
+        const cb = mtl.msg(mtl.Id, theme.queue, "commandBuffer", .{});
+        theme.encode(cb, out, METAL_DT);
+        mtl.msg(void, cb, "commit", .{});
+        mtl.msg(void, cb, "waitUntilCompleted", .{});
+        v.* = gpuUs(cb);
+        const spent = nowNs() - t0;
+        if (spent < 33_333_333) {
+            const left = 33_333_333 - spent;
+            const ts: std.c.timespec = .{ .sec = 0, .nsec = @intCast(left) };
+            _ = std.c.nanosleep(&ts, null);
+        }
+    }
+    std.mem.sort(f64, &paced, {}, std.sort.asc(f64));
+    return .{ .frame_us = whole[n / 2], .draw_us = draw[n / 2], .paced_us = paced[paced.len / 2] };
+}
+
+fn nowNs() u64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(std.c.CLOCK.UPTIME_RAW, &ts);
+    return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
 }
 
 fn packFloat(px: []const f32) u32 {
@@ -166,6 +194,7 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
         \\ Avg GPU Frame     : {d:.1} us | Budget: {d:.1} us
         \\ Worst GPU Frame   : {d:.1} us
         \\ Profile (BGRA8)   : {d:.1} us median frame = {d:.1} us init/step + {d:.1} us draw
+        \\ Paced 30 FPS      : {d:.1} us median frame (the live cost: the GPU clocks lower between frames)
         \\ Draw Threadgroup  : {d}x{d} (max {d}; a SIMD group is one 32-px row of it)
         \\ Watchdog 320x200  : {s}
         \\ NaN / Inf Check   : {s}
@@ -186,6 +215,7 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
         METAL_BUDGET_US,                   run.gpu_us_worst,
         prof.frame_us,                     @max(0.0, prof.frame_us - prof.draw_us),
         prof.draw_us,
+        prof.paced_us,
         theme.draw.group.w,                theme.draw.group.h,
         theme.draw.max_threads,
         if (wd_ok) "PASS" else "FAIL (failed to compile or run at 320x200)",

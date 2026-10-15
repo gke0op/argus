@@ -98,7 +98,15 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
 
 Measured on an M3 at 1920x1200 with `make gpu-probes` (`tools/gpu_probes/`: tiny kernels that
 each isolate one cost) and by taking the four ported themes apart. Rerun the probes on
-another chip before trusting exact numbers; the ratios are what matter.
+another chip before trusting exact numbers; the ratios are what matter. How the hardware
+works underneath (SIMD groups, Dynamic Caching, clocks, compression, TBDR, pacing) is in
+[apple_gpu.md](apple_gpu.md).
+
+**Judge budgets on the paced number.** At Argus's 30 FPS the GPU stays at a low clock, so
+a frame costs 1.4–2.3x what it costs back-to-back. The harness prints both: `Profile
+(BGRA8)` (back-to-back, good for A/B comparisons) and `Paced 30 FPS` (the live cost). For
+A/B tests, warm the GPU first (the harness does): the first measurements on a cold GPU
+run slow and fake big differences.
 
 **Read the harness profile first.** The report's `Profile (BGRA8)` line times frames the way
 the app draws them (into the BGRA8 drawable) and splits each into `init/step` and `draw`. To
@@ -111,7 +119,7 @@ find where a draw's time goes, switch parts off one at a time and compare. Two t
 **How the hardware runs your kernel.** Argus dispatches 32x32 threadgroups. The GPU executes
 them in **SIMD groups of 32 threads = 32 neighbouring pixels of one row**, which run in lock-step.
 
-| Measured (one op per pixel, full screen) | Cost |
+| Measured back-to-back (one op per pixel, full screen) | Cost |
 |---|---|
 | writing the frame (BGRA8) | ~0.1–0.2 ms floor |
 | `fma` | ~3.5 µs |
@@ -182,6 +190,8 @@ Explain the one mental shift up front: you write the rule for one pixel, and the
 | `src/theme_harness.zig` | `make harness`; `.metal` files take the GPU path |
 | `themes/Tutorial_*.metal` | the two tutorials |
 | `tools/gpu_probes/` | `make gpu-probes`: one-cost-each probe kernels behind section 5 |
+| `src/gpu_arch_probe.zig` | `make gpu-arch`: engine-level probes (clocks, write path, threadgroups, CPU, memory) |
+| `apple_gpu.md` | the Apple GPU as Argus drives it: measured + sourced |
 
 Zig + Metal hybrids (a Zig theme whose per-pixel draw runs as a Metal kernel over its
 CPU-built tables) exist as a prototype for `Opus_Black_Hole` only (`src/gpu/bh_*.zig`,
