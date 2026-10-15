@@ -2,6 +2,7 @@ const std = @import("std");
 const math = std.math;
 pub const sc = @import("desktop/space_config.zig");
 pub const obs_mod = @import("desktop/observatory.zig");
+const gpu = @import("gpu/presenter.zig");
 const status_glyph = @import("desktop/status_glyph.zig");
 
 pub const NATIVE_W = sc.NATIVE_W;
@@ -184,6 +185,10 @@ const MacBridge = struct {
     /// frame_idx + 1 of each Space's last rendered frame (0 = never), for warm-rate neighbors.
     last_render_tick: [MAX_SPACES]usize = @splat(0),
     perf_log: bool = false,
+    // GPU prototype (`--gpu`): Metal presenters for Spaces whose theme has a GPU port.
+    gpu_enabled: bool = false,
+    gpu: [MAX_SPACES]?gpu.Presenter = @splat(null),
+    gpu_tried: [MAX_SPACES]?*anyopaque = @splat(null),
     perf_renders: [MAX_SPACES]u16 = @splat(0),
     perf_visible: u16 = 0,
     screen_rect: CGRect,
@@ -541,6 +546,9 @@ const MacBridge = struct {
             }
         }
 
+        if (sp.mode != .custom_shader) self.dropGpu(idx);
+        if (sp.mode == .custom_shader and self.gpu_enabled and self.renderSpaceGpu(idx)) return;
+
         // A picture Space whose image failed to load shows the window's black background.
         if (sp.mode != .custom_shader) {
             if (sp.cg_image) |old| {
@@ -578,6 +586,28 @@ const MacBridge = struct {
             if (sp.cg_image) |old| self.CGImageRelease(old);
             sp.cg_image = cg_img;
         }
+    }
+
+    fn dropGpu(self: *MacBridge, idx: usize) void {
+        if (self.gpu[idx]) |*p| p.destroy();
+        self.gpu[idx] = null;
+    }
+
+    /// Steps the theme on the CPU and shades it on the GPU into the Space's CAMetalLayer.
+    /// False when the theme has no GPU port (the caller falls back to the CPU path).
+    fn renderSpaceGpu(self: *MacBridge, idx: usize) bool {
+        const sp = &self.obs.spaces[idx];
+        if (self.gpu[idx]) |*p| {
+            const host = self.msg0(p.layer, self.sel_registerName("superlayer"));
+            if (p.handle != sp.dylib_handle or host != sp.desktop_layer) self.dropGpu(idx);
+        }
+        if (self.gpu[idx] == null) {
+            if (self.gpu_tried[idx] == sp.dylib_handle) return false; // not a GPU build: don't retry every frame
+            self.gpu_tried[idx] = sp.dylib_handle;
+            self.gpu[idx] = gpu.Presenter.create(sp.dylib_handle, sp.theme_state, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H) orelse return false;
+        }
+        self.obs.stepSpace(idx);
+        return self.gpu[idx].?.render();
     }
 
     /// True while the login window / lock screen covers the session (CGSSessionScreenIsLocked).
@@ -1372,6 +1402,8 @@ pub fn main(init: std.process.Init) !void {
             headless_test = true;
         } else if (std.mem.eql(u8, a, "--perf-log")) {
             perf_log = true;
+        } else if (std.mem.eql(u8, a, "--gpu")) {
+            sc.gpu_ports = true;
         } else if (std.mem.eql(u8, a, "--window")) {
             normal_window = true;
         } else if (std.mem.eql(u8, a, "--frames") and i + 1 < args.len) {
@@ -1764,6 +1796,7 @@ pub fn main(init: std.process.Init) !void {
         .cf_true = kCFBooleanTrue_ptr.*,
         .sel_occlusion_state = sel_registerName("occlusionState"),
         .perf_log = perf_log,
+        .gpu_enabled = sc.gpu_ports,
         .screen_rect = screen_rect,
         .pboard_filenames_type = pboard_filenames_type,
         .CATransaction = objc_getClass("CATransaction"),

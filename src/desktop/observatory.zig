@@ -210,6 +210,13 @@ pub const Observatory = struct {
         return out_buf[0..pos];
     }
 
+    /// Advances a Space's SDK theme one step without drawing (GPU-presented Spaces draw on the GPU).
+    pub fn stepSpace(self: *Observatory, space_idx: usize) void {
+        if (space_idx >= MAX_SPACES or self.paused) return;
+        const sp = &self.spaces[space_idx];
+        if (sp.theme_state != null and sp.theme_step_fn != null) sp.theme_step_fn.?(sp.theme_state, 0.008 * self.spin_mult);
+    }
+
     pub fn renderNativeShaderForSpaceIsolated(self: *Observatory, space_idx: usize, phase_cycles: f64) bool {
         if (space_idx >= MAX_SPACES) return false;
         const sp = &self.spaces[space_idx];

@@ -158,6 +158,12 @@ pub fn verifyDylibSafety(dylib_z: [:0]const u8) bool {
     return true;
 }
 
+/// GPU prototype (`--gpu`): themes with a Metal port (src/gpu/) are built through their export
+/// wrapper, so the presenter can read their tables. Off by default; other themes are unaffected.
+pub var gpu_ports = false;
+const GPU_PORT_THEME = "Opus_Black_Hole.zig";
+const GPU_PORT_ROOT = "-Mroot=src/gpu/bh_export.zig";
+
 pub const SpaceConfig = struct {
     space_id: u64 = 0,
     index_1based: usize = 1,
@@ -247,6 +253,8 @@ pub const SpaceConfig = struct {
             self.dylib_gen,
         }, 0) catch return false;
 
+        const gpu_port = gpu_ports and std.mem.eql(u8, std.Io.Dir.path.basename(path), GPU_PORT_THEME);
+
         // Content-addressed verified .dylib cache: hash source content so unchanged shaders
         // across app restarts or multiple Spaces skip `zig build-lib` and `--verify-dylib`!
         var src_hash: u64 = 0;
@@ -256,6 +264,7 @@ pub const SpaceConfig = struct {
         if (std.Io.Dir.cwd().readFile(g_io, path, &hash_read_buf)) |src_bytes| {
             if (src_bytes.len > 0) {
                 src_hash = std.hash.Wyhash.hash(0xA460_5017, src_bytes);
+                if (gpu_port) src_hash ^= 0x6770_755F_706F_7274; // separate cache entry for the GPU build
                 // v2: v1 cache entries carry path-derived install names that collide across themes.
                 if (std.fmt.bufPrint(&cache_buf, "/tmp/argus_cache_v2_{x}.dylib", .{src_hash})) |cp| {
                     cache_path = cp;
@@ -287,21 +296,12 @@ pub const SpaceConfig = struct {
                 "zig";
 
             const alloc = std.heap.page_allocator;
+            var mtheme_buf: [530]u8 = undefined;
+            const mtheme_arg = std.fmt.bufPrint(&mtheme_buf, "-Mtheme={s}", .{path}) catch return false;
+            const cpu_argv = [_][]const u8{ zig_bin, "build-lib", path, "-dynamic", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", emit_arg, "-install_name", iname_arg };
+            const gpu_argv = [_][]const u8{ zig_bin, "build-lib", "-dynamic", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", emit_arg, "-install_name", iname_arg, "--dep", "theme", GPU_PORT_ROOT, "-O", "ReleaseFast", mtheme_arg };
             const res = std.process.run(alloc, g_io, .{
-                .argv = &[_][]const u8{
-                    zig_bin,
-                    "build-lib",
-                    path,
-                    "-dynamic",
-                    "-O",
-                    "ReleaseFast",
-                    "-target",
-                    "aarch64-macos",
-                    "-lc",
-                    emit_arg,
-                    "-install_name",
-                    iname_arg,
-                },
+                .argv = if (gpu_port) &gpu_argv else &cpu_argv,
             }) catch return false;
             defer alloc.free(res.stdout);
             defer alloc.free(res.stderr);
