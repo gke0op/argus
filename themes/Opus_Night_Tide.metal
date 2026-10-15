@@ -38,7 +38,7 @@ constant float YAW = 0.85f;         // looking along the beach, ~49 degrees to t
 constant float SHORE = 5.0f;        // still-water line, metres in front of the eye
 constant float BEACH_SLOPE = 0.07f; // about 1:14
 constant float T_WAVE = 8.0f;       // seconds between waves
-constant float MAP_X0 = -24.0f;     // the map spans x in [-24, 104] m (we look along it) ...
+constant float MAP_X0 = -24.0f;     // the map spans 128 m along the beach and wraps (endless) ...
 constant float MAP_W = 128.0f;
 constant float MAP_Z = 48.0f;       // ... and z in [0, 48] m
 constant float FOCAL = 1.45f;
@@ -52,6 +52,25 @@ struct Sea {
     float foam;  // whitewater cover, 0..1
     float sheet; // swash sheet depth on the sand (m)
 };
+
+// The beach is endless: everything baked into the surf map repeats exactly every
+// MAP_W metres along the shore, and the map wraps, so a wave can peel down the
+// beach as far as the eye sees instead of running into the map's edge. Noise
+// along x uses this lattice that wraps after `cells` cells (cells = MAP_W x the
+// frequency, a whole number), and sines along x use whole cycles per MAP_W.
+static float noiseP(float2 p, float cells) {
+    const float2 i = floor(p);
+    const float2 fr = p - i;
+    const float2 u = fr * fr * (3.0f - 2.0f * fr);
+    const float ix0 = i.x - cells * floor(i.x / cells);
+    const float ix1 = ix0 + 1.0f >= cells ? 0.0f : ix0 + 1.0f;
+    const uint y0 = uint(int(i.y) + 32768), y1 = y0 + 1u;
+    const uint x0 = uint(ix0) + 32768u, x1 = uint(ix1) + 32768u;
+    const float a = argus_rand(uint2(x0, y0), 0u), b = argus_rand(uint2(x1, y0), 0u);
+    const float d = argus_rand(uint2(x0, y1), 0u), e = argus_rand(uint2(x1, y1), 0u);
+    return 2.0f * mix(mix(a, b, u.x), mix(d, e, u.x), u.y) - 1.0f;
+}
+constant float KX = 6.2831853f / 128.0f;   // one cycle per MAP_W along the beach
 
 static float rand1(float n) { return argus_rand(uint2(uint(int(n) + 100000), 17u), 5u); }
 
@@ -89,13 +108,13 @@ static Sea sea(float x, float z, float t) {
         // interfere, so the wave stands up into peaks where they agree and sags
         // where they don't. The pattern drifts from wave to wave; when a peak meets
         // a set wave or a big one, that part of the wave gets much bigger.
-        const float beat = 0.5f + 0.5f * cos(x * 0.11f + n * 1.9f + 0.8f * sin(x * 0.031f + n * 0.7f));
-        const float along = 0.35f + 1.3f * beat * beat + 0.25f * argus_noise(float2(x * 0.06f + n * 0.4f, 11.0f));
+        const float beat = 0.5f + 0.5f * cos(x * 2.0f * KX + n * 1.9f + 0.8f * sin(x * KX + n * 0.7f));
+        const float along = 0.35f + 1.3f * beat * beat + 0.25f * noiseP(float2(x * 0.0625f + n * 0.4f, 11.0f), 8.0f);
         amp = min(amp * along, 2.6f);
-        const float bend = 1.4f * sin(0.06f * x + 2.1f * n) + 0.9f * argus_noise(float2(x * 0.07f, n * 3.1f));
+        const float bend = 1.4f * sin(KX * x + 2.1f * n) + 0.9f * noiseP(float2(x * 0.0703125f, n * 3.1f), 9.0f);
         const float zc = crestZ(age) + bend;
         // The sandbar: waves break where it's shallow, so the break peels along x.
-        const float zb = 17.0f + 4.0f * argus_noise(float2(x * 0.045f + n * 0.17f, 3.0f)) + 1.5f * amp;
+        const float zb = 17.0f + 4.0f * noiseP(float2(x * 0.046875f + n * 0.17f, 3.0f), 6.0f) + 1.5f * amp;
         const float d = z - zc; // > 0 behind the crest (seaward), < 0 in front
         if (zc > SHORE) {
             // Blend from swell to breaking bore across the break, so the wave
@@ -120,7 +139,7 @@ static Sea sea(float x, float z, float t) {
                 const float front = smoothstep(-0.4f, 0.15f, d);
                 const float tail = exp(-max(d, 0.0f) / (2.5f + 7.0f * (1.0f - strength)));
                 s.h += bw * landing * hb * front * tail;
-                const float churn = 0.5f + 0.5f * argus_noise(float2(x * 1.6f + n * 7.0f, z * 1.2f - t * 2.2f));
+                const float churn = 0.5f + 0.5f * noiseP(float2(x * 1.6015625f + n * 7.0f, z * 1.2f - t * 2.2f), 205.0f);
                 s.stir += bw * landing * amp * (0.4f + 0.6f * strength) * (1.2f * exp(-(d * d) / 0.35f) + 0.75f * front * tail * churn);
                 s.foam += bw * landing * front * tail * (0.55f + 0.45f * churn);
             }
@@ -152,7 +171,7 @@ static Sea sea(float x, float z, float t) {
         s.foam += ramp * (1.0f - soak) * 0.5f * cover;
     }
     // Small wind ripples everywhere.
-    s.h += 0.025f * argus_noise(float2(x * 0.9f + t * 0.3f, z * 1.4f - t * 0.6f));
+    s.h += 0.025f * noiseP(float2(x * 0.8984375f + t * 0.3f, z * 1.4f - t * 0.6f), 115.0f);
     s.foam = saturate(s.foam);
     return s;
 }
@@ -161,8 +180,8 @@ static Sea sea(float x, float z, float t) {
 // apart that swash carves on real beaches) and a gently wandering waterline.
 static float sandY(float x, float z) {
     const float near = smoothstep(SHORE + 4.0f, SHORE - 3.0f, z);
-    const float cusps = 0.07f * sin(x * 0.75f) * near;
-    const float wander = 0.10f * argus_noise(float2(x * 0.06f, 1.7f));
+    const float cusps = 0.07f * sin(x * 15.0f * KX) * near;
+    const float wander = 0.10f * noiseP(float2(x * 0.0625f, 1.7f), 8.0f);
     // Landward the slope rolls over into a flat berm about 0.8 m up.
     const float rise = BEACH_SLOPE * (SHORE - z);
     const float berm = 0.8f - 0.8f * exp(-max(rise, 0.0f) / 0.8f);
@@ -172,7 +191,7 @@ static float sandY(float x, float z) {
 // ------------------------------------------------------------ the glow map --
 
 static float2 mapUV(float x, float z) { return float2((x - MAP_X0) / MAP_W, z / MAP_Z); }
-static bool inMap(float x, float z) { return x > MAP_X0 + 0.5f && x < MAP_X0 + MAP_W - 0.5f && z > 0.1f && z < MAP_Z - 1.0f; }
+static bool inMap(float x, float z) { return z > 0.1f && z < MAP_Z - 1.0f; }   // endless along x
 
 kernel void argus_init(constant ArgusFrame& f [[buffer(0)]],
                        texture2d<float, access::write> state [[texture(0)]],
@@ -208,7 +227,7 @@ kernel void argus_step(constant ArgusFrame& f [[buffer(0)]],
 
     // The halo: light scattered in the water spreads a little and fades.
     auto at = [&](int dx, int dy) {
-        return prev.read(uint2(clamp(int(gid.x) + dx, 0, int(w) - 1), clamp(int(gid.y) + dy, 0, int(h) - 1))).z;
+        return prev.read(uint2((int(gid.x) + dx + int(w)) % int(w), clamp(int(gid.y) + dy, 0, int(h) - 1))).z;
     };
     const float spread = 0.25f * (at(2, 0) + at(-2, 0) + at(0, 2) + at(0, -2));
     const float halo = (0.55f * c.z + 0.45f * spread) * exp(-dt / 0.35f) + 0.06f * light;
@@ -281,7 +300,7 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
                        texture2d<float> state [[texture(1)]],
                        uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= f.width || gid.y >= f.height) return;
-    constexpr sampler smp(filter::linear, address::clamp_to_edge);
+    constexpr sampler smp(filter::linear, s_address::repeat, t_address::clamp_to_edge);
     const float t = f.time;
     const float2 uv = argus_uv(gid, f);
     // The camera stands on the beach and looks along it: rotate the view ray.
@@ -369,9 +388,7 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
             const float streaks = argus_fbm(fp + 0.6f * float2(argus_noise(fp * 0.5f + 7.0f), 0.0f), 4);
             foam_tex = 0.25f + 0.95f * smoothstep(-0.35f, 0.45f, streaks);
         }
-        // The map ends ~100 m down the beach: let the light fade out before it does.
-        const float far_fade = smoothstep(MAP_X0 + MAP_W - 2.0f, MAP_X0 + MAP_W - 40.0f, x) * smoothstep(MAP_X0 + 1.0f, MAP_X0 + 10.0f, x);
-        const float glow = (g.x * sparkle + 0.2f * g.z) * foam_tex * far_fade;
+        const float glow = (g.x * sparkle + 0.2f * g.z) * foam_tex;
 
         if (sea) {
             // A turbulent sea: the chop scatters the reflection into a dim, broken
