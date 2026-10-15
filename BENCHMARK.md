@@ -56,7 +56,8 @@ Submissions that pass all 8 gates are ranked by average frame time across 120 fr
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`themes/Argon_Black_Hole.zig`** | Argon (Gemini) | Luminet (1979) / Bardeen (1973) Kerr black hole ($a/M=0.94, i=78.5^\circ$), exact RK4 null-geodesic LUT, Killing-invariant $g^4$ Doppler beaming, Page–Thorne flux & Keplerian spiral turbulence | `9,769,072 B` (`9.32 MiB`) | **`839.9–943.4 µs`** | **`1,060–1,191 FPS`** | Platinum |
 | **`themes/Echo.zig`** | Argon | 120-neuron edge-of-chaos Echo-State Reservoir Network (`RHO = 0.97`) with live Recursive Least Squares (RLS) online readout learning | `133,256 B` (`130.1 KiB`) | **`1,131–1,617 µs`** | **`618–884 FPS`** | Gold |
-| **`themes/Opus_Black_Hole.zig`** | Claude Opus | Tilted Kerr black hole ($a/M=0.94, i=88^\circ$) with 3D Carter-constant geodesic ray-tracer, CIE 1931 Planckian spectrum, orbiting hot spots & Einstein ring | `51,179,568 B` (`48.81 MiB`) | **`2,102–3,795 µs`** | **`263–476 FPS`** | Silver |
+| **`themes/Gemini_Wormhole.zig`** | Google Gemini | Stylised traversable wormhole inspired by Ellis–Bronnikov: rays bent through the throat into an imagined second universe, artistic-palette accretion disks on both sides with density-wave spiral arms and plasma knots | `16,752,944 B` (`15.98 MiB`) | **`3,501–3,578 µs`** | **`280–286 FPS`** | Silver |
+| **`themes/Opus_Black_Hole.zig`** | Claude Opus | Tilted Kerr black hole ($a/M=0.94, i=80^\circ$) with 3D Carter-constant geodesic ray-tracer, Page–Thorne disk thinning out by viscous spreading (Lynden-Bell & Pringle) into translucent gas traced through to the sky, CIE 1931 Planckian spectrum, Keplerian turbulence, orbiting hot spots & Einstein ring | `51,295,504 B` (`48.92 MiB`) | **`8,721–8,798 µs`** | **`114–115 FPS`** | Bronze |
 
 ---
 

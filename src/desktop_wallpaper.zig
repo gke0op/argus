@@ -337,7 +337,7 @@ const MacBridge = struct {
                 for (0..count) |idx| {
                     self.obs.spaces[idx].mode = .passthrough;
                 }
-                _ = self.loadCodeFileIntoSpaceInternal(self.obs.active_space_idx, "themes/Kerr_Black_Hole.zig", false);
+                _ = self.loadCodeFileIntoSpaceInternal(self.obs.active_space_idx, "themes/Gemini_Wormhole.zig", false);
             }
             for (0..count) |idx| {
                 if (self.obs.spaces[idx].cg_image == null and self.obs.spaces[idx].mode != .passthrough) {
@@ -1362,7 +1362,7 @@ pub fn main(init: std.process.Init) !void {
     defer obs.deinit(alloc);
 
     if (headless_test) {
-        const theme_path = "themes/Kerr_Black_Hole.zig";
+        const theme_path = "themes/Gemini_Wormhole.zig";
         const loaded = obs.loadShaderIntoSpace(0, theme_path);
         const t0 = std.Io.Clock.awake.now(g_io);
         for (0..20) |f| {
@@ -1850,14 +1850,14 @@ test "Observatory multi-Space engine: default Spaces, shader hot-compilation and
 
     // Verify live .zig shader hot-compilation (.dylib via dlopen) and execution on Space 2 (stateless) & Space 3 (stateful SDK)
     obs.n_spaces = 4;
-    const compiled = obs.spaces[2].compileAndLoadShader(2, "themes/Kerr_Black_Hole.zig");
+    const compiled = obs.spaces[2].compileAndLoadShader(2, "themes/Gemini_Wormhole.zig");
     try std.testing.expect(compiled);
     try std.testing.expectEqual(SpaceMode.custom_shader, obs.spaces[2].mode);
     try std.testing.expect(obs.spaces[2].custom_render_fn != null);
 
     @memset(&obs.pixels, 0);
     obs.renderPixelFrameForSpace(2, 0.25);
-    // Verify Kerr black hole shader populated non-zero RGBA pixels
+    // Verify the wormhole shader populated non-zero RGBA pixels
     try std.testing.expect(obs.pixels[(CANVAS_H / 2) * CANVAS_W + (CANVAS_W / 2 - 120)] != 0);
 
     // Verify stateful SDK theme hot-compilation (`themes/Echo.zig`)
@@ -1876,7 +1876,7 @@ test "Observatory multi-Space engine: default Spaces, shader hot-compilation and
     // Verify persistent state serialization & mode parsing
     var conf_buf: [2048]u8 = undefined;
     const serialized = obs.serializeStateConfig(&conf_buf);
-    try std.testing.expect(std.mem.indexOf(u8, serialized, "2\tcustom_shader\tKerr_Black_Hole.zig\tthemes/Kerr_Black_Hole.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, serialized, "2\tcustom_shader\tGemini_Wormhole.zig\tthemes/Gemini_Wormhole.zig") != null);
     try std.testing.expectEqual(SpaceMode.custom_shader, SpaceMode.fromModeName("custom_shader").?);
     // Configs saved by builds with built-in modes load those Spaces as untouched.
     for ([_][]const u8{ "magnetar_gr", "kronos_wave", "code_terminal" }) |legacy| {
@@ -1934,7 +1934,7 @@ test "Isolated per-Space shader buffers never alias each other" {
     defer obs.deinit(alloc);
     obs.n_spaces = 3;
 
-    try std.testing.expect(obs.loadShaderIntoSpace(0, "themes/Kerr_Black_Hole.zig"));
+    try std.testing.expect(obs.loadShaderIntoSpace(0, "themes/Gemini_Wormhole.zig"));
     try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Echo.zig"));
 
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(0, 0.1));
@@ -1955,19 +1955,19 @@ test "Reloading a shader into a dirty Space repaints instead of inheriting stale
     defer obs.deinit(alloc);
     obs.n_spaces = 3;
 
-    // Space 1: render Kerr, then plant "previous theme" garbage in the interior while leaving the
+    // Space 1: render the wormhole, then plant "previous theme" garbage in the interior while leaving the
     // probe pixels (corners) intact, so a probe-based background-skip heuristic would be fooled.
-    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Kerr_Black_Hole.zig"));
+    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Gemini_Wormhole.zig"));
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(1, 0.1));
     const garbage_idx = 100 * NATIVE_W + 100;
     obs.space_native_pixels[1][garbage_idx] = 0xFF00FF00;
 
     // Reload through the production entry point, then render one frame.
-    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Kerr_Black_Hole.zig"));
+    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Gemini_Wormhole.zig"));
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(1, 0.1));
 
     // Space 2: the same theme from a clean load, one frame.
-    try std.testing.expect(obs.loadShaderIntoSpace(2, "themes/Kerr_Black_Hole.zig"));
+    try std.testing.expect(obs.loadShaderIntoSpace(2, "themes/Gemini_Wormhole.zig"));
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(2, 0.1));
 
     try std.testing.expect(obs.space_native_pixels[1][garbage_idx] != 0xFF00FF00);
@@ -1981,7 +1981,7 @@ test "Canvas Spaces present from their own snapshot, never the shared canvas" {
     const obs = try Observatory.init(alloc);
     defer obs.deinit(alloc);
     obs.n_spaces = 4;
-    try std.testing.expect(obs.loadShaderIntoSpace(2, "themes/Kerr_Black_Hole.zig"));
+    try std.testing.expect(obs.loadShaderIntoSpace(2, "themes/Gemini_Wormhole.zig"));
     obs.spaces[3].mode = .picture;
 
     // Same order the app uses in one tick: render a Space into the shared canvas, snapshot it, next Space.
@@ -2012,19 +2012,19 @@ test "Mission Control Space reordering moves themes with space_id and resets mov
         obs.spaces[i].index_1based = i + 1;
     }
 
-    // Slot 1 (space_id = 4) has Kerr_Black_Hole.zig; Slot 3 (space_id = 6) has a picture
-    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Kerr_Black_Hole.zig"));
+    // Slot 1 (space_id = 4) has Gemini_Wormhole.zig; Slot 3 (space_id = 6) has a picture
+    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Gemini_Wormhole.zig"));
     obs.spaces[3].mode = .picture;
     obs.spaces[3].setLabel("Photo.png");
 
-    // Render Kerr in Slot 1, and plant stale garbage in Slot 3's native buffer while copying
-    // Kerr's corner probe pixels into Slot 3 so a missing reset on move would be caught.
+    // Render the wormhole in Slot 1, and plant stale garbage in Slot 3's native buffer while copying
+    // the wormhole's corner probe pixels into Slot 3 so a missing reset on move would be caught.
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(1, 0.1));
     @memcpy(&obs.space_native_pixels[3], &obs.space_native_pixels[1]);
     const garbage_idx = 100 * NATIVE_W + 100;
     obs.space_native_pixels[3][garbage_idx] = 0xFF00FF00;
 
-    // Simulate user dragging Space id=4 (Kerr) to Slot 3 and Space id=6 (Picture) to Slot 1 in Mission Control
+    // Simulate user dragging Space id=4 (the wormhole) to Slot 3 and Space id=6 (Picture) to Slot 1 in Mission Control
     const reordered_ids = [_]u64{ 3, 6, 7, 4 };
     const sync1 = obs.syncSpaceOrderByIds(&reordered_ids, 4);
     try std.testing.expect(sync1.order_changed);
@@ -2036,7 +2036,7 @@ test "Mission Control Space reordering moves themes with space_id and resets mov
     try std.testing.expectEqual(SpaceMode.custom_shader, obs.spaces[3].mode);
     try std.testing.expectEqual(@as(usize, 4), obs.spaces[3].index_1based);
 
-    // Slot 3's native buffer must have been reset on move so rendering Kerr at Slot 3 wipes the planted garbage
+    // Slot 3's native buffer must have been reset on move so rendering the wormhole at Slot 3 wipes the planted garbage
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(3, 0.1));
     try std.testing.expect(obs.space_native_pixels[3][garbage_idx] != 0xFF00FF00);
 
