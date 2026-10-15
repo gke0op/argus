@@ -1509,9 +1509,13 @@ var g_pictures: desktop_picture.DesktopPictures = .{};
 var g_quit_requested = std.atomic.Value(bool).init(false);
 
 extern "c" fn signal(sig: c_int, handler: *const fn (c_int) callconv(.c) void) ?*const anyopaque;
+extern "c" fn alarm(seconds: c_uint) c_uint;
 
 fn onQuitSignal(_: c_int) callconv(.c) void {
     g_quit_requested.store(true, .release);
+    // onTick normally exits within one frame. If the main thread is busy or its timer is not
+    // firing, SIGALRM's default action terminates the process so `make stop` always works.
+    _ = alarm(3);
 }
 
 extern "c" fn getcwd(buf: [*]u8, size: usize) ?[*:0]u8;
