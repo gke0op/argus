@@ -1443,6 +1443,8 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     // Skipped on Spaces Argus does not own (a fullscreen app's Space keeps the last desktop index).
     if (active_idx < b.obs.n_spaces and b.obs.spaces[active_idx].space_id == cur_space_id) {
         const sp = &b.obs.spaces[active_idx];
+        // GPU Spaces publish a CPU snapshot only on load or while the menu is open: ask for one.
+        if (g_pictures.wantsFreshFrame(b.frame_idx)) b.snap_tick[active_idx] = 0;
         g_pictures.tick(cur_space_id, desktop_picture.stillSignature(sp), sp.cg_image, b.frame_idx);
     }
 
@@ -2149,6 +2151,7 @@ test {
     _ = status_glyph;
     _ = metal_theme;
     _ = desktop_picture;
+    _ = @import("desktop/settings.zig");
 }
 
 test "Metal-only themes load into a Space and render on the GPU" {

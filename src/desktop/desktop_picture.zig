@@ -16,6 +16,10 @@
 
 const std = @import("std");
 const sc = @import("space_config.zig");
+const settings = @import("settings.zig");
+
+/// Settings key (desktop/settings.zig) that switches the feature on; off by default.
+pub const SETTING_KEY = "mission_control_stills";
 
 pub const MAX_ENTRIES: usize = 32;
 pub const UUID_MAX: usize = 48;
@@ -144,6 +148,10 @@ const MsgCStr = *const fn (Id, Sel, [*:0]const u8) callconv(.c) Id;
 const MsgRetCStr = *const fn (Id, Sel) callconv(.c) ?[*:0]const u8;
 const MsgSetDesktop = *const fn (Id, Sel, Id, Id, Id, ?*Id) callconv(.c) bool;
 
+const CGPoint = extern struct { x: f64, y: f64 };
+const CGSize = extern struct { width: f64, height: f64 };
+const CGRect = extern struct { origin: CGPoint, size: CGSize };
+
 const Native = struct {
     getClass: *const fn ([*:0]const u8) callconv(.c) Id,
     sel: *const fn ([*:0]const u8) callconv(.c) Sel,
@@ -164,6 +172,14 @@ const Native = struct {
     CGImageDestinationCreateWithURL: *const fn (?*anyopaque, ?*anyopaque, usize, ?*anyopaque) callconv(.c) ?*anyopaque,
     CGImageDestinationAddImage: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void,
     CGImageDestinationFinalize: *const fn (?*anyopaque) callconv(.c) bool,
+    CGImageGetWidth: *const fn (?*anyopaque) callconv(.c) usize,
+    CGImageGetHeight: *const fn (?*anyopaque) callconv(.c) usize,
+    CGImageGetColorSpace: *const fn (?*anyopaque) callconv(.c) ?*anyopaque,
+    CGBitmapContextCreate: *const fn (?*anyopaque, usize, usize, usize, usize, ?*anyopaque, u32) callconv(.c) ?*anyopaque,
+    CGBitmapContextCreateImage: *const fn (?*anyopaque) callconv(.c) ?*anyopaque,
+    CGContextDrawImage: *const fn (?*anyopaque, CGRect, ?*anyopaque) callconv(.c) void,
+    CGContextRelease: *const fn (?*anyopaque) callconv(.c) void,
+    CGImageRelease: *const fn (?*anyopaque) callconv(.c) void,
     CGSMainConnectionID: *const fn () callconv(.c) u32,
     CGSCopyManagedDisplaySpaces: *const fn (u32) callconv(.c) ?*anyopaque,
     key_spaces: ?*anyopaque,
@@ -175,6 +191,7 @@ const Native = struct {
         const objc = std.c.dlopen("/usr/lib/libobjc.A.dylib", .{ .LAZY = true }) orelse return null;
         const cf = std.c.dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", .{ .LAZY = true }) orelse return null;
         const iio = std.c.dlopen("/System/Library/Frameworks/ImageIO.framework/ImageIO", .{ .LAZY = true }) orelse return null;
+        const cg = std.c.dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", .{ .LAZY = true }) orelse return null;
         const sky = std.c.dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", .{ .LAZY = true }) orelse return null;
         _ = std.c.dlopen("/System/Library/Frameworks/AppKit.framework/AppKit", .{ .LAZY = true }) orelse return null;
         const msg = std.c.dlsym(objc, "objc_msgSend") orelse return null;
@@ -200,6 +217,14 @@ const Native = struct {
             .CGImageDestinationAddImage = @ptrCast(@alignCast(std.c.dlsym(iio, "CGImageDestinationAddImage") orelse return null)),
             .CGImageDestinationFinalize = @ptrCast(@alignCast(std.c.dlsym(iio, "CGImageDestinationFinalize") orelse return null)),
             .CGSMainConnectionID = @ptrCast(@alignCast(std.c.dlsym(sky, "CGSMainConnectionID") orelse return null)),
+            .CGImageGetWidth = @ptrCast(@alignCast(std.c.dlsym(cg, "CGImageGetWidth") orelse return null)),
+            .CGImageGetHeight = @ptrCast(@alignCast(std.c.dlsym(cg, "CGImageGetHeight") orelse return null)),
+            .CGImageGetColorSpace = @ptrCast(@alignCast(std.c.dlsym(cg, "CGImageGetColorSpace") orelse return null)),
+            .CGBitmapContextCreate = @ptrCast(@alignCast(std.c.dlsym(cg, "CGBitmapContextCreate") orelse return null)),
+            .CGBitmapContextCreateImage = @ptrCast(@alignCast(std.c.dlsym(cg, "CGBitmapContextCreateImage") orelse return null)),
+            .CGContextDrawImage = @ptrCast(@alignCast(std.c.dlsym(cg, "CGContextDrawImage") orelse return null)),
+            .CGContextRelease = @ptrCast(@alignCast(std.c.dlsym(cg, "CGContextRelease") orelse return null)),
+            .CGImageRelease = @ptrCast(@alignCast(std.c.dlsym(cg, "CGImageRelease") orelse return null)),
             .CGSCopyManagedDisplaySpaces = @ptrCast(@alignCast(std.c.dlsym(sky, "CGSCopyManagedDisplaySpaces") orelse return null)),
             .key_spaces = mkstr(null, "Spaces", 0x08000100),
             .key_id64 = mkstr(null, "id64", 0x08000100),
@@ -267,6 +292,20 @@ const Native = struct {
         return null;
     }
 
+    /// A private copy of a frame. Theme frames wrap a pixel buffer that the next render overwrites,
+    /// so the background encoder must never read the live one.
+    fn copyImage(self: *const Native, img: ?*anyopaque) ?*anyopaque {
+        const w = self.CGImageGetWidth(img);
+        const h = self.CGImageGetHeight(img);
+        if (w == 0 or h == 0) return null;
+        // kCGImageAlphaNoneSkipLast | kCGBitmapByteOrder32Big, like the frames Argus presents.
+        const ctx = self.CGBitmapContextCreate(null, w, h, 8, 0, self.CGImageGetColorSpace(img), 5 | (4 << 12)) orelse return null;
+        defer self.CGContextRelease(ctx);
+        const r = CGRect{ .origin = .{ .x = 0, .y = 0 }, .size = .{ .width = @floatFromInt(w), .height = @floatFromInt(h) } };
+        self.CGContextDrawImage(ctx, r, img);
+        return self.CGBitmapContextCreateImage(ctx);
+    }
+
     fn writePNG(self: *const Native, cg_image: ?*anyopaque, path: []const u8) bool {
         const url = self.CFURLCreateFromFileSystemRepresentation(null, path.ptr, @intCast(path.len), false) orelse return false;
         defer self.CFRelease(url);
@@ -281,11 +320,47 @@ const Native = struct {
 // Per-visit driver
 // ----------------------------------------------------------------------------
 
+const JOB_IDLE: u8 = 0;
+const JOB_RUNNING: u8 = 1;
+const JOB_OK: u8 = 2;
+const JOB_FAILED: u8 = 3;
+
+/// One background PNG encode. The main thread fills it and starts the thread; the thread only
+/// writes the file and publishes `state`; the main thread reads the result on a later tick.
+const Job = struct {
+    state: std.atomic.Value(u8) = std.atomic.Value(u8).init(JOB_IDLE),
+    space_id: u64 = 0,
+    sig: u64 = 0,
+    uuid_buf: [UUID_MAX]u8 = @splat(0),
+    uuid_len: usize = 0,
+    path_buf: [700]u8 = @splat(0),
+    path_len: usize = 0,
+    image: ?*anyopaque = null,
+
+    fn uuid(self: *const Job) []const u8 {
+        return self.uuid_buf[0..self.uuid_len];
+    }
+    fn path(self: *const Job) []const u8 {
+        return self.path_buf[0..self.path_len];
+    }
+};
+
+fn encodeJob(native: *const Native, job: *Job) void {
+    const ok = native.writePNG(job.image, job.path());
+    native.CGImageRelease(job.image);
+    job.image = null;
+    job.state.store(if (ok) JOB_OK else JOB_FAILED, .release);
+}
+
 pub const DesktopPictures = struct {
     native: ?Native = null,
     ledger: Ledger = .{},
     dir_buf: [512]u8 = @splat(0),
     dir_len: usize = 0,
+    /// Native side loaded and the stills folder exists.
+    ready: bool = false,
+    /// The user setting (`mission_control_stills`). When off, every visited Space that still
+    /// shows one of our stills gets its own picture back.
     enabled: bool = false,
 
     // Current visit
@@ -296,17 +371,39 @@ pub const DesktopPictures = struct {
     sig_since: usize = 0,
     done: bool = false,
 
+    job: Job = .{},
+
     pub fn init(self: *DesktopPictures) void {
+        self.enabled = settings.getBool(SETTING_KEY, false);
         const home = std.c.getenv("HOME") orelse return;
         const dir = std.fmt.bufPrint(&self.dir_buf, "{s}" ++ STILLS_SUBDIR, .{std.mem.sliceTo(home, 0)}) catch return;
         self.dir_len = dir.len;
-        std.Io.Dir.cwd().createDirPath(sc.g_io, dir) catch return;
-        self.native = Native.load() orelse return;
         var path_buf: [600]u8 = undefined;
         const lp = std.fmt.bufPrint(&path_buf, "{s}/" ++ LEDGER_NAME, .{dir}) catch return;
         var text_buf: [MAX_ENTRIES * (UUID_MAX + URL_MAX + 24)]u8 = undefined;
         if (std.Io.Dir.cwd().readFile(sc.g_io, lp, &text_buf)) |text| self.ledger.parse(text) else |_| {}
-        self.enabled = true;
+        // Off and nothing to restore: touch nothing (no folder, no frameworks).
+        if (!self.enabled and self.ledger.n == 0) return;
+        std.Io.Dir.cwd().createDirPath(sc.g_io, dir) catch return;
+        self.native = Native.load() orelse return;
+        self.ready = true;
+    }
+
+    /// Settings API: is the feature on?
+    pub fn missionControlStills(self: *const DesktopPictures) bool {
+        return self.enabled;
+    }
+
+    /// Settings API: switch the feature on or off and persist it. Turning it off hands the active
+    /// Space back to the user's picture on the next tick, and every other Space on its next visit.
+    pub fn setMissionControlStills(self: *DesktopPictures, on: bool) void {
+        self.enabled = on;
+        settings.setBool(SETTING_KEY, on);
+        if (!self.ready) {
+            const keep = self.enabled;
+            self.init();
+            self.enabled = keep;
+        }
     }
 
     fn stillsDir(self: *const DesktopPictures) []const u8 {
@@ -326,17 +423,24 @@ pub const DesktopPictures = struct {
 
     /// True when a desktop picture URL is one of Argus's stills (never record those as originals).
     fn isOurs(self: *const DesktopPictures, abs_url: []const u8) bool {
-        const prefix = "file://";
-        if (!std.mem.startsWith(u8, abs_url, prefix)) return false;
+        _ = self;
+        if (!std.mem.startsWith(u8, abs_url, "file://")) return false;
         // Stills live under ".../Application Support/Argus/Desktop Stills/"; URLs percent-encode spaces.
-        return std.mem.indexOf(u8, abs_url, "/Application%20Support/Argus/Desktop%20Stills/") != null or
-            std.mem.indexOf(u8, abs_url[prefix.len..], self.stillsDir()) != null;
+        return std.mem.indexOf(u8, abs_url, "/Application%20Support/Argus/Desktop%20Stills/") != null;
+    }
+
+    /// True on the tick a fresh frame should be published for the coming still: GPU Spaces only
+    /// snapshot their frame after a load or while the menu is open, so the caller asks for one.
+    pub fn wantsFreshFrame(self: *const DesktopPictures, frame: usize) bool {
+        return self.ready and self.enabled and !self.done and self.last_sig != 0 and
+            frame -% self.sig_since == SETTLE_TICKS - 2;
     }
 
     /// Called every tick; costs a few compares unless the active Space or its theme just changed.
     /// `sig` is `stillSignature` of the active Space; `cg_image` is its latest presented frame.
-    pub fn tick(self: *DesktopPictures, space_id: u64, sig: u64, cg_image: ?*anyopaque, frame: usize) void {
-        if (!self.enabled) return;
+    pub fn tick(self: *DesktopPictures, space_id: u64, theme_sig: u64, cg_image: ?*anyopaque, frame: usize) void {
+        if (!self.ready) return;
+        const sig = if (self.enabled) theme_sig else 0;
         if (space_id != self.cur_space_id) {
             self.cur_space_id = space_id;
             self.cur_uuid_len = 0;
@@ -349,11 +453,21 @@ pub const DesktopPictures = struct {
             self.sig_since = frame;
             self.done = false;
         }
+
+        switch (self.job.state.load(.acquire)) {
+            JOB_RUNNING => return, // one encode at a time
+            JOB_OK, JOB_FAILED => |st| {
+                self.finishJob(st == JOB_OK, space_id, sig);
+                self.job.state.store(JOB_IDLE, .release);
+            },
+            else => {},
+        }
+
         if (self.done) return;
         const space_uuid = self.cur_uuid_buf[0..self.cur_uuid_len];
 
         if (sig == 0) {
-            // Passthrough: hand the Space back to the user's own picture, right away.
+            // Passthrough, or the feature is off: hand the Space back to the user's own picture.
             if (self.ledger.find(space_uuid)) |e| self.restore(e, space_uuid);
             self.done = true;
             return;
@@ -366,34 +480,54 @@ pub const DesktopPictures = struct {
         }
         if (cg_image == null or frame -% self.sig_since < SETTLE_TICKS) return;
         self.done = true;
-        self.apply(space_uuid, sig, cg_image);
+        self.startJob(space_id, space_uuid, sig, cg_image);
     }
 
-    fn apply(self: *DesktopPictures, space_uuid: []const u8, sig: u64, cg_image: ?*anyopaque) void {
+    fn startJob(self: *DesktopPictures, space_id: u64, space_uuid: []const u8, sig: u64, cg_image: ?*anyopaque) void {
+        const n = &self.native.?;
+        const p = self.stillPath(space_uuid, sig, &self.job.path_buf) orelse return;
+        self.job.path_len = p.len;
+        @memcpy(self.job.uuid_buf[0..space_uuid.len], space_uuid);
+        self.job.uuid_len = space_uuid.len;
+        self.job.space_id = space_id;
+        self.job.sig = sig;
+        self.job.image = n.copyImage(cg_image) orelse return;
+        self.job.state.store(JOB_RUNNING, .release);
+        const t = std.Thread.spawn(.{}, encodeJob, .{ n, &self.job }) catch {
+            n.CGImageRelease(self.job.image);
+            self.job.image = null;
+            self.job.state.store(JOB_IDLE, .release);
+            return;
+        };
+        t.detach();
+    }
+
+    /// Main thread, after the encode: set the still only if the user is still on that Space and
+    /// it still shows the same theme; otherwise drop the file (the next visit makes a new one).
+    fn finishJob(self: *DesktopPictures, ok: bool, space_id: u64, sig: u64) void {
+        const job = &self.job;
+        if (!ok) return;
+        if (job.space_id != space_id or job.sig != sig) {
+            unlinkPath(job.path());
+            return;
+        }
         const n = &self.native.?;
         var cur_buf: [URL_MAX]u8 = undefined;
         // No readable picture to restore later (nil or non-file wallpaper): leave this Space alone.
-        const cur = n.currentDesktopURL(&cur_buf) orelse return;
-        const e = self.ledger.findOrAdd(space_uuid) orelse return;
+        const cur = n.currentDesktopURL(&cur_buf) orelse return unlinkPath(job.path());
+        const e = self.ledger.findOrAdd(job.uuid()) orelse return unlinkPath(job.path());
         if (!self.isOurs(cur)) {
             e.setOriginal(cur); // first visit, or the user picked a new picture since
         } else if (e.orig_len == 0) {
-            return; // one of our stills with no recorded original: nothing safe to restore to
+            return unlinkPath(job.path()); // our still with no recorded original: nothing safe to restore to
         }
-
-        var path_buf: [700]u8 = undefined;
-        const path = self.stillPath(space_uuid, sig, &path_buf) orelse return;
-        if (!n.writePNG(cg_image, path)) return;
         var url_buf: [URL_MAX]u8 = undefined;
-        const url = fileURL(path, &url_buf) orelse return;
-        if (!n.setDesktopURL(url)) {
-            unlinkPath(path);
-            return;
-        }
+        const url = fileURL(job.path(), &url_buf) orelse return unlinkPath(job.path());
+        if (!n.setDesktopURL(url)) return unlinkPath(job.path());
         const old_sig = e.applied_sig;
         e.applied_sig = sig;
         self.saveLedger();
-        if (old_sig != 0 and old_sig != sig) self.deleteStill(space_uuid, old_sig);
+        if (old_sig != 0 and old_sig != sig) self.deleteStill(job.uuid(), old_sig);
     }
 
     fn restore(self: *DesktopPictures, e: *Entry, space_uuid: []const u8) void {
@@ -416,11 +550,11 @@ pub const DesktopPictures = struct {
     }
 
     /// On quit: restore the active Space. Other Spaces cannot be reached through the public API
-    /// without visiting them; their originals stay in the ledger and are restored on next visit
-    /// after Argus starts again (a passthrough Space restores immediately; a theme Space keeps
-    /// its still, which matches what Argus draws there).
+    /// without visiting them; their originals stay in the ledger and come back on their next visit
+    /// after Argus starts again (immediately for a Space that is no longer themed, or when the
+    /// feature is off).
     pub fn restoreActiveForQuit(self: *DesktopPictures, space_id: u64) void {
-        if (!self.enabled) return;
+        if (!self.ready) return;
         var ubuf: [UUID_MAX]u8 = @splat(0);
         const u = self.native.?.spaceUUID(space_id, &ubuf) orelse return;
         if (self.ledger.find(u)) |e| self.restore(e, u);
