@@ -3,15 +3,18 @@
 // OPUS BLACK HOLE // themes/Opus_Black_Hole.zig
 //
 // A spinning (Kerr) black hole with a thin accretion disk, rendered from the
-// physics rather than tuned by eye.
+// physics rather than tuned by eye. Audited independently (Gemini 4 Argon; Claude
+// Opus with its own code): every item under "computed" was re-derived and checked.
 //
 // What is computed, not chosen:
-//  * Light paths: exact Kerr null geodesics (Carter constants, Hamiltonian form,
-//    RK4) traced backward from a pinhole camera for every pixel. Spin, frame
-//    dragging and the D-shaped shadow come out of the equations.
+//  * Light paths: exact Kerr null geodesics (Hamiltonian form, RK4, with p_r re-solved
+//    from the null condition each step), traced backward from a pinhole camera. The
+//    GPU traces every pixel (2x2 samples, 8x8 at edges and photon rings); the CPU
+//    fallback traces 4x4-block corners and interpolates where the image is smooth.
+//    Spin, frame dragging and the D-shaped shadow come out of the equations.
 //  * Disk: geometrically thin, optically thick, inner edge at the ISCO (exact
-//    Bardeen-Press-Teukolsky formula), emitted flux from the Page-Thorne
-//    integral evaluated numerically from Kerr circular-orbit E(r), L(r), Omega(r).
+//    Bardeen-Press-Teukolsky formula), emitted flux from the Page-Thorne integral
+//    evaluated numerically from Kerr circular-orbit E(r), L(r), Omega(r).
 //  * Color: each point radiates as a blackbody at T(r) ~ F^(1/4). The observed
 //    spectrum is exactly a blackbody at g*T, with g the full Kerr redshift
 //    (gravitational + Doppler), so color AND brightness come from Planck's law
@@ -19,39 +22,52 @@
 //    switched off: the approaching side is much brighter, as it would be.
 //  * Light travel time: each pixel's pattern phase includes the photon's
 //    coordinate travel time, so lensed images lag the direct one.
+//  * Grazing light: where gas is translucent, light crosses tau / mu of it, with mu =
+//    g |p_theta| / r the cosine of its angle to the disk in the gas's own frame
+//    (at 80 deg the median mu is ~0.2), and I = B(1 - e^-tau/mu) + I_behind e^-tau/mu.
 //
 // What is chosen (stated honestly):
 //  * Spin a = 0.94 M, inclination 80 deg (steeply tilted).
-//  * Outer disk: no wall. Viscous spreading (Lynden-Bell & Pringle 1974) rolls the
-//    surface density off as Sigma ~ (R_C/r) exp(-r/R_C); optical depth follows it, so
-//    past ~15 M the cool gas turns translucent and light from behind (sky, the lensed
-//    far side) is traced through it: I = B(T)(1 - e^-tau) + I_behind e^-tau. Turbulence
-//    modulates the column density, so the edge frays into drifting wisps.
-//    The scale R_C and normalisation TAU0 are choices; the falloff law is not.
-//  * Peak disk temperature 6,500 K: a heavy supermassive black hole with a low
-//    accretion rate (T_peak ~ (Mdot / M^2)^(1/4)). Hotter disks look bluer-white;
-//    most of a 5,000 K disk is honestly a warm off-white, not orange.
-//  * Time-lapse: one inner-disk orbit takes ~10 s on screen (in reality hours).
-//  * Turbulence, shaped like the magnetorotational turbulence of real disks: eddies
-//    stretched along the orbit (~5% of r radially, ~0.2 rad in azimuth) and tilted
-//    into trailing spirals (~14 deg), three octaves falling as k^(-1/3) (2D Kolmogorov),
-//    and log-normal emissivity, exp(0.5 m - 0.125), so filaments are bright and gaps dark
-//    while the mean is unchanged. Advected at the true Keplerian rate, so it shears;
-//    refreshed in two cross-faded generations of 60 M. Eddy lifetimes do not yet scale
-//    with the local orbital period (that naively winds the pattern into radial stripes).
+//  * Peak disk temperature 6,500 K, a warm look. Physically T_peak ~ (Mdot / M^2)^(1/4),
+//    and a thin disk this cool around a supermassive hole needs an accretion rate of
+//    ~1e-7 Eddington, where real flows are hot and thick instead. Real thin disks
+//    around such holes are ~30,000-100,000 K, blue-white. This is an artistic choice
+//    (as Interstellar's was); the colours are still the honest Planck colours of 6,500 K.
+//  * Outer disk: no wall. The surface density rolls off as Sigma ~ (R_C/r) exp(-r/R_C),
+//    the gamma = 1 (nu ~ r) Lynden-Bell & Pringle (1974) viscous-spreading profile, used
+//    as an outer taper; optical depth follows it, so far out the cool gas turns
+//    translucent and light from behind (sky, the lensed far side) is traced through it.
+//    It is not self-consistent with the steady Page-Thorne T(r) (that solution spreads
+//    outward beyond R_C/2), and R_C, TAU0 and the gamma are choices.
+//  * Time-lapse: one ISCO orbit takes ~2.4 s on screen, one at r = 6 M ~10 s (in
+//    reality hours for a 1e8 solar-mass hole).
+//  * Turbulence: procedural value noise styled after the magnetorotational turbulence of
+//    real disks, not simulated MHD: eddies stretched along the orbit (~5% of r radially,
+//    ~0.2 rad in azimuth), trailing ~14 deg at birth (shear winds them tighter, to
+//    5-11 deg at peak visibility), three octaves with amplitude ratio 2^(-1/3), i.e. a
+//    Kolmogorov-like k^(-5/3) energy spectrum, and log-normal emissivity
+//    exp(0.5 m - 0.125 var m) with its mean kept at 1. It modulates the emitting
+//    filling factor at fixed local temperature (so it changes brightness, not colour).
+//    Advected at the true Kerr orbital rate, so it shears; refreshed in two
+//    cross-faded generations of 60 M (eddy lifetimes do not scale with the local
+//    orbital period: done naively that winds the pattern into radial stripes).
 //    The CPU fallback draws the coarse eddies only; the GPU adds the fine octaves.
-//  * Hot spots: plasma clumps on exact Kerr orbits (like Sgr A* flares). Each one
-//    shows up in every lensed image at once, its orbital phase lagging by each image's
-//    light-travel time (its birth and fade do not lag: not modelled), and
-//    shears as it ages: every radius of the clump keeps its own Omega(r), so after
-//    an age a the part at r has moved Omega(r) a, and the clump draws out into an arc.
-//    Their count, size and brightness are choices; their motion is not.
+//  * Hot spots: plasma clumps on exact Kerr orbits (like Sgr A* flares). Each appears
+//    in the direct image and the lowest-order lensed image of each pixel, its orbital
+//    phase lagging by that image's light-travel time (birth and fade do not lag; spots
+//    are not drawn in higher-order rings or in images seen through translucent gas).
+//    They shear as they age: every radius of the clump keeps its own Omega(r), so after
+//    an age a the part at r has moved Omega(r) a and the clump draws out into an arc.
+//    Hotter gas: emissivity x (1 + boost), so T rises as (1 + boost)^(1/4). Their count,
+//    size and brightness are choices; their motion is not.
 //  * Sky: a procedural Milky Way (band, dust lanes, bulge) and stars placed
 //    behind the hole and seen through the geodesics, so it bends into arcs and
 //    an Einstein ring. Its brightness is a composite-exposure choice.
-//  * Camera exposure + Reinhard tone mapping; faint stars for context.
+//  * Camera exposure + Reinhard tone mapping (HDR: to the display's EDR headroom).
+//    The CPU fallback composites translucent layers after tone mapping, in display
+//    values; the GPU composites radiances before it.
 //  Not modelled: limb darkening, color correction of disk atmospheres,
-//  returning radiation, disk thickness.
+//  returning radiation, disk thickness, gas inside the ISCO.
 //
 // Contract: 1 allocation (one slab) at init, 0 after; no clocks or I/O.
 // The geodesic work happens once in init; draw() is table lookups.
@@ -88,6 +104,8 @@ const TIME_LAPSE: f64 = 10.0; // M of coordinate time per unit of Argus dt
 const LIFE_M: f64 = 60.0; // turbulence generation lifetime, in M
 const TURB_SIGMA: f32 = 0.5; // log-normal emissivity: exp(sigma m - sigma^2 / 2), m ~ unit Gaussian
 const NOISE_STD: f32 = 40.0; // noise table byte levels per standard deviation
+const MU_MIN: f64 = 0.0067; // grazing limit for 1/mu (ln 150 = 5.0)
+const LMU_SCALE: f64 = 51.0; // ln(1/mu) per byte level: 0..255 covers mu down to MU_MIN
 const PEAK_BOOST: f64 = 3.0; // exp(2.6 sigma - sigma^2/2): turbulence brightens gas up to ~this much
 const EXP_N: usize = 1024; // exp table over [-4, 4] for the CPU draw
 const EXPO_TARGET: f64 = 7.0; // 99th-percentile disk luminance maps here before tone mapping
@@ -99,7 +117,7 @@ const GAL_TILT: f64 = 25.0 * math.pi / 180.0; // band's tilt on screen
 const NSPOT: usize = 6;
 const SPOT_LIFE: f64 = 90.0; // M of time each hot spot lives
 const SPOT_SIZE: f64 = 1.1; // M
-const SPOT_AMP: f32 = 6.0; // peak emissivity boost (hotter gas: T rises as boost^(1/4))
+const SPOT_AMP: f32 = 6.0; // peak emissivity boost (hotter gas: T rises as (1 + boost)^(1/4))
 const HALF_PI: f64 = math.pi / 2.0;
 /// Built by Argus's GPU path (src/gpu/bh_export.zig): the GPU traces the image itself at the
 /// window's native size, so init() skips the CPU trace and draw() runs it only if it's ever called.
@@ -277,6 +295,7 @@ pub const Hit = struct {
     t: f64 = 0,
     dir: [3]f64 = .{ 0, 0, 0 },
     steps: u32 = 0,
+    pth: f64 = 0, // photon p_theta at a disk crossing: sets the angle it crosses the gas at
 };
 
 /// Initial state for the backward ray through screen point (alpha, beta), camera at
@@ -367,7 +386,7 @@ pub fn traceNext(g: *const Geo, ray: *Ray, with_disk: bool) Hit {
             const rc = yc[0];
             if (with_disk and rc >= g.r_in and rc <= g.r_out) {
                 ray.* = .{ .y = y, .L = L, .n = n, .steps = steps + 1 };
-                return .{ .kind = .disk, .n = n, .r = rc, .ph = yc[2], .t = yc[3], .steps = steps };
+                return .{ .kind = .disk, .n = n, .r = rc, .ph = yc[2], .t = yc[3], .steps = steps, .pth = yc[5] };
             }
         }
     }
@@ -485,6 +504,7 @@ const Rec = extern struct {
     tobs: f16 = 0, // observed blackbody temperature g*T, for re-coloring hotter gas
     fp: u8 = 0, // pixel footprint: azimuthal extent in units of 64/65536 turn (saturating)
     bf: u8 = 0, // share of bg (luminance, /255) that lies behind this pixel's translucent gas
+    lmu: u8 = 0, // ln(1/mu) * LMU_SCALE: the slant of the line of sight through the gas
     tq: u16 = 0, // light-travel phase Omega*t in 1/1024 turn, mod 64 turns: kept apart so it can be unwrapped
 };
 
@@ -659,7 +679,7 @@ pub const State = struct {
                             sum += v;
                             sum2 += v * v;
                         } else {
-                            self.noise[ch][ri][pi] = @intFromFloat(math.clamp(128.0 + @as(f64, NOISE_STD) * (v - mean) / sd, 0.0, 255.0));
+                            self.noise[ch][ri][pi] = @intFromFloat(@round(math.clamp(128.0 + @as(f64, NOISE_STD) * (v - mean) / sd, 0.0, 255.0)));
                         }
                     }
                 }
@@ -738,10 +758,27 @@ pub const State = struct {
         var out = [3]Hit{ traceNext(&self.geo, &ray, true), .{}, .{} };
         for (1..3) |i| {
             const prev = out[i - 1];
-            if (prev.kind != .disk or opticalDepth(prev.r) >= tau_max) break;
+            if (prev.kind != .disk or self.slantTau(x, prev) >= tau_max) break;
             out[i] = traceNext(&self.geo, &ray, true);
         }
         return out;
+    }
+
+    /// ln(1/mu) for a disk crossing: mu = g |p_theta| / r is the cosine of the angle between the
+    /// photon and the disk normal in the gas's rest frame, so the light's path through the gas is
+    /// the vertical optical depth times 1/mu (at 80 deg most crossings are grazing, mu ~ 0.2).
+    fn lnInvMu(self: *const State, x: f64, hit: Hit) f64 {
+        const alpha = (x - 0.5 * @as(f64, @floatFromInt(self.w))) * self.mpp;
+        const L = -alpha * self.geo.sin_i;
+        const o = orbit(self.geo.a, hit.r);
+        const g = 1.0 / (o.ut * (1.0 - o.om * L));
+        const mu = math.clamp(g * @abs(hit.pth) / hit.r, MU_MIN, 1.0);
+        return -@log(mu);
+    }
+
+    /// Optical depth along the line of sight through the gas at a disk crossing.
+    fn slantTau(self: *const State, x: f64, hit: Hit) f64 {
+        return opticalDepth(hit.r) * @exp(self.lnInvMu(x, hit));
     }
 
     /// Display-linear light reaching the camera from behind translucent gas, in sky units
@@ -759,7 +796,7 @@ pub const State = struct {
                     break;
                 },
                 .disk => {
-                    const tau = opticalDepth(b.r);
+                    const tau = self.slantTau(x, b);
                     const s = self.shadeDisk(x, b.r, b.ph, b.t);
                     const k = @as(f64, self.exposure) * -std.math.expm1(-tau);
                     const c = [3]f64{ s.rgb[0] * k, s.rgb[1] * k, s.rgb[2] * k };
@@ -1003,6 +1040,7 @@ pub const State = struct {
                 const b = c[0].ph;
                 out.ph = b + w1 * wrapPi(c[1].ph - b) + w2 * wrapPi(c[2].ph - b) + w3 * wrapPi(c[3].ph - b);
                 out.t = w0 * c[0].t + w1 * c[1].t + w2 * c[2].t + w3 * c[3].t;
+                out.pth = w0 * c[0].pth + w1 * c[1].pth + w2 * c[2].pth + w3 * c[3].pth;
             },
             .sky => {
                 var d: [3]f64 = undefined;
@@ -1086,6 +1124,7 @@ pub const State = struct {
                         var disk_behind = [3]f64{ 0, 0, 0 }; // behind the disk samples: in bg only if translucent
                         var nd: usize = 0;
                         var first: Sample = .{};
+                        var first_lmu: f64 = 0.0; // ln(1/mu) of the first disk sample
                         const sub: usize = if (cl.cls == .edge) ss else 1; // supersample true edges only
                         const nsamp = sub * sub;
                         for (0..nsamp) |si| {
@@ -1113,7 +1152,7 @@ pub const State = struct {
                                     break :blk p[0];
                                 },
                             };
-                            const thin = hit.kind == .disk and opticalDepth(hit.r) < TAU_BEHIND;
+                            const thin = hit.kind == .disk and self.slantTau(fx, hit) < TAU_BEHIND;
                             if (thin and !have_back) {
                                 if (back_smooth) {
                                     backs = .{ interpolate(cb, u, v), interpolate(cc, u, v) };
@@ -1124,7 +1163,7 @@ pub const State = struct {
                                 }
                             }
                             if (hit.kind == .disk and hit.r > SPOT_RMAX) {
-                                const tau = opticalDepth(hit.r);
+                                const tau = self.slantTau(fx, hit);
                                 const dim = luma(self.shadeDisk(fx, hit.r, hit.ph, hit.t).rgb) * self.exposure * PEAK_BOOST < EMIT_FLOOR;
                                 if (tau * @exp(@as(f64, TAU_NOISE)) < TAU_MIN or dim) {
                                     // Gas too thin or too cool to show even when turbulence stirs it:
@@ -1139,10 +1178,13 @@ pub const State = struct {
                             }
                             const s = self.shadeHit(fx, hit, foot);
                             if (s.disk) {
-                                if (nd == 0) first = s;
+                                if (nd == 0) {
+                                    first = s;
+                                    first_lmu = self.lnInvMu(fx, hit);
+                                }
                                 nd += 1;
                                 for (0..3) |i| disk_rgb[i] += s.rgb[i];
-                                if (opticalDepth(hit.r) < TAU_BEHIND) {
+                                if (self.slantTau(fx, hit) < TAU_BEHIND) {
                                     const bh = self.behind(fx, backs, foot);
                                     for (0..3) |i| disk_behind[i] += bh[i];
                                 }
@@ -1155,7 +1197,7 @@ pub const State = struct {
                         // draw() composites translucent pixels as cov*c + (1 - bf*emit)*bg: only the light
                         // behind the gas (share bf) is dimmed by it, not the sky beside it.
                         var bf: u8 = 0;
-                        if (nd > 0 and self.tau_tab[first.rbin / R_FRAC] < TAU_BEHIND) {
+                        if (nd > 0 and self.tau_tab[first.rbin / R_FRAC] * @exp(first_lmu) < TAU_BEHIND) {
                             const lb = luma(disk_behind);
                             for (0..3) |i| bg_rgb[i] += disk_behind[i];
                             const lt = luma(bg_rgb);
@@ -1172,6 +1214,7 @@ pub const State = struct {
                                 .tobs = @floatCast(@min(first.tobs, 60000.0)),
                                 .tq = first.tq,
                                 .bf = bf,
+                                .lmu = @intFromFloat(@round(math.clamp(first_lmu * LMU_SCALE, 0.0, 255.0))),
                             };
                             self.row_x0[py] = @min(self.row_x0[py], @as(u16, @intCast(px)));
                             self.row_x1[py] = @max(self.row_x1[py], @as(u16, @intCast(px + 1)));
@@ -1340,12 +1383,13 @@ pub const State = struct {
                 var k = (self.exp_tab[ei] + (self.exp_tab[ei + 1] - self.exp_tab[ei]) * (ex - @as(f32, @floatFromInt(ei)))) * expo;
                 // Translucent outer gas: emitted fraction 1 - e^-tau, column density stirred by
                 // the same turbulence (unresolved texture averages out, as above).
-                const tau_b = self.tau_tab[rb];
-                const thin = tau_b < TAU_BEHIND;
+                // Line-of-sight optical depth: vertical tau times 1/mu, kept as a log.
+                const lt_los = self.lntau_tab[rb] + @as(f32, @floatFromInt(rc.lmu)) / @as(f32, LMU_SCALE);
+                const thin = lt_los < @as(f32, @floatCast(@log(TAU_BEHIND)));
                 var emit: f32 = 1.0;
                 if (thin) {
                     const nt = math.clamp(0.33 * m, -1.0, 1.0); // column density: tau * e^(1.2 nt)
-                    const xi = math.clamp((self.lntau_tab[rb] + TAU_NOISE * nt - EMIT_X0) * (@as(f32, EMIT_N) / (EMIT_X1 - EMIT_X0)), 0.0, @as(f32, EMIT_N) - 0.001);
+                    const xi = math.clamp((lt_los + TAU_NOISE * nt - EMIT_X0) * (@as(f32, EMIT_N) / (EMIT_X1 - EMIT_X0)), 0.0, @as(f32, EMIT_N) - 0.001);
                     const ii: usize = @intFromFloat(xi);
                     const fr_e = xi - @as(f32, @floatFromInt(ii));
                     emit = self.emit_tab[ii] + (self.emit_tab[ii + 1] - self.emit_tab[ii]) * fr_e;

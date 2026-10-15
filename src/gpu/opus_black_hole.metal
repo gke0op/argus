@@ -236,9 +236,10 @@ struct Hit {
     uint n;
     float r, ph, t; // t: relative light-travel delay (the theme's t_hit + T_REF)
     float3 dir;
+    float pth; // photon p_theta at a disk crossing: the angle it crosses the gas at
 };
 
-static Hit hitNone() { return Hit{KIND_HOLE, 0, 0.0f, 0.0f, 0.0f, float3(0.0f)}; }
+static Hit hitNone() { return Hit{KIND_HOLE, 0, 0.0f, 0.0f, 0.0f, float3(0.0f), 0.0f}; }
 
 static Ray startRay(constant TraceParams& P, float alpha, float beta) {
     const float a = P.a;
@@ -274,7 +275,7 @@ static Hit traceNext(constant TraceParams& P, thread Ray& ray, bool with_disk) {
             const float3 v = float3(vr * s * cp + vt * c * cp - vp * sp,
                                     vr * s * sp + vt * c * sp + vp * cp,
                                     vr * c - vt * s);
-            return Hit{KIND_SKY, 0, 0.0f, 0.0f, 0.0f, normalize(v)};
+            return Hit{KIND_SKY, 0, 0.0f, 0.0f, 0.0f, normalize(v), 0.0f};
         }
         const V6 k1 = rhs(a, L, y);
         const float h = stepSize(P, y, k1);
@@ -308,7 +309,7 @@ static Hit traceNext(constant TraceParams& P, thread Ray& ray, bool with_disk) {
                 ray.y = y;
                 ray.n = n;
                 ray.steps = steps + 1;
-                return Hit{KIND_DISK, n, rc, yc.p.z, yc.q.x, float3(0.0f)};
+                return Hit{KIND_DISK, n, rc, yc.p.z, yc.q.x, float3(0.0f), yc.q.z};
             }
         }
     }
@@ -319,6 +320,9 @@ static Hit traceNext(constant TraceParams& P, thread Ray& ray, bool with_disk) {
 
 static float opticalDepth(float r) { return TAU0 * (R_C / r) * exp(-r / R_C); }
 
+constant float MU_MIN = 0.0067f;  // grazing limit for 1/mu, as the theme
+constant float LMU_SCALE = 51.0f; // ln(1/mu) per byte level
+
 struct Orbit {
     float om, ut;
 };
@@ -328,6 +332,18 @@ static Orbit orbitAt(float a, float r) {
     const float r32 = r * sr;
     const float den = sqrt(r32) * sqrt(r32 - 3.0f * sr + 2.0f * a);
     return Orbit{1.0f / (r32 + a), (r32 + a) / den};
+}
+
+// ln(1/mu) at a disk crossing: mu = g |p_theta| / r is the cosine of the photon's angle to the
+// disk normal in the gas's rest frame; the line of sight crosses tau / mu of gas, not tau.
+static float lnInvMu(constant TraceParams& P, float alpha, Hit h) {
+    const Orbit o = orbitAt(P.a, h.r);
+    const float g = 1.0f / (o.ut * (1.0f - o.om * (-alpha * P.sin_i)));
+    return -log(clamp(g * fabs(h.pth) / h.r, MU_MIN, 1.0f));
+}
+
+static float slantTau(constant TraceParams& P, float alpha, Hit h) {
+    return opticalDepth(h.r) * exp(lnInvMu(P, alpha, h));
 }
 
 static float temperature(constant TraceParams& P, device const float* ttab, float r) {
@@ -462,7 +478,7 @@ static float3 behind(constant TraceParams& P, constant Static& st, device const 
             acc += tr * sky(P, st, b.dir, foot[i + 1]);
             break;
         }
-        const float tau = opticalDepth(b.r);
+        const float tau = slantTau(P, alpha, b);
         const Sample s = shadeDisk(P, st, ttab, alpha, b.r, b.ph, b.t);
         acc += tr * s.rgb * (P.exposure * (1.0f - exp(-tau)));
         tr *= exp(-tau);
@@ -483,6 +499,7 @@ struct Px {
     Sample first[3];  // the first of each order: its record, if that order stays animated
     float3 behind[3]; // light behind those samples
     float3 stat[3];   // their mean emission plus what shows through: used if they stay static
+    float lmu[3];     // ln(1/mu) of the first sample of each order
 };
 
 static Px pxNew() {
@@ -491,6 +508,7 @@ static Px pxNew() {
     for (uint o = 0; o < 3; o++) {
         px.cnt[o] = 0;
         px.first[o] = Sample{0.0f, 0, float3(0.0f), 0, 0};
+        px.lmu[o] = 0.0f;
         px.behind[o] = float3(0.0f);
         px.stat[o] = float3(0.0f);
     }
@@ -504,7 +522,8 @@ static void addSample(thread Px& px, constant TraceParams& P, constant Static& s
         return;
     }
     if (h0.kind != KIND_DISK) return;
-    const float tau = opticalDepth(h0.r);
+    const float lmu = lnInvMu(P, alpha, h0);
+    const float tau = opticalDepth(h0.r) * exp(lmu);
     const Sample smp = shadeDisk(P, st, ttab, alpha, h0.r, h0.ph, h0.t);
     if (h0.r > SPOT_RMAX) {
         const bool dim = luma(smp.rgb) * P.exposure * PEAK_BOOST < EMIT_FLOOR;
@@ -515,7 +534,10 @@ static void addSample(thread Px& px, constant TraceParams& P, constant Static& s
         }
     }
     const uint o = min(h0.n, 3u) - 1;
-    if (px.cnt[o] == 0) px.first[o] = smp;
+    if (px.cnt[o] == 0) {
+        px.first[o] = smp;
+        px.lmu[o] = lmu;
+    }
     px.cnt[o] += 1;
     const float3 bh = behind(P, st, ttab, alpha, h1, h2, foot);
     px.behind[o] += bh;
@@ -547,6 +569,7 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
                      device uint* bg [[buffer(4)]],
                      device ushort* tq [[buffer(5)]],
                      device uchar* bfrac [[buffer(6)]],
+                     device uchar* lmuq [[buffer(7)]],
                      uint2 gid [[thread_position_in_grid]]) {
     const uint x = gid.x;
     const uint y = gid.y + P.row0;
@@ -567,7 +590,7 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
             const Hit pv = hits[s][i - 1];
             // Fetch a little past the threshold: whether the pixel counts as translucent is
             // decided below from its record, exactly as bh_shade decides it.
-            if (pv.kind != KIND_DISK || opticalDepth(pv.r) >= 2.0f * TAU_BEHIND) break;
+            if (pv.kind != KIND_DISK || slantTau(P, ab.x, pv) >= 2.0f * TAU_BEHIND) break;
             hits[s][i] = traceNext(P, ray, true);
         }
     }
@@ -629,7 +652,7 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
                 h[c][1] = hitNone();
                 h[c][2] = hitNone();
                 for (uint l = 1; l < 3; l++) {
-                    if (h[c][l - 1].kind != KIND_DISK || opticalDepth(h[c][l - 1].r) >= 2.0f * TAU_BEHIND) break;
+                    if (h[c][l - 1].kind != KIND_DISK || slantTau(P, ab.x, h[c][l - 1]) >= 2.0f * TAU_BEHIND) break;
                     h[c][l] = traceNext(P, ray, true);
                 }
                 if (c > 0) {
@@ -666,12 +689,14 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
     // light beside it is not. bh_shade composites cov*c + (1 - f*emit)*bg, where f is the share of
     // bg that lies behind the gas: exact when both parts have the same colour.
     float3 under = float3(0.0f);
-    if (p >= 0 && st.tau_tab[px.first[p].rbin / R_FRAC] < TAU_BEHIND) under = px.behind[p];
+    const float lmu_p = p >= 0 ? px.lmu[p] : 0.0f;
+    if (p >= 0 && st.lntau_tab[px.first[p].rbin / R_FRAC] + lmu_p < log(TAU_BEHIND)) under = px.behind[p];
     const float3 bg_rgb = beside + under;
     const float lt = luma(bg_rgb);
     const uint idx = y * P.width + x;
     bg[idx] = packRGB9E5(bg_rgb / float(N));
     bfrac[idx] = uchar(lt > 1e-12f ? clamp(luma(under) / lt, 0.0f, 1.0f) * 255.0f + 0.5f : 0.0f);
+    lmuq[idx] = uchar(clamp(lmu_p * LMU_SCALE + 0.5f, 0.0f, 255.0f));
     recs[idx] = p >= 0 ? Rec{ushort(px.first[p].rbin), ushort(px.first[p].phi), ushort(covq)} : Rec{0, 0, 0};
     tq[idx] = p >= 0 ? ushort(px.first[p].tq) : ushort(0);
 }
@@ -737,7 +762,7 @@ static float2 noiseBilinear(device const uchar* noise, constant Frame& fr, uint 
 
 // One pixel of the theme's draw(), composited before tone mapping (light adds in linear).
 static float3 shadePre(uint x, uint y, constant TraceParams& P, device const float* ttab,
-                       device const Rec* recs, device const uint* bg, device const uchar* bfrac,
+                       device const Rec* recs, device const uint* bg, device const uchar* bfrac, device const uchar* lmuq,
                        device const uchar* noise, constant Static& st, constant Frame& fr, float exposure) {
     const uint i = y * P.width + x;
     const float3 bgv = unpackRGB9E5(bg[i]);
@@ -772,12 +797,13 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     // MRI-like turbulence, log-normal with its mean kept at 1.
     float k = exp(TURB_SIGMA * m - 0.5f * TURB_SIGMA * TURB_SIGMA * vm) * exposure;
 
-    const float tau_b = st.tau_tab[rb];
-    const bool thin = tau_b < TAU_BEHIND;
+    // Line-of-sight optical depth: vertical tau times 1/mu, kept as a log.
+    const float lt_los = st.lntau_tab[rb] + float(lmuq[i]) / LMU_SCALE;
+    const bool thin = lt_los < log(TAU_BEHIND);
     float emit = 1.0f;
     if (thin) {
         const float nt = clamp(0.33f * m, -1.0f, 1.0f); // column density: tau * e^(1.2 nt)
-        const float xi = clamp((st.lntau_tab[rb] + TAU_NOISE * nt - EMIT_X0) * (float(EMIT_N) / (EMIT_X1 - EMIT_X0)), 0.0f, float(EMIT_N) - 0.001f);
+        const float xi = clamp((lt_los + TAU_NOISE * nt - EMIT_X0) * (float(EMIT_N) / (EMIT_X1 - EMIT_X0)), 0.0f, float(EMIT_N) - 0.001f);
         const uint ii = uint(xi);
         const float fr_e = xi - float(ii);
         emit = st.emit_tab[ii] + (st.emit_tab[ii + 1] - st.emit_tab[ii]) * fr_e;
@@ -852,6 +878,7 @@ kernel void bh_shade(device const Rec* recs [[buffer(0)]],
                      constant TraceParams& P [[buffer(6)]],
                      device const float* ttab [[buffer(7)]],
                      device const uchar* bfrac [[buffer(8)]],
+                     device const uchar* lmuq [[buffer(9)]],
                      texture2d<float, access::write> out [[texture(0)]],
                      uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= v.out_w || gid.y >= v.out_h) return;
@@ -859,7 +886,7 @@ kernel void bh_shade(device const Rec* recs [[buffer(0)]],
     const uint x = min(uint((float(gid.x) + 0.5f) * float(v.width) / float(v.out_w)), v.width - 1);
     const uint y = min(uint((float(gid.y) + 0.5f) * float(v.height) / float(v.out_h)), v.height - 1);
     float3 c = float3(0.0f);
-    if (y < v.rows_done) c = toneMap(shadePre(x, y, P, ttab, recs, bg, bfrac, noise, st, fr, v.exposure), max(v.headroom, 1.0f));
+    if (y < v.rows_done) c = toneMap(shadePre(x, y, P, ttab, recs, bg, bfrac, lmuq, noise, st, fr, v.exposure), max(v.headroom, 1.0f));
     c = max(c, 0.0f);
     if (v.out_mode == OUT_SRGB) c = float3(srgbEncode(min(c.x, 1.0f)), srgbEncode(min(c.y, 1.0f)), srgbEncode(min(c.z, 1.0f)));
     else if (v.out_mode == OUT_PQ) c = pqEncode(c);
