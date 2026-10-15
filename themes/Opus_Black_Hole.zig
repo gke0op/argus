@@ -60,8 +60,9 @@
 //    (sigma 0.2: a radiatively efficient thin disk, ~5% temperature ripples), and the gas
 //    temperature follows it as T ~ eps^(1/4), so it changes colour as well as brightness.
 //    Each octave is filtered by the pixel's footprint on the disk: below the eddy size it
-//    averages out. The CPU fallback draws the coarse octave only, as brightness at fixed
-//    colour; the GPU draws both.
+//    averages out. The CPU fallback draws the coarse octave only, on a coarse grid (one
+//    value per radial bin and 1/512 turn per frame, interpolated), as brightness at fixed colour, and
+//    bakes the pixels it cannot visibly change; the GPU draws both octaves per pixel.
 //  * Hot spots: plasma clumps on exact Kerr orbits (like Sgr A* flares). Each appears
 //    in the direct image and the lowest-order lensed image of each pixel, its orbital
 //    phase lagging by that image's light-travel time (birth and fade do not lag; spots
@@ -846,6 +847,7 @@ pub const State = struct {
     band_ka: [NBAND]u32, // generation counters of the band's two staggered generations
     band_kb: [NBAND]u32,
     gen: [N_OCT][NBAND][2]TurbGen, // per-frame generation constants (octave, band, A/B)
+    gtab: [R_BINS][GT_NP]f32, // CPU path: coarse turbulence this frame per radial bin and phase slot
     band_n0: [R_BINS]u8, // CPU path: octave-0 band below each bin and its two blend weights
     band_w: [R_BINS][2]f32,
     sband: [N_OCT][R_BINS]f32, // log2(lifetime / BAND_L0) per octave and radial bin
@@ -1623,6 +1625,71 @@ pub const State = struct {
                 self.recs[i].fp = @intCast(@min((fp + 63) / 64, 255));
             }
         }
+        self.bakeStatic();
+    }
+
+    /// One disk pixel, composited over its background and tone mapped, as draw() writes it.
+    inline fn composite(self: *const State, rc: Rec, c: [3]f32, bgp: u32) u32 {
+        const yl = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        const tm = 1.0 / (1.0 + yl); // Reinhard on luminance, hue preserved
+        if (rc.bf != 0) {
+            // I = cov * B(T_s)(1 - e^-tau_*) + bg * (1 - bf (1 - e^-tau_ext)): bg holds the light
+            // beside the gas and, a share bf of it, the light behind it, which only that share sees dimmed.
+            var out: [3]u8 = undefined;
+            const cov: f32 = @as(f32, @floatFromInt(rc.cov)) / 255.0;
+            const tr = 1.0 - @as(f32, @floatFromInt(rc.bf)) / 255.0;
+            for (0..3) |i| {
+                const bl = self.lin8[(bgp >> @intCast(8 * i)) & 0xFF];
+                const v = @min(cov * c[i] * tm + tr * bl, 1.0);
+                out[i] = self.srgb[@intFromFloat(v * 4095.0)];
+            }
+            return sdk.packRGBA(out[0], out[1], out[2]);
+        } else if (rc.cov == 255) {
+            const r0 = self.srgb[@intFromFloat(@min(c[0] * tm, 1.0) * 4095.0)];
+            const g0 = self.srgb[@intFromFloat(@min(c[1] * tm, 1.0) * 4095.0)];
+            const b0 = self.srgb[@intFromFloat(@min(c[2] * tm, 1.0) * 4095.0)];
+            return sdk.packRGBA(r0, g0, b0);
+        } else {
+            // Partly covered opaque pixel, blended in linear light: bg already holds the sky
+            // of the uncovered samples (weighted by their share), so it adds as is.
+            var out: [3]u8 = undefined;
+            const cov: f32 = @as(f32, @floatFromInt(rc.cov)) / 255.0;
+            for (0..3) |i| {
+                const bl = self.lin8[(bgp >> @intCast(8 * i)) & 0xFF];
+                const v = @min(cov * c[i] * tm + bl, 1.0);
+                out[i] = self.srgb[@intFromFloat(v * 4095.0)];
+            }
+            return sdk.packRGBA(out[0], out[1], out[2]);
+        }
+    }
+
+    /// Turbulence that cannot change an 8-bit level (gas too dim, or eddies averaged out by the
+    /// footprint) leaves a pixel the same every frame unless a hot spot can reach it: those
+    /// pixels are composited once here, into the background, and draw() skips them.
+    fn bakeStatic(self: *State) void {
+        const span_bins = self.lnr_span / @as(f64, @floatFromInt(R_BINS));
+        // Outermost bin a spot's mask can reach (step(): spot radius <= 5.35 r_in, +wr +12 bins).
+        const spot_bin_max: u32 = @intFromFloat(@ceil((@log(5.35 * self.geo.r_in) - self.lnr_in + SPOT_SIZE / (1.15 * self.geo.r_in)) / span_bins + 13.0));
+        const n = self.w * self.h;
+        for (0..n) |i| {
+            const rc = self.recs[i];
+            if (rc.cov == 0 or rc.rbin / R_FRAC <= spot_bin_max) continue;
+            const frf: f32 = @as(f32, @floatFromInt(rc.fr)) * 0.25;
+            const fpf: f32 = @as(f32, @floatFromInt(rc.fp)) * 64.0;
+            const tex_c = 1.0 / (1.0 + frf * frf * self.inv_cr2 + fpf * fpf * self.inv_cp2);
+            if (!turbInvisible(rc, tex_c, self.exposure)) continue;
+            const k = @exp(-0.5 * TURB_SIGMA * TURB_SIGMA * tex_c * tex_c) * self.exposure;
+            const c = [3]f32{ @as(f32, rc.rgb[0]) * k, @as(f32, rc.rgb[1]) * k, @as(f32, rc.rgb[2]) * k };
+            self.bg[i] = self.composite(rc, c, self.bg[i]);
+            self.recs[i].cov = 0;
+        }
+    }
+
+    /// The ripple is below an 8-bit level: eddies averaged out below 1% rms by the footprint,
+    /// or gas too dim (linear < 0.02: a 5% change is < 1 level).
+    inline fn turbInvisible(rc: Rec, tex_c: f32, expo: f32) bool {
+        const yl = (0.2126 * @as(f32, rc.rgb[0]) + 0.7152 * @as(f32, rc.rgb[1]) + 0.0722 * @as(f32, rc.rgb[2])) * expo;
+        return tex_c * TURB_SIGMA < 0.01 or yl < 0.02;
     }
 
     // ---------------------------------------------------------------- per frame
@@ -1652,6 +1719,17 @@ pub const State = struct {
                         .phoff = seed >> 16,
                     };
                 }
+            }
+        }
+
+        // CPU fallback: the coarse octave once per frame on a (radial bin, 1/GT_NP turn) grid,
+        // interpolated per pixel. Eddies are below a 1920-wide pixel anyway (the footprint
+        // filter keeps ~20% of their amplitude); the GPU path samples them exactly.
+        for (0..R_BINS) |b| {
+            const rbf = @as(f32, @floatFromInt(b)) + 0.5;
+            for (0..GT_NP) |pc| {
+                const phi: u16 = @intCast((pc << (16 - GT_LOG2)) + (1 << (15 - GT_LOG2)));
+                self.gtab[b][pc] = self.turbCoarse(phi, rbf);
             }
         }
 
@@ -1689,7 +1767,23 @@ pub const State = struct {
         return !math.isFinite(self.t_m) or !math.isFinite(self.exposure);
     }
 
-    /// Octave-0 turbulence at a pixel (unit variance, nearest cell): two lifetime bands blended
+    /// The CPU turbulence grid at a pixel: bilinear between bin centres and phase slots.
+    inline fn turbGrid(self: *const State, phi: u16, rbf: f32) f32 {
+        const xb = math.clamp(rbf - 0.5, 0.0, @as(f32, R_BINS - 1) - 0.001);
+        const b0: usize = @intFromFloat(xb);
+        const tb = xb - @as(f32, @floatFromInt(b0));
+        const q = phi -% (1 << (15 - GT_LOG2));
+        const p0: usize = q >> (16 - GT_LOG2);
+        const p1 = (p0 + 1) & (GT_NP - 1);
+        const tp = @as(f32, @floatFromInt(q & ((1 << (16 - GT_LOG2)) - 1))) / @as(f32, 1 << (16 - GT_LOG2));
+        const r0 = &self.gtab[b0];
+        const r1 = &self.gtab[@min(b0 + 1, R_BINS - 1)];
+        const g0 = r0[p0] + (r0[p1] - r0[p0]) * tp;
+        const g1 = r1[p0] + (r1[p1] - r1[p0]) * tp;
+        return g0 + (g1 - g0) * tb;
+    }
+
+    /// Octave-0 turbulence at (phi, rbf) (unit variance, nearest cell): two lifetime bands blended
     /// across radius, each two staggered generations, every generation advected at Omega(r)
     /// since its birth. Variance-preserving (sin/cos) weights keep the statistics stationary.
     fn turbCoarse(self: *const State, phi: u16, rbf: f32) f32 {
@@ -1747,12 +1841,6 @@ pub const State = struct {
             const row = buf[y * stride .. y * stride + w];
             const bg_row = self.bg[y * w .. y * w + w];
             const rec_row = self.recs[y * w .. y * w + w];
-            // Last turbulence lookup on this row: a neighbour inside the same eddy cell (2 rows, half a
-            // cell in azimuth) reuses it, i.e. nearest sampling at the eddy scale.
-            var last_row: i32 = -100;
-            var last_phi: u16 = 0;
-            var last_g: f32 = 0.0;
-            const half_cell: i32 = @intFromFloat(0.5 * self.cell_p0);
             for (x0..x1) |x| {
                 const rc = rec_row[x];
                 if (rc.cov == 0) continue;
@@ -1763,20 +1851,9 @@ pub const State = struct {
                 const frf: f32 = @as(f32, @floatFromInt(rc.fr)) * 0.25; // bins
                 const fpf: f32 = @as(f32, @floatFromInt(rc.fp)) * 64.0;
                 const tex_c = 1.0 / (1.0 + frf * frf * self.inv_cr2 + fpf * fpf * self.inv_cp2);
-                // Skip the lookups where the ripple cannot change an 8-bit level: eddies averaged out
-                // below 1% rms by the footprint, or gas too dim (linear < 0.02: a 5% change is < 1 level).
-                const dim_gas = (0.2126 * @as(f32, rc.rgb[0]) + 0.7152 * @as(f32, rc.rgb[1]) + 0.0722 * @as(f32, rc.rgb[2])) * expo < 0.02;
+                // Skip the lookups where the ripple cannot change an 8-bit level (see bakeStatic).
                 var m: f32 = 0.0;
-                if (!(tex_c * TURB_SIGMA < 0.01 or (dim_gas and self.spot_mask[rb] == 0))) {
-                    const trow: i32 = @intFromFloat(rbf * (@as(f32, NR) / @as(f32, R_BINS)));
-                    const dphi: i32 = @as(i16, @bitCast(rc.phi -% last_phi));
-                    if (@abs(trow - last_row) > 2 or @abs(dphi) > half_cell) {
-                        last_g = self.turbCoarse(rc.phi, rbf);
-                        last_row = trow;
-                        last_phi = rc.phi;
-                    }
-                    m = last_g * tex_c;
-                }
+                if (!turbInvisible(rc, tex_c, expo)) m = self.turbGrid(rc.phi, rbf) * tex_c;
                 const ex = math.clamp((TURB_SIGMA * m - 0.5 * TURB_SIGMA * TURB_SIGMA * tex_c * tex_c + 4.0) * (@as(f32, EXP_N) / 8.0), 0.0, @as(f32, EXP_N) - 0.001);
                 const ei: usize = @intFromFloat(ex);
                 var k = (self.exp_tab[ei] + (self.exp_tab[ei + 1] - self.exp_tab[ei]) * (ex - @as(f32, @floatFromInt(ei)))) * expo;
@@ -1838,42 +1915,14 @@ pub const State = struct {
                     [3]f32{ spot_rgb[0] * spot_scale * k, spot_rgb[1] * spot_scale * k, spot_rgb[2] * spot_scale * k }
                 else
                     [3]f32{ @as(f32, rc.rgb[0]) * k, @as(f32, rc.rgb[1]) * k, @as(f32, rc.rgb[2]) * k };
-                const yl = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-                const tm = 1.0 / (1.0 + yl); // Reinhard on luminance, hue preserved
-                const bgp = bg_row[x];
-                if (rc.bf != 0) {
-                    // I = cov * B(T_s)(1 - e^-tau_*) + bg * (1 - bf (1 - e^-tau_ext)): bg holds the light
-                    // beside the gas and, a share bf of it, the light behind it, which only that share sees dimmed.
-                    var out: [3]u8 = undefined;
-                    const cov: f32 = @as(f32, @floatFromInt(rc.cov)) / 255.0;
-                    const tr = 1.0 - @as(f32, @floatFromInt(rc.bf)) / 255.0;
-                    for (0..3) |i| {
-                        const bl = self.lin8[(bgp >> @intCast(8 * i)) & 0xFF];
-                        const v = @min(cov * c[i] * tm + tr * bl, 1.0);
-                        out[i] = self.srgb[@intFromFloat(v * 4095.0)];
-                    }
-                    row[x] = sdk.packRGBA(out[0], out[1], out[2]);
-                } else if (rc.cov == 255) {
-                    const r0 = self.srgb[@intFromFloat(@min(c[0] * tm, 1.0) * 4095.0)];
-                    const g0 = self.srgb[@intFromFloat(@min(c[1] * tm, 1.0) * 4095.0)];
-                    const b0 = self.srgb[@intFromFloat(@min(c[2] * tm, 1.0) * 4095.0)];
-                    row[x] = sdk.packRGBA(r0, g0, b0);
-                } else {
-                    // Partly covered opaque pixel, blended in linear light: bg already holds the sky
-                    // of the uncovered samples (weighted by their share), so it adds as is.
-                    var out: [3]u8 = undefined;
-                    const cov: f32 = @as(f32, @floatFromInt(rc.cov)) / 255.0;
-                    for (0..3) |i| {
-                        const bl = self.lin8[(bgp >> @intCast(8 * i)) & 0xFF];
-                        const v = @min(cov * c[i] * tm + bl, 1.0);
-                        out[i] = self.srgb[@intFromFloat(v * 4095.0)];
-                    }
-                    row[x] = sdk.packRGBA(out[0], out[1], out[2]);
-                }
+                row[x] = self.composite(rc, c, bg_row[x]);
             }
         }
     }
 };
+
+const GT_LOG2 = 9; // CPU turbulence grid: 2^9 phase slots per turn (2 noise-table cells)
+const GT_NP = 1 << GT_LOG2;
 
 /// One generation of eddies: its weight now, its age (Q16 phase per unit Omega), and the offsets
 /// that make it an independent draw from the octave's noise plane. Laid out for the GPU.
