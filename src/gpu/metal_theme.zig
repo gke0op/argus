@@ -67,9 +67,11 @@ pub fn parseDirectives(src: []const u8) Directives {
     return d;
 }
 
-const Pipe = struct {
+pub const Pipe = struct {
     pso: mtl.Id,
     group: mtl.MTLSize,
+    /// maxTotalThreadsPerThreadgroup (reported by the harness).
+    max_threads: usize,
 
     fn make(dev: mtl.Id, lib: mtl.Id, name: [*:0]const u8, err_buf: []u8) !?Pipe {
         const func = mtl.msg(mtl.Id, lib, "newFunctionWithName:", .{mtl.nsString(name)}) orelse return null;
@@ -81,7 +83,7 @@ const Pipe = struct {
         };
         const tw = mtl.msg(usize, pso, "threadExecutionWidth", .{});
         const tmax = mtl.msg(usize, pso, "maxTotalThreadsPerThreadgroup", .{});
-        return .{ .pso = pso, .group = .{ .w = tw, .h = @max(1, tmax / tw), .d = 1 } };
+        return .{ .pso = pso, .group = .{ .w = tw, .h = @max(1, tmax / tw), .d = 1 }, .max_threads = tmax };
     }
 
     fn dispatch(self: Pipe, enc: mtl.Id, w: usize, h: usize) void {

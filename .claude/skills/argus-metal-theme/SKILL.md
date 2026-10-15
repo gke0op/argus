@@ -90,16 +90,75 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
    ```bash
    make harness THEME=themes/<Author>_<Name>.metal FRAMES=300 OUT=/tmp/<name>.png
    ```
-   It compiles with the prelude and runs 300 frames at 1920x1200 plus a 320x200 watchdog run. It gates on: compile, NaN/Inf (in a float32 render), pixel variance > 100, ≥ 2,000 animated pixels between first and last frame, and average GPU time < 8.3 ms. It writes the last frame as a PNG. **Open the PNG and look at it**: passing gates don't mean it looks good. Render later frames (`FRAMES=900`) for simulations that take time to develop.
+   It compiles with the prelude and runs 300 frames at 1920x1200 plus a 320x200 watchdog run, then times 120 more as the app draws them (`Profile (BGRA8)`: init/step vs draw). It gates on: compile, NaN/Inf (in a float32 render), pixel variance > 100, ≥ 2,000 animated pixels between first and last frame, and average GPU time < 8.3 ms. It writes the last frame as a PNG. **Open the PNG and look at it**: passing gates don't mean it looks good. Render later frames (`FRAMES=900`) for simulations that take time to develop.
 3. **Run it live.** Drag the `.metal` file onto a Space in the Argus menu-bar panel (or choose it with the file picker). Save edits and Argus hot-reloads within a second. If the new code doesn't compile, the old version keeps running and the error is printed on Argus's stderr (`./Argus.app/Contents/MacOS/Argus --perf-log` in a terminal shows it).
 4. `make test` must stay green when engine code changes.
 
-## 5. Performance habits on the GPU
+## 5. Performance: what the GPU actually does (measured)
 
-- Per-pixel `sin`, `exp`, `pow` are cheap on the GPU (unlike the CPU). Loops are fine when every pixel runs a similar count. Big per-pixel branches that differ between neighbours cost more.
-- Raymarching, fractals and fbm with 4–6 octaves all fit in the budget at 1920x1200. Check `Avg GPU Frame` in the harness report.
-- Prefer `half` for colour maths only if profiling says so. `float` is the safe default.
-- Simulations: shrink the state (`@argus state`) before you cut steps.
+Measured on an M3 at 1920x1200 with `make gpu-probes` (`tools/gpu_probes/`: tiny kernels that
+each isolate one cost) and by taking the four ported themes apart. Rerun the probes on
+another chip before trusting exact numbers; the ratios are what matter.
+
+**Read the harness profile first.** The report's `Profile (BGRA8)` line times frames the way
+the app draws them (into the BGRA8 drawable) and splits each into `init/step` and `draw`. To
+find where a draw's time goes, switch parts off one at a time and compare. Two traps:
+- The compiler deletes code whose result is unused. If you skip a stage with `continue`,
+  still feed its result into the output (e.g. `col.x += z * 1e-9f`), or you'll measure nothing.
+- Dead code is free: corals left in the kernel but never executed cost 0.02 ms. Only
+  what runs costs, so kernel size is not a reason to split a theme.
+
+**How the hardware runs your kernel.** Argus dispatches 32x32 threadgroups. The GPU executes
+them in **SIMD groups of 32 threads = 32 neighbouring pixels of one row**, which run in lock-step.
+
+| Measured (one op per pixel, full screen) | Cost |
+|---|---|
+| writing the frame (BGRA8) | ~0.1–0.2 ms floor |
+| `fma` | ~3.5 µs |
+| `exp` | ~3 µs |
+| `sqrt` + divide, `pow` | ~8 µs |
+| `sin` (= `fast::sin`, Metal's default) | ~15 µs; `precise::sin` ~37 µs |
+| integer `/` and `%` by a power of two | free (shift, mask) |
+| integer `/` and `%` by a constant like 2049 | ~15 µs |
+| integer `/` and `%` by a runtime value | ~58 µs |
+| `half` instead of `float` maths | same speed (no ALU gain on M3) |
+
+**Rules that follow, biggest first:**
+1. **Neighbouring pixels must read neighbouring texels.** 32 coherent texture reads per
+   pixel cost 0.45 ms; the same 32 reads at random addresses in an 8 MB texture cost
+   **33 ms (74x)**. `sample` is ~1.5x a `read`. All 32 lanes reading the *same* texel (a
+   shared table row) is the cheapest read there is.
+2. **Branch per row or per tile, not per pixel.** A branch that differs between
+   neighbouring pixels runs both sides (2.0x). The same branch differing per row or per
+   32x32 tile costs nothing. Loops: a per-pixel random trip count costs like the max of the
+   32 lanes (2.1x the mean); a count that varies smoothly across the screen costs 1.26x.
+3. **Make per-tile lists 32 px wide (or a multiple).** Then a SIMD group never straddles two
+   tiles and walks one list. Coral Reef's 30 px tiles → 32 px: −0.2 ms.
+4. **Cull cooperatively.** Instead of every pixel testing every candidate, let the lanes of a
+   SIMD group split the candidates, test them against the group's pixel span
+   (`simd_min/simd_max` of the pixel coords), combine with `simd_ballot`/`simd_or`, and visit
+   only the hits (`ctz` over the mask, `simd_shuffle` to broadcast data). Don't assume all 32
+   lanes are active (earlier `continue`s, right screen edge): split work by rank among
+   `simd_ballot(true)` and fall back when lanes aren't on the same item
+   (`simd_all(id == simd_broadcast_first(id))`). Examples: `Gemini_Aquarium.metal` (whole
+   draw 9.9 → 1.7 ms), `Opus_Coral_Reef.metal` corals. For bigger lists, cull per threadgroup
+   into `threadgroup` arrays with an atomic append and a `threadgroup_barrier` (no early
+   `return` before the barrier): `Lizard_Island.metal`.
+5. **Use power-of-two strides for packed tables** (`uint2(n & 2047, row + (n >> 11))`, not
+   `n % 2049`): −0.1 ms on Coral Reef.
+6. **Local arrays indexed at run time can end up in memory.** A 96-element array indexed by
+   a computed value: 200 ms vs 6 ms for 32 elements. Small arrays often stay in registers
+   (Coral Reef's `ids[16]` made no difference): measure before rewriting.
+7. **Copy baked state once.** A full-grid `argus_step` that returns at once costs ~0.05 ms
+   at 2048x2048, but copying 2048x2048 RGBA16F costs ~0.77 ms per frame. Bake in `argus_init`
+   and copy into the other ping-pong texture only on the first frames (`if (f.frame < 3u)`).
+
+**Things that did not help** (so don't spend time on them): cheaper arithmetic inside a loop
+that isn't arithmetic-bound; batching texture reads by hand (the compiler already overlaps
+them); `[[max_total_threads_per_threadgroup(N)]]` or other threadgroup shapes; `half` for speed.
+
+Raymarching, fractals and fbm with 4–6 octaves all fit the budget at 1920x1200. For
+simulations, shrink the state (`@argus state`) before you cut steps.
 
 ## 6. Teaching it
 
@@ -122,6 +181,7 @@ Explain the one mental shift up front: you write the rule for one pixel, and the
 | `src/gpu/presenter.zig` | CAMetalLayer per Space window; Zig + Metal hybrids (Opus_Black_Hole) |
 | `src/theme_harness.zig` | `make harness`; `.metal` files take the GPU path |
 | `themes/Tutorial_*.metal` | the two tutorials |
+| `tools/gpu_probes/` | `make gpu-probes`: one-cost-each probe kernels behind section 5 |
 
 Zig + Metal hybrids (a Zig theme whose per-pixel draw runs as a Metal kernel over its
 CPU-built tables) exist as a prototype for `Opus_Black_Hole` only (`src/gpu/bh_*.zig`,

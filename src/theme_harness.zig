@@ -35,7 +35,7 @@ fn runMetal(theme: *metal_theme.Theme, out: mtl.Id, frames: usize, first: ?[]f32
         if (mtl.msg(usize, cb, "status", .{}) == 5) { // MTLCommandBufferStatusError
             return .{ .ok = false, .err = mtl.describe(mtl.msg(mtl.Id, cb, "error", .{})) };
         }
-        const us = (mtl.msg(f64, cb, "GPUEndTime", .{}) - mtl.msg(f64, cb, "GPUStartTime", .{})) * 1e6;
+        const us = gpuUs(cb);
         if (f > 0) { // frame 0 includes one-time init and pipeline warm-up
             total += us;
             worst = @max(worst, us);
@@ -46,6 +46,41 @@ fn runMetal(theme: *metal_theme.Theme, out: mtl.Id, frames: usize, first: ?[]f32
         });
     }
     return .{ .ok = true, .gpu_us_avg = total / @as(f64, @floatFromInt(@max(1, frames - 1))), .gpu_us_worst = worst };
+}
+
+const Profile = struct { frame_us: f64 = 0, draw_us: f64 = 0 };
+
+fn gpuUs(cb: mtl.Id) f64 {
+    return (mtl.msg(f64, cb, "GPUEndTime", .{}) - mtl.msg(f64, cb, "GPUStartTime", .{})) * 1e6;
+}
+
+/// Times `frames` more frames the way the app draws them: into a BGRA8 texture (the
+/// drawable's format; the main run writes RGBA32F, 4x the bytes, for the NaN check).
+/// Each frame is timed whole, then argus_draw alone on the same state, so the split is
+/// init+step = frame - draw. Medians, so one stray hitch doesn't skew it.
+fn profileMetal(theme: *metal_theme.Theme, frames: usize) Profile {
+    const out = mtl.newTexture(theme.dev, mtl.PIXEL_BGRA8, theme.frame.width, theme.frame.height, mtl.STORAGE_PRIVATE);
+    defer mtl.release(out);
+    var whole: [256]f64 = undefined;
+    var draw: [256]f64 = undefined;
+    const n = @min(frames, whole.len);
+    for (0..n) |f| {
+        const pool = mtl.poolPush();
+        defer mtl.poolPop(pool);
+        const cb = mtl.msg(mtl.Id, theme.queue, "commandBuffer", .{});
+        theme.encode(cb, out, METAL_DT);
+        mtl.msg(void, cb, "commit", .{});
+        mtl.msg(void, cb, "waitUntilCompleted", .{});
+        const cb2 = mtl.msg(mtl.Id, theme.queue, "commandBuffer", .{});
+        theme.encodeDrawOnly(cb2, out);
+        mtl.msg(void, cb2, "commit", .{});
+        mtl.msg(void, cb2, "waitUntilCompleted", .{});
+        whole[f] = gpuUs(cb);
+        draw[f] = gpuUs(cb2);
+    }
+    std.mem.sort(f64, whole[0..n], {}, std.sort.asc(f64));
+    std.mem.sort(f64, draw[0..n], {}, std.sort.asc(f64));
+    return .{ .frame_us = whole[n / 2], .draw_us = draw[n / 2] };
 }
 
 fn packFloat(px: []const f32) u32 {
@@ -89,6 +124,8 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
         std.process.exit(1);
     }
 
+    const prof = profileMetal(&theme, 120);
+
     var nan_detected = false;
     for (first) |v| if (!std.math.isFinite(v)) {
         nan_detected = true;
@@ -128,6 +165,8 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
         \\ Frames Rendered   : {d} (dt = 1/30 s)
         \\ Avg GPU Frame     : {d:.1} us | Budget: {d:.1} us
         \\ Worst GPU Frame   : {d:.1} us
+        \\ Profile (BGRA8)   : {d:.1} us median frame = {d:.1} us init/step + {d:.1} us draw
+        \\ Draw Threadgroup  : {d}x{d} (max {d}; a SIMD group is one 32-px row of it)
         \\ Watchdog 320x200  : {s}
         \\ NaN / Inf Check   : {s}
         \\ Pixel Variance    : {d} / {d} non-bg pixels
@@ -145,6 +184,10 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
         width,                             height,
         frames,                            run.gpu_us_avg,
         METAL_BUDGET_US,                   run.gpu_us_worst,
+        prof.frame_us,                     @max(0.0, prof.frame_us - prof.draw_us),
+        prof.draw_us,
+        theme.draw.group.w,                theme.draw.group.h,
+        theme.draw.max_threads,
         if (wd_ok) "PASS" else "FAIL (failed to compile or run at 320x200)",
         if (nan_detected) "FAIL (NaN/Inf in the output!)" else "CLEAN",
         distinct_pixels,                   width * height,
