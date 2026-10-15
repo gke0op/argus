@@ -1,7 +1,7 @@
 # Zig 0.17.0: ./.toolchain/zig if present (gitignored, e.g. a symlink), otherwise zig on PATH.
 ZIG ?= $(shell if [ -x ./.toolchain/zig ]; then echo ./.toolchain/zig; else command -v zig; fi)
 ZFLAGS = -O ReleaseFast -target aarch64-macos -lc
-THEME ?= themes/Magnetar_Minimal.zig
+THEME ?= themes/Echo.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 

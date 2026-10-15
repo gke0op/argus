@@ -96,7 +96,7 @@ Argus compiles themes with **Zig `0.17.0`** (`./.toolchain/zig`, `$ZIG`, `$HOME/
 - **Casts**: `@floatFromInt`, `@intFromFloat`, `@intCast`, `@ptrCast` (never `@intToFloat` or `@floatToInt`).
 - **`std.mem` trimming**: `std.mem.trimEnd` / `std.mem.trimStart` (replacing `trimRight` / `trimLeft`).
 - **Sentinel formatting**: `std.fmt.bufPrintSentinel(&buf, fmt, args, 0)` (replacing `bufPrintZ`).
-- **Deep reference & example**: Read `docs/ZIG_017_DOSSIER.md` for `0.17.0` stdlib rules and `themes/Magnetar_Minimal.zig` for a complete reference theme.
+- **Deep reference & example**: Read `docs/ZIG_017_DOSSIER.md` for `0.17.0` stdlib rules and `themes/Echo.zig` for a complete reference theme.
 
 ---
 

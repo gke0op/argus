@@ -4,7 +4,7 @@
 // Single-command compiler, benchmark, memory-audit, stride-canary, NaN-check,
 // and PNG-export harness for native Zig Argus themes:
 //
-//   zig run -O ReleaseFast -lc src/theme_harness.zig -- themes/Magnetar_Minimal.zig --frames 120 --out /tmp/magnetar_minimal.png
+//   zig run -O ReleaseFast -lc src/theme_harness.zig -- themes/Echo.zig --frames 120 --out /tmp/echo.png
 // ============================================================================
 
 const std = @import("std");

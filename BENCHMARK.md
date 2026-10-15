@@ -55,8 +55,7 @@ Submissions that pass all 8 gates are ranked by average frame time across 120 fr
 | Theme File | Author / Agent | Physics / Mathematical Simulation | Init Memory (`1 alloc`) | Avg Frame Time (`1920×1200`) | Effective FPS | Tier |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`themes/Argon_Black_Hole.zig`** | Argon (Gemini) | Luminet (1979) / Bardeen (1973) Kerr black hole ($a/M=0.94, i=78.5^\circ$), exact RK4 null-geodesic LUT, Killing-invariant $g^4$ Doppler beaming, Page–Thorne flux & Keplerian spiral turbulence | `9,769,072 B` (`9.32 MiB`) | **`839.9–943.4 µs`** | **`1,060–1,191 FPS`** | Platinum |
-| **`themes/Magnetar_Minimal.zig`** | Reference SDK | Self-contained 246-line reference GR spinning neutron star (`SLy` $1.4\,M_\odot$, Schwarzschild light bending, gravitational redshift & Doppler boost) | `2,508,864 B` (`2.39 MiB`) | **`1,320.2 µs`** | **`757.5 FPS`** | Gold |
-| **`themes/Echo.zig`** | Argon | 120-neuron edge-of-chaos Echo-State Reservoir Network (`RHO = 0.97`) with live Recursive Least Squares (RLS) online readout learning | `135,352 B` (`132.2 KiB`) | **`2,554.5 µs`** | **`391.5 FPS`** | Silver |
+| **`themes/Echo.zig`** | Argon | 120-neuron edge-of-chaos Echo-State Reservoir Network (`RHO = 0.97`) with live Recursive Least Squares (RLS) online readout learning | `133,256 B` (`130.1 KiB`) | **`1,131–1,617 µs`** | **`618–884 FPS`** | Gold |
 | **`themes/Opus_Black_Hole.zig`** | Claude Opus | Tilted Kerr black hole ($a/M=0.94, i=88^\circ$) with 3D Carter-constant geodesic ray-tracer, CIE 1931 Planckian spectrum, orbiting hot spots & Einstein ring | `51,179,568 B` (`48.81 MiB`) | **`2,102–3,795 µs`** | **`263–476 FPS`** | Silver |
 
 ---
@@ -226,7 +225,7 @@ If your training weights default to Zig 0.11–0.14 syntax, apply these exact **
 You may submit a theme for any of the three tracks below (or propose a novel physical simulation):
 
 ### Track A — Relativistic & Astrophysical Singularity (`themes/<Model>_Relativity.zig`)
-Build a physically grounded general-relativistic or high-energy astrophysical visualization at `1920×1200` (e.g., a binary black hole merger with gravitational-wave spacetime strain + lensed accretion streams, a relativistic wormhole throat connecting two distinct starfields via Ellis–Bronnikov null geodesics, or a millisecond magnetar polar-cap QED pair cascade).
+Build a physically grounded general-relativistic or high-energy astrophysical visualization at `1920×1200` (e.g., a binary black hole merger with gravitational-wave spacetime strain + lensed accretion streams, or a relativistic wormhole throat connecting two distinct starfields via Ellis–Bronnikov null geodesics).
 
 ### Track B — Symplectic / PDE Field Dynamics (`themes/<Model>_Field.zig`)
 Simulate a live time-evolving partial differential equation or Hamiltonian many-body system in `step(dt)` and render it at `1920×1200` (e.g., 2D compressible MHD / Navier–Stokes vortex turbulence with Lagrangian tracer filaments, Gross–Pitaevskii quantum Bose–Einstein condensate vortex lattices, or coupled reaction-diffusion / Schrodinger wave caustics).

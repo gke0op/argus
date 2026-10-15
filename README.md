@@ -16,4 +16,4 @@ make test                                 # run the test suites
 make harness THEME=themes/Echo.zig        # verify and benchmark a theme headlessly
 ```
 
-Write your own theme: see `themes/argus_theme_sdk.zig` and `themes/Magnetar_Minimal.zig`.
+Write your own theme: see `themes/argus_theme_sdk.zig` and `themes/Echo.zig`.

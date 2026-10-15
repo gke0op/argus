@@ -7,7 +7,10 @@
 // a slow two-tone signal. Neurons sit on a golden-angle spiral; warm = positive
 // state, cool = negative. Each neuron's strongest live synapse is drawn.
 // The readout learns live (recursive least squares) to predict the input
-// DELAY ticks ahead: along the bottom, faint = truth, bright = prediction.
+// DELAY ticks ahead. Each neuron is one orb driven by a single "life" level
+// (its state, how fast it is moving, how much the readout is listening to it
+// right now): size, glow and the white-hot centre all rise and fall together.
+// Everything else is black.
 //
 // Contract: 1 allocation at init, 0 after; no clocks/I/O; draws via stride.
 // Deterministic: fixed seed, own PRNG, no stdlib randomness.
@@ -22,7 +25,6 @@ const K: usize = 6;
 const RHO: f32 = 0.97;
 const LEAK: f32 = 0.18;
 const GAIN: f32 = 1.8;
-const VOICE: usize = 320;
 const DELAY: usize = 24; // forecast horizon in ticks (~0.8 s of signal time)
 // lambda = 1: no forgetting. With lambda < 1, P winds up along the many weakly
 // excited state directions and overflows after minutes; a wallpaper runs for days.
@@ -34,7 +36,9 @@ const PHI: f64 = 1.6180339887498949;
 
 const WARM = [3]f32{ 255.0, 168.0, 82.0 };
 const COOL = [3]f32{ 92.0, 162.0, 255.0 };
-const VOICE_COL = [3]f32{ 150.0, 190.0, 255.0 };
+const NUCLEUS = [3]f32{ 255.0, 244.0, 228.0 };
+// Forecast-error smoothing per tick (~3 s of signal time).
+const ERR_EMA: f64 = 0.01;
 
 const Rng = struct {
     s: u64,
@@ -134,19 +138,42 @@ fn addDot(buf: []u32, stride: usize, w: usize, h: usize, cx: f32, cy: f32, r_cor
     }
 }
 
-/// Draws the newest `count` samples of a ring buffer, right-aligned to `span` slots.
-fn trace(buf: []u32, stride: usize, w: usize, h: usize, ring: *const [VOICE]f32, head: usize, count: usize, span: usize, base: f32, amp: f32, step_x: f32, col: [3]f32) void {
-    if (count < 2 or span < count) return;
-    const start = (head + VOICE - count) % VOICE;
-    const off = span - count;
-    var prev_x = @as(f32, @floatFromInt(off)) * step_x;
-    var prev_y = base - amp * ring[start];
-    for (1..count) |k| {
-        const nxp = @as(f32, @floatFromInt(off + k)) * step_x;
-        const nyp = base - amp * ring[(start + k) % VOICE];
-        addLine(buf, stride, w, h, prev_x, prev_y, nxp, nyp, col[0], col[1], col[2]);
-        prev_x = nxp;
-        prev_y = nyp;
+/// One orb: halo, body and a white-hot centre, all scaled by the same `life` in [0, 1].
+fn addNeuron(buf: []u32, stride: usize, w: usize, h: usize, cx: f32, cy: f32, sc: f32, life: f32, col: [3]f32) void {
+    const body = (2.0 + 4.0 * life) * sc;
+    const halo = (4.0 + 12.0 * life) * sc;
+    const k_body = 0.3 + 0.5 * life;
+    const k_halo = 0.06 + 0.24 * life;
+    const k_hot = 0.2 + 0.8 * life;
+    const hot = [3]f32{ 0.4 * col[0] + 0.6 * NUCLEUS[0], 0.4 * col[1] + 0.6 * NUCLEUS[1], 0.4 * col[2] + 0.6 * NUCLEUS[2] };
+    const ext = @ceil(halo) + 1.0;
+    const x_lo = toI(cx - ext);
+    const x_hi = toI(cx + ext);
+    const y_lo = toI(cy - ext);
+    const y_hi = toI(cy + ext);
+    var y = y_lo;
+    while (y <= y_hi) : (y += 1) {
+        var x = x_lo;
+        while (x <= x_hi) : (x += 1) {
+            const fx = @as(f32, @floatFromInt(x)) - cx;
+            const fy = @as(f32, @floatFromInt(y)) - cy;
+            const d = @sqrt(fx * fx + fy * fy);
+            if (d > halo) continue;
+            const q = 1.0 - d / halo;
+            var r = col[0] * k_halo * q * q;
+            var g = col[1] * k_halo * q * q;
+            var b = col[2] * k_halo * q * q;
+            const edge = math.clamp(body + 0.5 - d, 0.0, 1.0);
+            if (edge > 0.0) {
+                // Centre blends from the body colour to white-hot, continuously, with no inner rim.
+                const c = 1.0 - math.clamp(d / body, 0.0, 1.0);
+                const m = k_hot * @sqrt(c);
+                r += edge * ((1.0 - m) * col[0] * k_body + m * hot[0]);
+                g += edge * ((1.0 - m) * col[1] * k_body + m * hot[1]);
+                b += edge * ((1.0 - m) * col[2] * k_body + m * hot[2]);
+            }
+            addPx(buf, stride, w, h, x, y, r, g, b);
+        }
     }
 }
 
@@ -156,6 +183,7 @@ pub const State = struct {
     scale: f64,
     t: f64,
     x: [N]f32,
+    dx: [N]f32, // last tick's change in state: how hard each neuron is firing
     src: [N][K]u8,
     wt: [N][K]f32,
     w_in: [N]f32,
@@ -164,11 +192,7 @@ pub const State = struct {
     xh: [DELAY + 1][N]f32,
     xh_head: usize,
     steps: u64,
-    truth: [VOICE]f32,
-    pred: [VOICE]f32,
-    pred_len: usize,
-    voice_head: usize,
-    voice_len: usize,
+    err: f64, // smoothed squared forecast error
 
     /// Exactly one allocation; every table lives inline in State.
     pub fn init(alloc: std.mem.Allocator, w: usize, h: usize, scale: f64) !*State {
@@ -179,6 +203,7 @@ pub const State = struct {
             .scale = scale,
             .t = 0.0,
             .x = @splat(0.0),
+            .dx = @splat(0.0),
             .src = undefined,
             .wt = undefined,
             .w_in = undefined,
@@ -187,11 +212,7 @@ pub const State = struct {
             .xh = @splat(@splat(0.0)),
             .xh_head = 0,
             .steps = 0,
-            .truth = @splat(0.0),
-            .pred = @splat(0.0),
-            .pred_len = 0,
-            .voice_head = 0,
-            .voice_len = 0,
+            .err = 1.0,
         };
         var rng = Rng{ .s = 7 };
         const w_scale: f32 = RHO / (@sqrt(@as(f32, @floatFromInt(K))) * 0.5774);
@@ -228,6 +249,7 @@ pub const State = struct {
             for (0..K) |k| a += self.wt[i][k] * self.x[self.src[i][k]];
             nx[i] = (1.0 - LEAK) * self.x[i] + LEAK * tanh32(a);
         }
+        for (0..N) |i| self.dx[i] = nx[i] - self.x[i];
         self.x = nx;
 
         // Remember x(t); the oldest slot holds x(t - DELAY).
@@ -251,6 +273,7 @@ pub const State = struct {
                 yhat += self.w_out[i] * xd[i];
             }
             const e = @as(f64, u) - yhat;
+            self.err += ERR_EMA * (@min(e * e, 4.0) - self.err);
             if (den > 1.0e-12 and math.isFinite(den) and math.isFinite(yhat)) {
                 const inv = 1.0 / den;
                 for (0..N) |i| self.w_out[i] += px[i] * inv * e;
@@ -260,15 +283,10 @@ pub const State = struct {
                 }
             } else {
                 self.resetReadout();
-                yhat = 0.0;
+                self.err = 1.0;
             }
         }
 
-        self.truth[self.voice_head] = u;
-        self.pred[self.voice_head] = @floatCast(math.clamp(yhat, -1.5, 1.5));
-        self.voice_head = (self.voice_head + 1) % VOICE;
-        if (self.voice_len < VOICE) self.voice_len += 1;
-        if (ready and self.pred_len < VOICE) self.pred_len += 1;
         self.steps += 1;
         self.t += dt * SIM_RATE;
     }
@@ -277,6 +295,8 @@ pub const State = struct {
         if (!math.isFinite(self.t)) return true;
         for (self.x) |v| if (!math.isFinite(v)) return true;
         for (self.w_out) |v| if (!math.isFinite(v)) return true;
+        if (!math.isFinite(self.err)) return true;
+        for (self.dx) |v| if (!math.isFinite(v)) return true;
         return false;
     }
 
@@ -287,19 +307,16 @@ pub const State = struct {
         const h: usize = @min(self.h, buf.len / stride);
         if (h == 0) return;
 
-        // Background: a faint vertical gradient, deep navy to violet.
-        const hf: f32 = @floatFromInt(h);
-        for (0..h) |yy| {
-            const f = @as(f32, @floatFromInt(yy)) / hf;
-            const bg = sdk.packRGBA(sat(4.0 + 5.0 * f), sat(6.0 + 3.0 * f), sat(14.0 + 10.0 * f));
-            @memset(buf[yy * stride .. yy * stride + w], bg);
-        }
+        // Every pixel that is not part of the network is off.
+        const black = sdk.packRGBA(0, 0, 0);
+        for (0..h) |yy| @memset(buf[yy * stride .. yy * stride + w], black);
 
+        const hf: f32 = @floatFromInt(h);
         const wf: f32 = @floatFromInt(w);
         const sc: f32 = math.clamp(@as(f32, @floatCast(self.scale)), 1.0, 4.0);
         const cx = wf * 0.5;
-        const cy = hf * 0.44;
-        const R = @min(wf, hf) * 0.36;
+        const cy = hf * 0.5;
+        const R = @min(wf, hf) * 0.42;
         const rot: f32 = @floatCast(@mod(0.02 * self.t, 2.0 * math.pi));
 
         var px: [N]f32 = undefined;
@@ -328,25 +345,35 @@ pub const State = struct {
             const signed = self.wt[i][best] * self.x[j];
             const col = if (signed > 0.0) WARM else COOL;
             const inten = @min(@sqrt(best_s) * 0.6, 1.0) * 0.55;
-            addLine(buf, stride, w, h, px[j], py[j], px[i], py[i], col[0] * inten, col[1] * inten, col[2] * inten);
+            // Stop at the orbs' edges so synapses never cut across a neuron's body.
+            const lx = px[i] - px[j];
+            const ly = py[i] - py[j];
+            const len = @sqrt(lx * lx + ly * ly);
+            const gap = 7.0 * sc;
+            if (len <= 2.0 * gap) continue;
+            const ux = lx / len * gap;
+            const uy = ly / len * gap;
+            addLine(buf, stride, w, h, px[j] + ux, py[j] + uy, px[i] - ux, py[i] - uy, col[0] * inten, col[1] * inten, col[2] * inten);
         }
 
-        // Neurons: soft halo plus bright core, size and glow tracking |state|.
+        // Live readout share of each neuron, and its firing rate, both normalized to the busiest.
+        var c_max: f32 = 1.0e-9;
+        var d_max: f32 = 1.0e-9;
+        for (0..N) |i| {
+            c_max = @max(c_max, @abs(@as(f32, @floatCast(self.w_out[i])) * self.x[i]));
+            d_max = @max(d_max, @abs(self.dx[i]));
+        }
+        const conf: f32 = @floatCast(math.clamp(1.0 - @sqrt(self.err) / 0.5, 0.0, 1.0));
+
+        // Neurons: one life level per neuron drives the whole orb.
         for (0..N) |i| {
             const v = self.x[i];
             const m = @sqrt(@min(@abs(v), 1.0));
-            const col = if (v > 0.0) WARM else COOL;
-            const kc = 0.35 + 0.65 * m;
-            const kh = m * 0.25;
-            addDot(buf, stride, w, h, px[i], py[i], (1.5 + 3.5 * m) * sc, (4.0 + 12.0 * m) * sc, .{ col[0] * kc, col[1] * kc, col[2] * kc }, .{ col[0] * kh, col[1] * kh, col[2] * kh });
+            const fire = @sqrt(@abs(self.dx[i]) / d_max);
+            const heard = @sqrt(@abs(@as(f32, @floatCast(self.w_out[i])) * v) / c_max) * (0.3 + 0.7 * conf);
+            const life = math.clamp(0.45 * m + 0.3 * fire + 0.4 * heard, 0.0, 1.0);
+            addNeuron(buf, stride, w, h, px[i], py[i], sc, life, if (v > 0.0) WARM else COOL);
         }
-
-        // Along the bottom: faint = the true signal, bright = the learned forecast of it.
-        const base = hf * 0.9;
-        const amp = hf * 0.05;
-        const step_x = wf / @as(f32, @floatFromInt(VOICE));
-        trace(buf, stride, w, h, &self.truth, self.voice_head, self.voice_len, self.voice_len, base, amp, step_x, .{ VOICE_COL[0] * 0.35, VOICE_COL[1] * 0.35, VOICE_COL[2] * 0.35 });
-        trace(buf, stride, w, h, &self.pred, self.voice_head, self.pred_len, self.voice_len, base, amp, step_x, .{ 255.0 * 0.95, 200.0 * 0.95, 140.0 * 0.95 });
     }
 };
 

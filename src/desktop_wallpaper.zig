@@ -1860,13 +1860,18 @@ test "Observatory multi-Space engine: default Spaces, shader hot-compilation and
     // Verify Kerr black hole shader populated non-zero RGBA pixels
     try std.testing.expect(obs.pixels[(CANVAS_H / 2) * CANVAS_W + (CANVAS_W / 2 - 120)] != 0);
 
-    // Verify stateful SDK theme hot-compilation (`themes/Magnetar_Minimal.zig`)
-    const compiled_sdk = obs.spaces[3].compileAndLoadShader(3, "themes/Magnetar_Minimal.zig");
+    // Verify stateful SDK theme hot-compilation (`themes/Echo.zig`)
+    const compiled_sdk = obs.spaces[3].compileAndLoadShader(3, "themes/Echo.zig");
     try std.testing.expect(compiled_sdk);
     try std.testing.expect(obs.spaces[3].theme_state != null);
     @memset(&obs.pixels, 0);
     obs.renderPixelFrameForSpace(3, 0.25);
-    try std.testing.expect(obs.pixels[(CANVAS_H / 2) * CANVAS_W + (CANVAS_W / 2)] != 0);
+    // Echo's background is black, so look for any lit (non-black RGB) pixel.
+    var lit: usize = 0;
+    for (obs.pixels) |p| {
+        if (p & 0x00FF_FFFF != 0) lit += 1;
+    }
+    try std.testing.expect(lit > 0);
 
     // Verify persistent state serialization & mode parsing
     var conf_buf: [2048]u8 = undefined;
