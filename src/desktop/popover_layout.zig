@@ -77,13 +77,14 @@ pub const ROW_A_Y: f64 = 40.0; // top of the first control row
 pub const ROW_B_Y: f64 = 66.0; // top of the second
 pub const ROW_H: f64 = 22.0;
 
-// Mini preview of the selected Space, the same size as a strip thumbnail: clicking it goes back.
-pub const preview = Rect{ .x = 16, .y = ROW_A_Y - 2, .w = 80, .h = 50 };
+// Mini preview of the selected Space: exactly the strip's first thumbnail slot, so the two faces
+// line up pixel for pixel across the flip. Clicking it goes back.
+pub const preview: Rect = thumb(0, 0.0);
 
 // Left block: the selected Space's theme, and speed.
-pub const LX: f64 = 108.0;
+pub const LX: f64 = 116.0;
 pub const space_btn = Rect{ .x = LX - 4, .y = ROW_A_Y, .w = 62, .h = ROW_H };
-pub const stepper = Rect{ .x = LX + 62, .y = ROW_A_Y, .w = 172, .h = ROW_H };
+pub const stepper = Rect{ .x = LX + 62, .y = ROW_A_Y, .w = 164, .h = ROW_H };
 pub const stepper_prev = Rect{ .x = stepper.x, .y = stepper.y, .w = 32, .h = stepper.h };
 pub const stepper_next = Rect{ .x = stepper.x + stepper.w - 32, .y = stepper.y, .w = 32, .h = stepper.h };
 pub const slider = Rect{ .x = LX + 62, .y = ROW_B_Y, .w = 140, .h = ROW_H };
@@ -253,6 +254,8 @@ test "popover layout: every control hits where it is drawn, inside the box" {
     try std.testing.expectEqual(Hit.back, hitSettings(30, 18).?);
     try std.testing.expectEqual(Hit.back, hitSettings(preview.x + preview.w * 0.5, preview.y + preview.h * 0.5).?);
     try std.testing.expect(preview.x + preview.w < space_btn.x and preview.y + preview.h <= SPACES_H - 8);
+    const t0 = thumb(0, 0.0);
+    try std.testing.expect(preview.x == t0.x and preview.y == t0.y and preview.w == t0.w and preview.h == t0.h);
     try std.testing.expectEqual(Hit.quit, hitSettings(W - 20, 18).?);
     try std.testing.expectEqual(Hit.next_space, hitSettings(LX + 10, ROW_A_Y + 10).?);
     try std.testing.expectEqual(Hit.prev_theme, hitSettings(stepper.x + 10, ROW_A_Y + 10).?);

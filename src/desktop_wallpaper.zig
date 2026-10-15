@@ -900,25 +900,28 @@ const MacBridge = struct {
             const sp = &self.obs.spaces[idx];
             const r = pl.thumb(idx, self.strip_scroll);
             if (r.x + r.w < clip.x or r.x > clip.x + clip.w) continue; // scrolled out of view
-            const is_active = (idx == self.obs.active_space_idx);
             const is_drag_hover = (self.obs.drag_hover_idx != null and self.obs.drag_hover_idx.? == idx);
-
-            // Bare 16:10 Texture Frame (actual CGImage texture, zero sheen/blur overlays)
-            self.drawSpaceThumbnail(ctx, H, r.x, r.y, r.w, r.h, sp);
-            if (paused and sp.cg_image != null) self.fillR(ctx, H, r, 4.5, .{ 0.0, 0.0, 0.0, 0.35 });
-
-            const ring = pl.Rect{ .x = r.x - 1.0, .y = r.y - 1.0, .w = r.w + 2.0, .h = r.h + 2.0 };
-            if (is_drag_hover) {
-                self.strokeR(ctx, H, ring, 5.0, 1.5, .{ 1.0, 1.0, 1.0, 1.0 });
-            } else if (is_active) {
-                self.strokeR(ctx, H, ring, 5.0, 1.2, .{ 0.92, 0.94, 0.98, 0.95 });
-            }
-
-            // Bare Roman Numeral (I..VIII) in the top-left corner inside the frame (no box, no effects)
-            const roman = romanNumeral(sp.index_1based);
-            const col: Rgba = if (is_active) .{ 1.0, 1.0, 1.0, 1.0 } else .{ 0.78, 0.80, 0.86, 0.92 };
-            self.drawLabel(ctx, H, r.x + 5.5, r.y + 4.0, roman, self.dict_small, col, .left);
+            self.drawStripThumb(ctx, H, r, sp, idx == self.obs.active_space_idx, is_drag_hover);
         }
+    }
+
+    /// One Space thumbnail as the strip shows it: the frame, dimmed while paused, a ring when it is
+    /// the highlighted Space (or a drop target), and its numeral.
+    fn drawStripThumb(self: *MacBridge, ctx: ?*anyopaque, H: f64, r: pl.Rect, sp: *const SpaceConfig, highlighted: bool, drag_hover: bool) void {
+        // Bare 16:10 Texture Frame (actual CGImage texture, zero sheen/blur overlays)
+        self.drawSpaceThumbnail(ctx, H, r.x, r.y, r.w, r.h, sp);
+        if (self.obs.paused and sp.cg_image != null) self.fillR(ctx, H, r, 4.5, .{ 0.0, 0.0, 0.0, 0.35 });
+
+        const ring = pl.Rect{ .x = r.x - 1.0, .y = r.y - 1.0, .w = r.w + 2.0, .h = r.h + 2.0 };
+        if (drag_hover) {
+            self.strokeR(ctx, H, ring, 5.0, 1.5, .{ 1.0, 1.0, 1.0, 1.0 });
+        } else if (highlighted) {
+            self.strokeR(ctx, H, ring, 5.0, 1.2, .{ 0.92, 0.94, 0.98, 0.95 });
+        }
+
+        // Bare Roman Numeral (I..VIII) in the top-left corner inside the frame (no box, no effects)
+        const col: Rgba = if (highlighted) .{ 1.0, 1.0, 1.0, 1.0 } else .{ 0.78, 0.80, 0.86, 0.92 };
+        self.drawLabel(ctx, H, r.x + 5.5, r.y + 4.0, romanNumeral(sp.index_1based), self.dict_small, col, .left);
     }
 
     // ---- Settings face --------------------------------------------------------------------
@@ -951,11 +954,9 @@ const MacBridge = struct {
         }
         self.drawLabel(ctx, H, W - 20.0, 11.5, "Quit", self.dict_small, C_MUTED, .right);
 
-        // Mini preview of the selected Space (click to go back), like its strip thumbnail.
-        const pv = pl.preview;
-        self.drawSpaceThumbnail(ctx, H, pv.x, pv.y, pv.w, pv.h, sp);
-        self.strokeR(ctx, H, .{ .x = pv.x - 1.0, .y = pv.y - 1.0, .w = pv.w + 2.0, .h = pv.h + 2.0 }, 5.0, 1.2, .{ 0.92, 0.94, 0.98, 0.95 });
-        self.drawLabel(ctx, H, pv.x + 5.5, pv.y + 4.0, romanNumeral(sp.index_1based), self.dict_small, .{ 1.0, 1.0, 1.0, 1.0 }, .left);
+        // Mini preview of the selected Space (click to go back): the strip's first slot, drawn by
+        // the same code as a selected strip thumbnail.
+        self.drawStripThumb(ctx, H, pl.preview, sp, true, false);
 
         // Row A, left: which Space (click to move on), and its theme stepper ‹ Name ›
         var sp_buf: [16]u8 = undefined;
