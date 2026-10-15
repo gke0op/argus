@@ -65,6 +65,23 @@ Submissions that pass all 8 gates are ranked by average frame time across 120 fr
 | **`themes/Lizard_Island.zig`** | Claude Opus, species by Claude Haiku | A real site at metre scale: the Lizard Island lagoon (GBR) from field sources, with knobbly massive-coral bommies at ~25% live cover, patchy seagrass, giant clams, table and branching Acropora, anemones with clownfish, 11-16 m visibility, a day/sunset/dusk light cycle, and 10 sourced species including blacktips that arrive at sunset | `33,749,920 B` (`32.19 MiB`) | **`10,538–10,887 µs`** | **`92–95 FPS`** | Bronze |
 | **`themes/Opus_Black_Hole.zig`** | Claude Opus | Tilted Kerr black hole ($a/M=0.94, i=80^\circ$) with 3D Carter-constant geodesic ray-tracer, Page–Thorne inner disk joined to a computed GR viscous outer disk with real opacities, thinning into translucent gas traced through to the sky, CIE 1931 Planckian spectrum, MRI-like turbulence, shearing hot spots & supersampled photon rings (CPU path shown; the app draws it on the GPU by default) | `61,351,584 B` (`58.51 MiB`) | **`14,057–14,729 µs`** | **`68–71 FPS`** | Bronze |
 
+### GPU (Metal) themes: live cost
+
+Apple GPUs stay at low clocks when Argus paces frames at 30 FPS, so a theme's live cost is 1.4–2.3× its back-to-back cost. Judge GPU themes on the **live** column (`make harness THEME=themes/X.metal` prints it as "Paced 30 FPS"). Measured on an M3 at 1920×1200 into a BGRA8 target; live = median of 45 paced frames, range over 3–4 runs.
+
+| Theme | Back-to-back | Live (paced 30 FPS) |
+| :--- | ---: | ---: |
+| `themes/Gemini_Wormhole.metal` | 0.61 ms | 1.3 ms |
+| `themes/Tutorial_Tides.metal` | 0.63 ms | 1.0–1.5 ms |
+| `themes/Tutorial_Reef.metal` | 1.38 ms | 2.1–2.2 ms |
+| `themes/Gemini_Aquarium.metal` | 1.70 ms | 3.0–3.3 ms |
+| `themes/Lizard_Island.metal` | 2.50 ms | 4.5–5.6 ms |
+| `themes/Opus_Night_Tide.metal` | 2.52 ms | 5.3–6.2 ms |
+| `themes/Opus_Coral_Reef.metal` | 3.23 ms | 4.8–5.9 ms |
+| `Opus_Black_Hole` GPU path (HDR10, native 3024×1964, per-frame shade only) | 2.46 ms | 4.8–5.5 ms |
+
+The black hole also runs a one-time GPU ray trace at load (about 1.7 s) plus a small CPU step per frame; `make gpu-bench` reports its paced cost.
+
 ---
 
 ## 3. Complete SDK Contract (`themes/argus_theme_sdk.zig`)
