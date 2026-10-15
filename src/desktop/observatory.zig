@@ -2,16 +2,12 @@
 // ARGUS DESKTOP // src/desktop/observatory.zig
 //
 // Per-Space state for the multi-Space wallpaper engine: isolated native 1920x1200
-// (@2x Retina) theme buffers, 960x600 canvas snapshots, Mission Control order
-// reconciliation, and SDK theme dispatch.
+// (@2x Retina) theme buffers, Mission Control order reconciliation, and SDK theme dispatch.
 // ============================================================================
 
 const std = @import("std");
 const sc = @import("space_config.zig");
 
-pub const CANVAS_W = sc.CANVAS_W;
-pub const CANVAS_H = sc.CANVAS_H;
-pub const CANVAS_PIXELS = sc.CANVAS_PIXELS;
 pub const NATIVE_W = sc.NATIVE_W;
 pub const NATIVE_H = sc.NATIVE_H;
 pub const NATIVE_PIXELS = sc.NATIVE_PIXELS;
@@ -20,13 +16,12 @@ pub const MAX_SPACES = sc.MAX_SPACES;
 pub const SpaceConfig = sc.SpaceConfig;
 pub const SpaceMode = sc.SpaceMode;
 
-/// Background for Spaces with no theme frame to show (opaque RGBA8888, kCGBitmapByteOrder32Big).
-pub const CANVAS_CLEAR: u32 = 0xFF100805;
-
 pub const Observatory = struct {
     paused: bool = false,
     spin_mult: f64 = 1.0,
     phase_accum: f64 = 0.0,
+    /// Theme steps per drawn frame: 2 when the app halves its frame rate on battery, so motion keeps its speed.
+    steps_per_frame: u8 = 1,
     last_compute_us: f64 = 0.0,
 
     // Dynamically discovered macOS Desktop Spaces (never hardcoded!)
@@ -39,12 +34,7 @@ pub const Observatory = struct {
     drag_mouse_x: f64 = 0.0,
     drag_mouse_y: f64 = 0.0,
 
-    pixels: [CANVAS_PIXELS]u32,
-    native_pixels: [NATIVE_PIXELS]u32,
     space_native_pixels: [MAX_SPACES][NATIVE_PIXELS]u32,
-    /// Per-Space snapshot of the shared `pixels` canvas. Canvas modes render into `pixels`, then copy
-    /// here, so each Space layer can be handed to CoreAnimation zero-copy without aliasing.
-    space_canvas_pixels: [MAX_SPACES][CANVAS_PIXELS]u32,
     popover_pixels: [POPOVER_PIXELS]u32,
 
     pub fn init(allocator: std.mem.Allocator) !*Observatory {
@@ -52,6 +42,7 @@ pub const Observatory = struct {
         self.paused = false;
         self.spin_mult = 1.0;
         self.phase_accum = 0.0;
+        self.steps_per_frame = 1;
         self.last_compute_us = 0.0;
         self.n_spaces = 1;
         self.active_space_idx = 0;
@@ -62,12 +53,10 @@ pub const Observatory = struct {
         self.drag_mouse_y = 0.0;
 
         self.initSpacesDefault();
-        @memset(&self.pixels, CANVAS_CLEAR);
-        @memset(&self.native_pixels, CANVAS_CLEAR);
         @memset(&self.popover_pixels, 0x00000000);
-        // space_native_pixels / space_canvas_pixels are deliberately NOT touched here: the app's
-        // page_allocator returns zero-filled pages, and touching all MAX_SPACES buffers would commit
-        // ~184 MB for Spaces that never animate. Every shader load resets its own buffer instead.
+        // space_native_pixels is deliberately NOT touched here: the app's page_allocator returns
+        // zero-filled pages, and touching all MAX_SPACES buffers would commit ~74 MB for Spaces that
+        // never animate. Every shader load resets its own buffer instead.
         return self;
     }
 
@@ -86,12 +75,6 @@ pub const Observatory = struct {
         if (!self.spaces[space_idx].compileAndLoadShader(space_idx, path)) return false;
         self.resetSpaceNativeBuffer(space_idx);
         return true;
-    }
-
-    /// Copy the freshly rendered shared canvas into the Space's own snapshot buffer.
-    pub fn snapshotCanvasForSpace(self: *Observatory, space_idx: usize) void {
-        if (space_idx >= MAX_SPACES) return;
-        @memcpy(&self.space_canvas_pixels[space_idx], &self.pixels);
     }
 
     pub const SpaceOrderSyncResult = struct {
@@ -230,34 +213,6 @@ pub const Observatory = struct {
         return out_buf[0..pos];
     }
 
-    /// Fast 2x2 -> 1x1 mirror from `native_pixels` (1920x1200) to `pixels` (960x600).
-    fn syncDownsampledFromNative(self: *Observatory) void {
-        for (0..CANVAS_H) |y| {
-            const src_row = (y * 2) * NATIVE_W;
-            const dst_row = y * CANVAS_W;
-            for (0..CANVAS_W) |x| {
-                self.pixels[dst_row + x] = self.native_pixels[src_row + (x * 2)];
-            }
-        }
-    }
-
-    pub fn renderNativeShaderForSpace(self: *Observatory, space_idx: usize, phase_cycles: f64) bool {
-        const sp = &self.spaces[space_idx];
-        if (sp.mode != .custom_shader) return false;
-        if (sp.theme_state != null and sp.theme_step_fn != null and sp.theme_draw_fn != null) {
-            if (!self.paused) {
-                sp.theme_step_fn.?(sp.theme_state, 0.008 * self.spin_mult);
-            }
-            sp.theme_draw_fn.?(sp.theme_state, &self.native_pixels, NATIVE_PIXELS, NATIVE_W);
-            return true;
-        }
-        if (sp.custom_render_fn) |render_fn| {
-            render_fn(&self.native_pixels, @intCast(NATIVE_W), @intCast(NATIVE_H), phase_cycles, 0);
-            return true;
-        }
-        return false;
-    }
-
     pub fn renderNativeShaderForSpaceIsolated(self: *Observatory, space_idx: usize, phase_cycles: f64) bool {
         if (space_idx >= MAX_SPACES) return false;
         const sp = &self.spaces[space_idx];
@@ -265,7 +220,7 @@ pub const Observatory = struct {
         const dst_buf = &self.space_native_pixels[space_idx];
         if (sp.theme_state != null and sp.theme_step_fn != null and sp.theme_draw_fn != null) {
             if (!self.paused) {
-                sp.theme_step_fn.?(sp.theme_state, 0.008 * self.spin_mult);
+                for (0..self.steps_per_frame) |_| sp.theme_step_fn.?(sp.theme_state, 0.008 * self.spin_mult);
             }
             sp.theme_draw_fn.?(sp.theme_state, dst_buf, NATIVE_PIXELS, NATIVE_W);
             return true;
@@ -275,21 +230,5 @@ pub const Observatory = struct {
             return true;
         }
         return false;
-    }
-
-    pub fn renderPixelFrame(self: *Observatory, phase_cycles: f64) void {
-        self.renderPixelFrameForSpace(self.active_space_idx, phase_cycles);
-    }
-
-    /// Renders a Space into the shared 960x600 canvas: a theme frame (downsampled from native)
-    /// for shader Spaces, otherwise a clear background for picture/passthrough Spaces.
-    pub fn renderPixelFrameForSpace(self: *Observatory, space_idx: usize, phase_cycles: f64) void {
-        if (space_idx < MAX_SPACES and self.spaces[space_idx].mode == .custom_shader) {
-            if (self.renderNativeShaderForSpace(space_idx, phase_cycles)) {
-                self.syncDownsampledFromNative();
-                return;
-            }
-        }
-        @memset(&self.pixels, CANVAS_CLEAR);
     }
 };
