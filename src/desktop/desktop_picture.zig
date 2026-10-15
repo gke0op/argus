@@ -27,6 +27,8 @@ pub const URL_MAX: usize = 1024;
 /// Ticks a theme must run on the active Space before its still is taken (30 ticks = 1 s at 30 Hz),
 /// so the still is a developed frame, not the first one after a load.
 pub const SETTLE_TICKS: usize = 30;
+/// Unused stills are kept this long: a Space created from a themed Space keeps pointing at its file.
+pub const PRUNE_DAYS: i96 = 14;
 
 const STILLS_SUBDIR = "/Library/Application Support/Argus/Desktop Stills";
 const LEDGER_NAME = "ledger.tsv";
@@ -110,7 +112,7 @@ pub const Ledger = struct {
     pub fn serialize(self: *const Ledger, out: []u8) []const u8 {
         var pos: usize = 0;
         for (self.entries[0..self.n]) |*e| {
-            if (e.applied_sig == 0) continue; // only Spaces that still need restoring
+            if (e.orig_len == 0) continue;
             const w = std.fmt.bufPrint(out[pos..], "{s}\t{x}\t{s}\n", .{ e.uuid(), e.applied_sig, e.original() }) catch break;
             pos += w.len;
         }
@@ -127,7 +129,7 @@ pub const Ledger = struct {
             const sig_s = cols.next() orelse continue;
             const orig = cols.next() orelse "";
             const sig = std.fmt.parseInt(u64, sig_s, 16) catch continue;
-            if (sig == 0 or orig.len > URL_MAX) continue;
+            if (orig.len == 0 or orig.len > URL_MAX) continue;
             const e = self.findOrAdd(u) orelse continue;
             e.applied_sig = sig;
             e.setOriginal(orig);
@@ -386,6 +388,7 @@ pub const DesktopPictures = struct {
         if (!self.enabled and self.ledger.n == 0) return;
         std.Io.Dir.cwd().createDirPath(sc.g_io, dir) catch return;
         self.native = Native.load() orelse return;
+        self.pruneStills();
         self.ready = true;
     }
 
@@ -429,6 +432,20 @@ pub const DesktopPictures = struct {
         return std.mem.indexOf(u8, abs_url, "/Application%20Support/Argus/Desktop%20Stills/") != null;
     }
 
+    /// The user's own picture behind `cur` for the Space `space_uuid`. When `cur` is one of our stills
+    /// it may belong to another Space: macOS seeds a new Space with the picture of the Space it was
+    /// created from, so a Space made while Argus ran can show another Space's still. Then the owner's
+    /// recorded original is the picture that Space would have had.
+    fn originalFor(self: *DesktopPictures, space_uuid: []const u8, cur: []const u8) ?[]const u8 {
+        if (!self.isOurs(cur)) return cur;
+        if (self.ledger.find(space_uuid)) |e| {
+            if (e.orig_len > 0) return e.original();
+        }
+        const owner = stillOwner(cur) orelse return null;
+        const o = self.ledger.find(owner) orelse return null;
+        return if (o.orig_len > 0) o.original() else null;
+    }
+
     /// True on the tick a fresh frame should be published for the coming still: GPU Spaces only
     /// snapshot their frame after a load or while the menu is open, so the caller asks for one.
     pub fn wantsFreshFrame(self: *const DesktopPictures, frame: usize) bool {
@@ -468,7 +485,7 @@ pub const DesktopPictures = struct {
 
         if (sig == 0) {
             // Passthrough, or the feature is off: hand the Space back to the user's own picture.
-            if (self.ledger.find(space_uuid)) |e| self.restore(e, space_uuid);
+            self.restore(space_uuid);
             self.done = true;
             return;
         }
@@ -515,38 +532,59 @@ pub const DesktopPictures = struct {
         var cur_buf: [URL_MAX]u8 = undefined;
         // No readable picture to restore later (nil or non-file wallpaper): leave this Space alone.
         const cur = n.currentDesktopURL(&cur_buf) orelse return unlinkPath(job.path());
+        // First visit, the user picked a new picture since, or a Space seeded with another Space's still.
+        var orig_buf: [URL_MAX]u8 = undefined;
+        const orig_src = self.originalFor(job.uuid(), cur) orelse return unlinkPath(job.path());
+        @memcpy(orig_buf[0..orig_src.len], orig_src);
+        const orig = orig_buf[0..orig_src.len];
         const e = self.ledger.findOrAdd(job.uuid()) orelse return unlinkPath(job.path());
-        if (!self.isOurs(cur)) {
-            e.setOriginal(cur); // first visit, or the user picked a new picture since
-        } else if (e.orig_len == 0) {
-            return unlinkPath(job.path()); // our still with no recorded original: nothing safe to restore to
-        }
+        e.setOriginal(orig);
         var url_buf: [URL_MAX]u8 = undefined;
         const url = fileURL(job.path(), &url_buf) orelse return unlinkPath(job.path());
         if (!n.setDesktopURL(url)) return unlinkPath(job.path());
-        const old_sig = e.applied_sig;
         e.applied_sig = sig;
         self.saveLedger();
-        if (old_sig != 0 and old_sig != sig) self.deleteStill(job.uuid(), old_sig);
     }
 
-    fn restore(self: *DesktopPictures, e: *Entry, space_uuid: []const u8) void {
-        if (e.applied_sig == 0) return;
+    /// Hands the active Space back to the user's own picture if it shows one of our stills,
+    /// whether Argus set it there or macOS copied it in when the Space was created. Still files
+    /// are left in place: other Spaces may show the same file (they are pruned after PRUNE_DAYS).
+    fn restore(self: *DesktopPictures, space_uuid: []const u8) void {
         const n = &self.native.?;
         var cur_buf: [URL_MAX]u8 = undefined;
-        const cur = n.currentDesktopURL(&cur_buf);
-        // Only undo our own still; if the user chose another picture meanwhile, keep theirs.
-        if (cur == null or self.isOurs(cur.?)) {
-            if (e.orig_len > 0) _ = n.setDesktopURL(e.original());
+        if (n.currentDesktopURL(&cur_buf)) |cur| {
+            // Only undo our own still; if the user chose another picture meanwhile, keep theirs.
+            if (self.isOurs(cur)) {
+                if (self.originalFor(space_uuid, cur)) |orig| _ = n.setDesktopURL(orig);
+            }
         }
-        self.deleteStill(space_uuid, e.applied_sig);
-        e.applied_sig = 0;
-        self.saveLedger();
+        if (self.ledger.find(space_uuid)) |e| {
+            if (e.applied_sig != 0) {
+                e.applied_sig = 0;
+                self.saveLedger();
+            }
+        }
     }
 
-    fn deleteStill(self: *const DesktopPictures, space_uuid: []const u8, sig: u64) void {
-        var path_buf: [700]u8 = undefined;
-        if (self.stillPath(space_uuid, sig, &path_buf)) |p| unlinkPath(p);
+    /// Deletes stills older than PRUNE_DAYS that no Space is known to show. Startup only.
+    fn pruneStills(self: *const DesktopPictures) void {
+        var dir = std.Io.Dir.cwd().openDir(sc.g_io, self.stillsDir(), .{ .iterate = true }) catch return;
+        defer dir.close(sc.g_io);
+        const now_ns = std.Io.Clock.real.now(sc.g_io).nanoseconds;
+        var it = dir.iterate();
+        while (it.next(sc.g_io) catch null) |entry| {
+            if (entry.kind != .file or !std.mem.endsWith(u8, entry.name, ".png")) continue;
+            var applied = false;
+            for (self.ledger.entries[0..self.ledger.n]) |*e| {
+                if (e.applied_sig == 0) continue;
+                var nb: [UUID_MAX + 24]u8 = undefined;
+                const want = std.fmt.bufPrint(&nb, "{s}-{x}.png", .{ e.uuid(), e.applied_sig }) catch continue;
+                if (std.mem.eql(u8, want, entry.name)) applied = true;
+            }
+            if (applied) continue;
+            const st = dir.statFile(sc.g_io, entry.name, .{}) catch continue;
+            if (now_ns - st.mtime.nanoseconds > PRUNE_DAYS * std.time.ns_per_day) dir.deleteFile(sc.g_io, entry.name) catch {};
+        }
     }
 
     /// On quit: restore the active Space. Other Spaces cannot be reached through the public API
@@ -557,9 +595,18 @@ pub const DesktopPictures = struct {
         if (!self.ready) return;
         var ubuf: [UUID_MAX]u8 = @splat(0);
         const u = self.native.?.spaceUUID(space_id, &ubuf) orelse return;
-        if (self.ledger.find(u)) |e| self.restore(e, u);
+        self.restore(u);
     }
 };
+
+/// The Space UUID a still URL belongs to: stills are named `<space-uuid>-<sig hex>.png`.
+pub fn stillOwner(abs_url: []const u8) ?[]const u8 {
+    const slash = std.mem.lastIndexOfScalar(u8, abs_url, '/') orelse return null;
+    const name = abs_url[slash + 1 ..];
+    if (!std.mem.endsWith(u8, name, ".png")) return null;
+    const dash = std.mem.lastIndexOfScalar(u8, name, '-') orelse return null;
+    return if (dash > 0) name[0..dash] else null;
+}
 
 fn unlinkPath(path: []const u8) void {
     var z: [701]u8 = undefined;
@@ -605,24 +652,26 @@ test "still signature: passthrough is 0, themes change with path and mtime" {
     try std.testing.expect(stillSignature(&sp) != b);
 }
 
-test "ledger round-trips Spaces that still need restoring and drops restored ones" {
+test "ledger round-trips Spaces with an original, applied or restored" {
     var l: Ledger = .{};
     const e1 = l.findOrAdd("AAAA-1").?;
     e1.applied_sig = 0xbeef;
     e1.setOriginal("file:///Users/me/Pictures/Lake%20Tahoe.heic");
     const e2 = l.findOrAdd("BBBB-2").?;
-    e2.setOriginal("file:///x.png"); // applied_sig 0: already restored, not persisted
+    e2.setOriginal("file:///x.png"); // applied_sig 0: restored, but its original is kept for cloned Spaces
+    _ = l.findOrAdd("CCCC-3").?; // no original: not persisted
     try std.testing.expectEqual(e1, l.findOrAdd("AAAA-1").?);
 
     var buf: [4096]u8 = undefined;
     const text = l.serialize(&buf);
     var l2: Ledger = .{};
     l2.parse(text);
-    try std.testing.expectEqual(@as(usize, 1), l2.n);
+    try std.testing.expectEqual(@as(usize, 2), l2.n);
     const r = l2.find("AAAA-1").?;
     try std.testing.expectEqual(@as(u64, 0xbeef), r.applied_sig);
     try std.testing.expectEqualStrings("file:///Users/me/Pictures/Lake%20Tahoe.heic", r.original());
-    try std.testing.expect(l2.find("BBBB-2") == null);
+    try std.testing.expectEqual(@as(u64, 0), l2.find("BBBB-2").?.applied_sig);
+    try std.testing.expect(l2.find("CCCC-3") == null);
 }
 
 test "ledger evicts a restored entry when full, never one holding a still" {
@@ -638,6 +687,14 @@ test "ledger evicts a restored entry when full, never one holding a still" {
     try std.testing.expect(l.find("U4") != null);
     for (l.entries[0..l.n]) |*e| e.applied_sig = 1;
     try std.testing.expect(l.findOrAdd("NEWER") == null);
+}
+
+test "still owner is the Space UUID in the still's file name" {
+    try std.testing.expectEqualStrings(
+        "75F2A850-DE83-442F-952E-62D360F90EA9",
+        stillOwner("file:///Users/me/Library/Application%20Support/Argus/Desktop%20Stills/75F2A850-DE83-442F-952E-62D360F90EA9-8369291325f4e51a.png").?,
+    );
+    try std.testing.expect(stillOwner("file:///Users/me/Pictures/a.jpeg") == null);
 }
 
 test "file URLs percent-encode spaces and keep path separators" {
