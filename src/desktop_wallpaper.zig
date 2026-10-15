@@ -4,9 +4,6 @@ pub const sc = @import("desktop/space_config.zig");
 pub const obs_mod = @import("desktop/observatory.zig");
 const status_glyph = @import("desktop/status_glyph.zig");
 
-pub const CANVAS_W = sc.CANVAS_W;
-pub const CANVAS_H = sc.CANVAS_H;
-pub const CANVAS_PIXELS = sc.CANVAS_PIXELS;
 pub const NATIVE_W = sc.NATIVE_W;
 pub const NATIVE_H = sc.NATIVE_H;
 pub const NATIVE_PIXELS = sc.NATIVE_PIXELS;
@@ -73,6 +70,7 @@ const MsgSendRetCStr = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?[*:0]c
 const MsgSendInitRect = *const fn (?*anyopaque, ?*anyopaque, CGRect) callconv(.c) ?*anyopaque;
 const MsgSendInitImage = *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, CGSize) callconv(.c) ?*anyopaque;
 const MsgSendRetF64 = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) f64;
+const MsgSendRetBool = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) bool;
 
 const MacBridge = struct {
     obs: *Observatory,
@@ -163,11 +161,7 @@ const MacBridge = struct {
     NSURL: ?*anyopaque,
     desktop_level: isize,
     normal_window: bool,
-    desktop_bitmap_ctx: ?*anyopaque,
-    native_bitmap_ctx: ?*anyopaque,
-    native_bitmap_ctxs: [MAX_SPACES]?*anyopaque = @splat(null),
     native_data_providers: [MAX_SPACES]?*anyopaque = @splat(null),
-    canvas_data_providers: [MAX_SPACES]?*anyopaque = @splat(null),
     popover_win: ?*anyopaque,
     popover_layer: ?*anyopaque,
     popover_bitmap_ctx: ?*anyopaque,
@@ -188,6 +182,15 @@ const MacBridge = struct {
     cf_true: ?*const anyopaque,
     screen_locked: bool = false,
     sel_occlusion_state: ?*anyopaque,
+    // Battery / Low Power Mode: half frame rate, two theme steps per frame (polled once a second).
+    IOPSCopyPowerSourcesInfo: *const fn () callconv(.c) ?*anyopaque,
+    IOPSGetProvidingPowerSourceType: *const fn (?*anyopaque) callconv(.c) ?*anyopaque,
+    CFEqual: *const fn (?*const anyopaque, ?*const anyopaque) callconv(.c) bool,
+    cf_battery_power: ?*anyopaque,
+    msgRetBool: MsgSendRetBool,
+    proc_info: ?*anyopaque,
+    sel_low_power: ?*anyopaque,
+    low_power: bool = false,
     /// frame_idx + 1 of each Space's last rendered frame (0 = never), for warm-rate neighbors.
     last_render_tick: [MAX_SPACES]usize = @splat(0),
     perf_log: bool = false,
@@ -388,7 +391,7 @@ const MacBridge = struct {
             self.ensureSpaceWindow(idx);
             self.bindWindowToSpace(idx);
             if ((sync_res.moved_mask & (@as(u16, 1) << @intCast(idx))) != 0) {
-                // Non-picture Spaces wrap the slot's per-index CGDataProvider; release the old slot's
+                // Shader Spaces wrap the slot's per-index CGDataProvider; release the old slot's
                 // CGImage and re-render immediately into the new slot's buffer + provider.
                 if (self.obs.spaces[idx].mode != .picture) {
                     if (self.obs.spaces[idx].cg_image) |old_img| {
@@ -548,58 +551,33 @@ const MacBridge = struct {
             }
         }
 
-        // Every animated Space presents ONLY from a buffer it owns; never fall back to a shared one.
-        if (sp.mode == .custom_shader and self.native_data_providers[idx] == null) return;
-        if (sp.mode != .custom_shader and self.canvas_data_providers[idx] == null) return;
-
-        switch (sp.mode) {
-            .custom_shader => {
-                _ = self.obs.renderNativeShaderForSpaceIsolated(idx, self.obs.phase_accum);
-            },
-            .picture => {
-                self.obs.renderPixelFrameForSpace(idx, self.obs.phase_accum);
-            },
-            .passthrough => {
-                if (sp.cg_image) |old| {
-                    self.CGImageRelease(old);
-                    sp.cg_image = null;
-                }
-            },
+        // A picture Space whose image failed to load shows the window's black background.
+        if (sp.mode != .custom_shader) {
+            if (sp.cg_image) |old| {
+                self.msgId(layer, self.sel_set_contents, null);
+                self.CGImageRelease(old);
+                sp.cg_image = null;
+            }
+            return;
         }
 
-        const cg_img_opt = if (sp.mode == .custom_shader)
-            self.CGImageCreate(
-                NATIVE_W,
-                NATIVE_H,
-                8,
-                32,
-                NATIVE_W * 4,
-                self.color_space,
-                5 | (4 << 12),
-                self.native_data_providers[idx],
-                null,
-                false,
-                0,
-            )
-        else blk: {
-            // The shared obs.pixels canvas is reused by several Spaces in one tick, so it must never
-            // be handed to CoreAnimation directly (that aliased every canvas layer -> "rave strobe").
-            // Copy it into this Space's own buffer, then wrap THAT zero-copy (no vm_copy / COW).
-            self.obs.snapshotCanvasForSpace(idx);
-            break :blk self.CGImageCreate(
-                CANVAS_W,
-                CANVAS_H,
-                8,
-                32,
-                CANVAS_W * 4,
-                self.color_space,
-                5 | (4 << 12),
-                self.canvas_data_providers[idx],
-                null,
-                false,
-                0,
-            );
-        };
+        // Every animated Space presents ONLY from a buffer it owns; never fall back to a shared one.
+        if (self.native_data_providers[idx] == null) return;
+        _ = self.obs.renderNativeShaderForSpaceIsolated(idx, self.obs.phase_accum);
+
+        const cg_img_opt = self.CGImageCreate(
+            NATIVE_W,
+            NATIVE_H,
+            8,
+            32,
+            NATIVE_W * 4,
+            self.color_space,
+            5 | (4 << 12),
+            self.native_data_providers[idx],
+            null,
+            false,
+            0,
+        );
 
         if (cg_img_opt) |cg_img| {
             self.msgBool(self.CATransaction, self.sel_disable_actions, true);
@@ -618,6 +596,17 @@ const MacBridge = struct {
         defer self.CFRelease(dict);
         const v = self.CFDictionaryGetValue(dict, self.cf_key_screen_locked) orelse return false;
         return @intFromPtr(v) == @intFromPtr(self.cf_true);
+    }
+
+    /// True on battery power or in Low Power Mode.
+    pub fn isPowerConstrained(self: *MacBridge) bool {
+        if (self.proc_info) |pi| {
+            if (self.msgRetBool(pi, self.sel_low_power)) return true;
+        }
+        const info = self.IOPSCopyPowerSourcesInfo() orelse return false;
+        defer self.CFRelease(info);
+        const src = self.IOPSGetProvidingPowerSourceType(info) orelse return false;
+        return self.CFEqual(src, self.cf_battery_power);
     }
 
     /// True when any part of the Space's window is on screen (NSWindowOcclusionStateVisible).
@@ -904,8 +893,8 @@ const MacBridge = struct {
         if (w_px == 0 or h_px == 0) return null;
 
         // Bake at @2x Retina resolution (1920x1200) so wallpapers and thumbnails are razor-sharp
-        const bake_w: usize = CANVAS_W * 2;
-        const bake_h: usize = CANVAS_H * 2;
+        const bake_w: usize = NATIVE_W;
+        const bake_h: usize = NATIVE_H;
         const ctx = self.CGBitmapContextCreate(
             null,
             bake_w,
@@ -1281,10 +1270,15 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
         if (b.popover_visible) b.flushPopoverLayer();
     }
 
-    // Once per second: is the lock screen up? (Display sleep is handled above.)
+    // Once per second: is the lock screen up (display sleep is handled above), and are we on battery or
+    // in Low Power Mode? Power-constrained, every other tick is skipped (15 FPS) and themes take two
+    // steps per drawn frame, so motion keeps its speed.
     if ((b.frame_idx % 30) == 0) {
         b.screen_locked = b.isScreenLocked();
+        b.low_power = b.isPowerConstrained();
+        b.obs.steps_per_frame = if (b.low_power) 2 else 1;
     }
+    const skip_tick = b.low_power and (b.frame_idx % 2) == 1;
 
     // Render only what can be seen. The active Space renders at 30 FPS while its window is on screen.
     // Its nearest animated left/right neighbors (scanning past passthrough / picture Spaces) stay warm
@@ -1295,8 +1289,10 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     const active_is_ours = active_idx < b.obs.n_spaces and
         b.obs.spaces[active_idx].space_id == b.obs.active_space_id;
     var rendered_any = false;
-    if (!b.obs.paused and active_is_ours and !b.screen_locked) {
-        b.obs.phase_accum += (1.0 / 150.0) * b.obs.spin_mult;
+    if (skip_tick) {
+        // Battery: this tick's frame is folded into the next one's second step.
+    } else if (!b.obs.paused and active_is_ours and !b.screen_locked) {
+        b.obs.phase_accum += (1.0 / 150.0) * b.obs.spin_mult * @as(f64, @floatFromInt(b.obs.steps_per_frame));
 
         if (isAnimatedSpaceMode(b.obs.spaces[active_idx].mode)) {
             const t0 = std.Io.Clock.awake.now(g_io);
@@ -1333,8 +1329,8 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     }
 
     if (b.perf_log and (b.frame_idx % 30) == 29) {
-        std.debug.print("[perf] t={d} active={d} ours={} locked={} visible=0x{x:0>2} renders/s:", .{
-            b.frame_idx / 30, active_idx, active_is_ours, b.screen_locked, b.perf_visible,
+        std.debug.print("[perf] t={d} active={d} ours={} locked={} low_power={} visible=0x{x:0>2} renders/s:", .{
+            b.frame_idx / 30, active_idx, active_is_ours, b.screen_locked, b.low_power, b.perf_visible,
         });
         for (0..b.obs.n_spaces) |idx| std.debug.print(" {d}", .{b.perf_renders[idx]});
         std.debug.print(" active_us={d:.0}\n", .{b.obs.last_compute_us});
@@ -1420,7 +1416,7 @@ pub fn main(init: std.process.Init) !void {
         const loaded = obs.loadShaderIntoSpace(0, theme_path);
         const t0 = std.Io.Clock.awake.now(g_io);
         for (0..20) |f| {
-            obs.renderPixelFrame(@as(f64, @floatFromInt(f)) / 90.0);
+            _ = obs.renderNativeShaderForSpaceIsolated(0, @as(f64, @floatFromInt(f)) / 90.0);
         }
         const elapsed_ns: u64 = @intCast(@max(@as(i96, 0), t0.durationTo(std.Io.Clock.awake.now(g_io)).nanoseconds));
         const avg_us = (@as(f64, @floatFromInt(elapsed_ns)) / 20.0) / 1000.0;
@@ -1452,6 +1448,9 @@ pub fn main(init: std.process.Init) !void {
     const libcf = std.c.dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", .{ .LAZY = true }) orelse return error.CFLoadFailed;
     const libct = std.c.dlopen("/System/Library/Frameworks/CoreText.framework/CoreText", .{ .LAZY = true }) orelse return error.CTLoadFailed;
     const libimageio = std.c.dlopen("/System/Library/Frameworks/ImageIO.framework/ImageIO", .{ .LAZY = true }) orelse return error.ImageIOLoadFailed;
+    const libiokit = std.c.dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", .{ .LAZY = true }) orelse return error.IOKitLoadFailed;
+    const IOPSCopyPowerSourcesInfo: *const fn () callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libiokit, "IOPSCopyPowerSourcesInfo") orelse return error.SymbolMissing));
+    const IOPSGetProvidingPowerSourceType: *const fn (?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libiokit, "IOPSGetProvidingPowerSourceType") orelse return error.SymbolMissing));
     const libskylight = std.c.dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", .{ .LAZY = true }) orelse return error.SkyLightLoadFailed;
     _ = std.c.dlopen("/System/Library/Frameworks/AppKit.framework/AppKit", .{ .LAZY = true }) orelse return error.AppKitLoadFailed;
     _ = std.c.dlopen("/System/Library/Frameworks/QuartzCore.framework/QuartzCore", .{ .LAZY = true }) orelse return error.QuartzLoadFailed;
@@ -1516,6 +1515,7 @@ pub fn main(init: std.process.Init) !void {
     const kCTFontAttributeName_ptr: *const ?*const anyopaque = @ptrCast(@alignCast(std.c.dlsym(libct, "kCTFontAttributeName") orelse return error.SymbolMissing));
     const kCTForegroundColorFromContext_ptr: *const ?*const anyopaque = @ptrCast(@alignCast(std.c.dlsym(libct, "kCTForegroundColorFromContextAttributeName") orelse return error.SymbolMissing));
     const kCFBooleanTrue_ptr: *const ?*const anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcf, "kCFBooleanTrue") orelse return error.SymbolMissing));
+    const CFEqual: *const fn (?*const anyopaque, ?*const anyopaque) callconv(.c) bool = @ptrCast(@alignCast(std.c.dlsym(libcf, "CFEqual") orelse return error.SymbolMissing));
 
     const CGImageSourceCreateWithURL: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libimageio, "CGImageSourceCreateWithURL") orelse return error.SymbolMissing));
     const CGImageSourceCreateWithData: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libimageio, "CGImageSourceCreateWithData") orelse return error.SymbolMissing));
@@ -1679,40 +1679,10 @@ pub fn main(init: std.process.Init) !void {
     // 6. Create CoreGraphics Bitmap Contexts (Native Display ColorSpace + kCGImageAlphaNoneSkipLast = 5
     //    on full-screen wallpaper contexts so QuartzCore skips CPU vUnpremultiplyData & TRC conversions!)
     const color_space = CGDisplayCopyColorSpace(display_id) orelse CGColorSpaceCreateDeviceRGB();
-    const desktop_bitmap_ctx = CGBitmapContextCreate(
-        @ptrCast(&obs.pixels),
-        CANVAS_W,
-        CANVAS_H,
-        8,
-        CANVAS_W * 4,
-        color_space,
-        5 | (4 << 12),
-    ) orelse return error.BitmapContextFailed;
-
-    const native_bitmap_ctx = CGBitmapContextCreate(
-        @ptrCast(&obs.native_pixels),
-        NATIVE_W,
-        NATIVE_H,
-        8,
-        NATIVE_W * 4,
-        color_space,
-        5 | (4 << 12),
-    ) orelse return error.BitmapContextFailed;
-
-    // Every Space MUST own its context + provider. Falling back to a shared buffer would make
-    // several Space layers alias one memory region (the "rave strobe" bug class), so fail loudly.
-    var native_bitmap_ctxs: [MAX_SPACES]?*anyopaque = @splat(null);
+    // Every Space MUST own its provider. Falling back to a shared buffer would make several Space
+    // layers alias one memory region (the "rave strobe" bug class), so fail loudly.
     var native_data_providers: [MAX_SPACES]?*anyopaque = @splat(null);
     for (0..MAX_SPACES) |idx| {
-        native_bitmap_ctxs[idx] = CGBitmapContextCreate(
-            @ptrCast(&obs.space_native_pixels[idx]),
-            NATIVE_W,
-            NATIVE_H,
-            8,
-            NATIVE_W * 4,
-            color_space,
-            5 | (4 << 12),
-        ) orelse return error.BitmapContextFailed;
         native_data_providers[idx] = CGDataProviderCreateWithData(
             null,
             @ptrCast(&obs.space_native_pixels[idx]),
@@ -1720,16 +1690,6 @@ pub fn main(init: std.process.Init) !void {
             null,
         ) orelse return error.DataProviderFailed;
     }
-    var canvas_data_providers: [MAX_SPACES]?*anyopaque = @splat(null);
-    for (0..MAX_SPACES) |idx| {
-        canvas_data_providers[idx] = CGDataProviderCreateWithData(
-            null,
-            @ptrCast(&obs.space_canvas_pixels[idx]),
-            CANVAS_PIXELS * 4,
-            null,
-        ) orelse return error.DataProviderFailed;
-    }
-
     const popover_bitmap_ctx = CGBitmapContextCreate(
         @ptrCast(&obs.popover_pixels),
         POPOVER_BMP_W,
@@ -1820,11 +1780,7 @@ pub fn main(init: std.process.Init) !void {
         .NSURL = NSURL,
         .desktop_level = desktop_level,
         .normal_window = normal_window,
-        .desktop_bitmap_ctx = desktop_bitmap_ctx,
-        .native_bitmap_ctx = native_bitmap_ctx,
-        .native_bitmap_ctxs = native_bitmap_ctxs,
         .native_data_providers = native_data_providers,
-        .canvas_data_providers = canvas_data_providers,
         .popover_win = popover_win,
         .popover_layer = popover_layer,
         .popover_bitmap_ctx = popover_bitmap_ctx,
@@ -1839,6 +1795,13 @@ pub fn main(init: std.process.Init) !void {
         .cf_key_screen_locked = CFStringCreateWithCString(null, "CGSSessionScreenIsLocked", 0x08000100),
         .cf_true = kCFBooleanTrue_ptr.*,
         .sel_occlusion_state = sel_registerName("occlusionState"),
+        .IOPSCopyPowerSourcesInfo = IOPSCopyPowerSourcesInfo,
+        .IOPSGetProvidingPowerSourceType = IOPSGetProvidingPowerSourceType,
+        .CFEqual = CFEqual,
+        .cf_battery_power = CFStringCreateWithCString(null, "Battery Power", 0x08000100),
+        .msgRetBool = @ptrCast(msgSend_raw),
+        .proc_info = if (objc_getClass("NSProcessInfo")) |cls| msg0(cls, sel_registerName("processInfo")) else null,
+        .sel_low_power = sel_registerName("isLowPowerModeEnabled"),
         .perf_log = perf_log,
         .screen_rect = screen_rect,
         .pboard_filenames_type = pboard_filenames_type,
@@ -1915,20 +1878,20 @@ test "Observatory multi-Space engine: default Spaces, shader hot-compilation and
     try std.testing.expectEqual(SpaceMode.custom_shader, obs.spaces[2].mode);
     try std.testing.expect(obs.spaces[2].custom_render_fn != null);
 
-    @memset(&obs.pixels, 0);
-    obs.renderPixelFrameForSpace(2, 0.25);
+    @memset(&obs.space_native_pixels[2], 0);
+    try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(2, 0.25));
     // Verify the wormhole shader populated non-zero RGBA pixels
-    try std.testing.expect(obs.pixels[(CANVAS_H / 2) * CANVAS_W + (CANVAS_W / 2 - 120)] != 0);
+    try std.testing.expect(obs.space_native_pixels[2][(NATIVE_H / 2) * NATIVE_W + (NATIVE_W / 2 - 240)] != 0);
 
     // Verify stateful SDK theme hot-compilation (`themes/Echo.zig`)
     const compiled_sdk = obs.spaces[3].compileAndLoadShader(3, "themes/Echo.zig");
     try std.testing.expect(compiled_sdk);
     try std.testing.expect(obs.spaces[3].theme_state != null);
-    @memset(&obs.pixels, 0);
-    obs.renderPixelFrameForSpace(3, 0.25);
+    @memset(&obs.space_native_pixels[3], 0);
+    try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(3, 0.25));
     // Echo's background is black, so look for any lit (non-black RGB) pixel.
     var lit: usize = 0;
-    for (obs.pixels) |p| {
+    for (obs.space_native_pixels[3]) |p| {
         if (p & 0x00FF_FFFF != 0) lit += 1;
     }
     try std.testing.expect(lit > 0);
@@ -1958,9 +1921,9 @@ test "Native 1920x1200 Retina shader rendering (Echo.zig) and Watchdog isolation
     try std.testing.expectEqual(NATIVE_W, obs.spaces[1].render_w);
     try std.testing.expectEqual(NATIVE_H, obs.spaces[1].render_h);
 
-    @memset(&obs.native_pixels, 0);
-    obs.renderPixelFrameForSpace(1, 0.1);
-    try std.testing.expect(obs.native_pixels[(NATIVE_H / 2) * NATIVE_W + (NATIVE_W / 2)] != 0);
+    @memset(&obs.space_native_pixels[1], 0);
+    try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(1, 0.1));
+    try std.testing.expect(obs.space_native_pixels[1][(NATIVE_H / 2) * NATIVE_W + (NATIVE_W / 2)] != 0);
 
     // Write a faulty theme that reports NaN and verify Watchdog blocks it before loading into Space 1
     const bad_shader_path = "/tmp/argus_bad_watchdog_test.zig";
@@ -2034,28 +1997,21 @@ test "Reloading a shader into a dirty Space repaints instead of inheriting stale
     try std.testing.expectEqualSlices(u32, &obs.space_native_pixels[2], &obs.space_native_pixels[1]);
 }
 
-test "Canvas Spaces present from their own snapshot, never the shared canvas" {
+test "Two steps per frame advance an SDK theme exactly like two single-step frames" {
     g_io = std.testing.io;
     sc.g_io = std.testing.io;
     const alloc = std.testing.allocator;
     const obs = try Observatory.init(alloc);
     defer obs.deinit(alloc);
-    obs.n_spaces = 4;
-    try std.testing.expect(obs.loadShaderIntoSpace(2, "themes/Gemini_Wormhole.zig"));
-    obs.spaces[3].mode = .picture;
+    obs.n_spaces = 2;
+    try std.testing.expect(obs.loadShaderIntoSpace(0, "themes/Echo.zig"));
+    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Echo.zig"));
 
-    // Same order the app uses in one tick: render a Space into the shared canvas, snapshot it, next Space.
-    obs.renderPixelFrameForSpace(2, 0.25);
-    obs.snapshotCanvasForSpace(2);
-    const snap2 = try alloc.dupe(u32, &obs.space_canvas_pixels[2]);
-    defer alloc.free(snap2);
-
-    obs.renderPixelFrameForSpace(3, 0.25);
-    obs.snapshotCanvasForSpace(3);
-
-    // Space 2's presented pixels must survive Space 3 reusing the shared canvas (the "rave strobe").
-    try std.testing.expectEqualSlices(u32, snap2, &obs.space_canvas_pixels[2]);
-    try std.testing.expect(!std.mem.eql(u32, &obs.space_canvas_pixels[2], &obs.space_canvas_pixels[3]));
+    // Space 0: two 30 FPS frames. Space 1: one battery frame with two steps.
+    for (0..2) |_| try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(0, 0.0));
+    obs.steps_per_frame = 2;
+    try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(1, 0.0));
+    try std.testing.expectEqualSlices(u32, &obs.space_native_pixels[0], &obs.space_native_pixels[1]);
 }
 
 test "Mission Control Space reordering moves themes with space_id and resets moved shader buffers" {

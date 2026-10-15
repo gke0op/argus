@@ -7,9 +7,6 @@
 
 const std = @import("std");
 
-pub const CANVAS_W: usize = 960;
-pub const CANVAS_H: usize = 600;
-pub const CANVAS_PIXELS: usize = CANVAS_W * CANVAS_H;
 
 // Native @2x Retina resolution for .dylib shaders & baked wallpapers (1920x1200)
 pub const NATIVE_W: usize = 1920;
