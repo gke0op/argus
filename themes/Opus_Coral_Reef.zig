@@ -6,10 +6,11 @@
 // A slow drift down a sandy channel through a shallow reef. Brain corals,
 // barrel sponges and rock covered in coralline algae are a solid, lit
 // heightfield. Staghorn corals branch out of it, sea fans and anemones sway,
-// and fourteen species live on it: schools of neon tetras, yellow tangs,
-// clownfish, silver fish and moorish idols; blacktip reef sharks and manta
-// rays cruising; moray eels, lionfish, parrotfish, queen angelfish and
-// seahorses close to the reef; sea turtles and moon jellyfish in open water.
+// and twelve species live on it: schools of yellow tangs, clownfish, silver
+// fish and moorish idols; blacktip reef sharks and manta rays cruising; moray
+// eels, lionfish, parrotfish and seahorses close to the reef; sea turtles and
+// moon jellyfish in open water. It is an imagined reef, not a real site (see
+// Lizard_Island.zig for that).
 // Light comes down in moving shafts and caustics ripple over the reef, which
 // fades into blue with distance.
 //
@@ -28,9 +29,9 @@
 // Lineage: the schooling and god rays come from Gemini_Aquarium, Claude
 // Opus's rework of Google Gemini's Gemini_Cyber_Topography; the reef's rock
 // ridges are Gemini's canyon harmonics, made periodic so the tile wraps.
-// Ten species were designed by Claude Haiku agents, one each (shark, moray,
-// lionfish, manta, turtle, moorish idol, parrotfish, queen angelfish,
-// seahorse, moon jelly); each struct's `author` says so.
+// Nine species were designed by Claude Haiku agents, one each (shark, moray,
+// lionfish, manta, turtle, moorish idol, parrotfish, seahorse, moon jelly);
+// each struct's `author` says so.
 //
 // Contract: one alloc.create(State) at init (~32.6 MiB, mostly the reef map),
 // nothing after; no clocks or I/O; every write goes through `y * stride + x`
@@ -94,7 +95,6 @@ const WATER_HOR = [3]f32{ 10, 56, 86 };
 // one to the front; each species struct (bottom of this file) sets its own
 // count, size, speed and habitat.
 const SPECIES = .{
-    NeonTetra,
     YellowTang,
     Clownfish,
     SilverFish,
@@ -107,7 +107,6 @@ const SPECIES = .{
     MoonJelly,
     SeaTurtle,
     MoorishIdol,
-    QueenAngelfish,
 };
 
 const N_SPECIES: usize = SPECIES.len;
@@ -1547,31 +1546,6 @@ fn classicFinish(c_in: [3]f32, hit: ClassicHit, u: f32, W_px_hint: f32) [3]f32 {
     return c;
 }
 
-const NeonTetra = struct {
-    pub const name = "Neon tetra";
-    pub const author = "Claude Opus, from Gemini_Aquarium";
-    pub const length: f32 = 0.34;
-    pub const half_depth: f32 = 0.15;
-    pub const extent: f32 = 1.3;
-    pub const upright = false;
-    pub const speed: f32 = 1.25;
-    pub const count: u8 = 36;
-    pub const school = true;
-    pub const habitat: u8 = 1;
-    pub fn shade(u: f32, s: f32, t: f32, seed: f32) ?[3]f32 {
-        _ = seed;
-        const hit = classicBody(u, s, t) orelse return null;
-        var c = State.mix3(.{ 38, 78, 150 }, .{ 196, 210, 226 }, hit.k);
-        const sn = 2.0 * hit.k - 1.0;
-        if (!hit.tail and @abs(sn + 0.05) < 0.17 and u > 0.08 and u < 0.74) {
-            c = .{ 50, 200, 255 };
-        } else if (!hit.tail and sn > 0.2 and u > 0.42 and u < 0.76) {
-            c = .{ 225, 40, 52 };
-        }
-        return classicFinish(c, hit, u, 0);
-    }
-};
-
 const YellowTang = struct {
     pub const name = "Yellow tang";
     pub const author = "Claude Opus, from Gemini_Aquarium";
@@ -2714,128 +2688,6 @@ const MoorishIdol = struct {
                 if ((ht > 0.25 and ht - a < 0.08) or u > u_edge - 0.035) return .{ 255, 210, 40 };
                 if (u < 0.87 or u > 0.93) return .{ 16, 14, 16 };
                 return .{ 244, 242, 236 };
-            }
-        }
-        return null;
-    }
-};
-
-const QueenAngelfish = struct {
-    /// Shown in credits. Keep it short.
-    pub const name = "Queen angelfish";
-    /// Your animal, e.g. "Claude Haiku".
-    pub const author = "Claude Haiku";
-
-    // --- size and placement -------------------------------------------------
-    /// Body length in world units, nose to tail tip. For scale: a neon tetra
-    /// is 0.34, a clownfish 0.5, a yellow tang 0.7, the big silver fish 1.1.
-    pub const length: f32 = 0.6;
-    /// Half the body depth (top-to-belly) as a fraction of length. The
-    /// renderer's W (one unit of `s` below) is length * half_depth.
-    pub const half_depth: f32 = 0.36;
-    /// The largest |s| your shape ever reaches, fins and body bends included.
-    /// It sets the bounding box: anything beyond is clipped.
-    pub const extent: f32 = 1.8;
-    /// true draws the body axis vertical with the head (u = 0) on top, whatever
-    /// way the animal moves (seahorse, jellyfish). false points the head where
-    /// it swims and keeps the belly (s > 0) facing down the screen.
-    pub const upright: bool = false;
-    /// Cruise speed relative to a clownfish (1.0). Sharks ~1.4, lionfish ~0.4.
-    pub const speed: f32 = 0.6;
-    /// How many live in the reef (1..24).
-    pub const count: u8 = 5;
-    /// true: they stay together as a school. false: each wanders alone.
-    pub const school: bool = false;
-    /// Where they swim: 0 = hugging the reef and sand, 1 = mid-water,
-    /// 2 = high in open water.
-    pub const habitat: u8 = 0;
-
-    /// Colour of the animal at one point, or null if the point is outside it.
-    ///   u    : along the body, 0 at the nose (or the top when upright) to 1 at
-    ///          the tail tip. Called for u in [-0.05, 1.05].
-    ///   s    : across the body in units of W (= length * half_depth).
-    ///          s < 0 is the back (dorsal side), s > 0 the belly. Called for
-    ///          s in [-extent, extent].
-    ///   t    : this animal's animation phase in radians. It advances about
-    ///          6-10 rad per second; sin(t) is a good tail beat.
-    ///   seed : 0..1, fixed per animal, for individual variation.
-    /// Return RGB in 0..255 (unlit; the reef adds fog). It runs once per pixel
-    /// the animal covers, so keep it cheap: a handful of sin/cos at most, no
-    /// loops over more than ~8 items, no allocation, no panics (clamp before any
-    /// @intFromFloat), no globals with state.
-    pub fn shade(u: f32, s: f32, t: f32, seed: f32) ?[3]f32 {
-        _ = seed;
-        if (u < 0.0) return null;
-        // Bend: the rear swings, growing toward the tail tip.
-        const sb = s - 0.15 * @sin(t) * u * u;
-        const a = @abs(sb);
-        const dorsal = sb < 0.0;
-        // Body: tall and disc-like, deepest at about a third of the length.
-        const p = math.clamp(u / 0.8, 0.0, 1.0);
-        const px = @sqrt(p) * @sqrt(@sqrt(p)); // p^0.75 without pow()
-        const body_hw: f32 = 0.14 + 0.98 * 4.0 * px * (1.0 - px); // parabolic bulge, peak 1.12
-        // Tail: a rounded yellow fan opening from the narrow tail root at u = 0.8.
-        const in_tail = u > 0.8;
-        const tf = math.clamp((u - 0.8) / 0.2, 0.0, 1.0);
-        const tail_hw: f32 = 0.14 + 1.0 * @sqrt(tf);
-        const hw: f32 = if (in_tail) tail_hw else body_hw;
-        if (u <= 1.0 and a <= hw) {
-            const k = 0.5 + 0.5 * math.clamp(sb / @max(hw, 0.05), -1.0, 1.0); // 0 back .. 1 belly
-            if (in_tail) {
-                if (hw - a < 0.1) return [3]f32{ 30, 190, 255 };
-                return [3]f32{ 252, 206 + 14 * k, 26 + 34 * k };
-            }
-            // Electric-blue lips at the nose.
-            if (u < 0.05) return [3]f32{ 30, 190, 255 };
-            // Dark blue crown just above and behind the eye, ringed in electric blue.
-            const cu = (u - 0.22) / 0.06;
-            const cs = (sb + 0.5) / 0.16;
-            const cr = cu * cu + cs * cs;
-            if (cr < 1.0) {
-                const cc: [3]f32 = if (cr > 0.55) .{ 60, 220, 255 } else .{ 20, 40, 130 };
-                return cc;
-            }
-            // The single eye on the head.
-            const eu = (u - 0.15) / 0.05;
-            const ev = (sb + 0.12) / 0.1;
-            if (eu * eu + ev * ev < 1.0) return [3]f32{ 12, 12, 22 };
-            // Yellow pectoral fin on the flank.
-            const pu = (u - 0.3) / 0.16;
-            const ps = (sb - 0.4) / 0.24;
-            const pr = pu * pu + ps * ps;
-            if (pr < 1.0) {
-                const pc: [3]f32 = if (pr > 0.6) .{ 236, 150, 24 } else .{ 255, 222, 40 };
-                return pc;
-            }
-            // Blue-green body with yellow-rimmed scales (rim grid is cheap sines).
-            const gx = @abs(@sin(u * 110.0));
-            const gy = @abs(@sin(sb * 306.0));
-            const rim = gx > 0.985 or gy > 0.985;
-            var c: [3]f32 = if (rim) .{ 240, 200, 50 } else .{ 12 + 14 * k, 58 + 128 * k, 170 + 44 * k };
-            if (hw - a < 0.07) c = .{ c[0] * 0.6, c[1] * 0.6, c[2] * 0.6 }; // dark outline
-            return c;
-        }
-        // Dorsal (s < 0) and anal (s > 0) fins: tall front, trailing tips sweeping back past the tail.
-        if (u >= 0.25 and u <= 1.05) {
-            // Arch rises from the back over u 0.25..0.75, then the rear edge
-            // tapers into one pointed filament sweeping back past the tail.
-            const base: f32 = if (dorsal) 1.12 else 0.98;
-            const bump: f32 = if (dorsal) 0.35 else 0.22;
-            const slope: f32 = if (dorsal) 1.28 else 1.3;
-            const fr = math.clamp((u - 0.25) / 0.5, 0.0, 1.0);
-            const arch = base + bump * 4.0 * fr * (1.0 - fr);
-            const fil = base + (u - 0.7) * slope;
-            const top = @max(arch, fil);
-            // Membrane fills down to the flank; past u = 0.7 it thins to a point,
-            // leaving clear water between the filament and the tail.
-            const m = math.clamp((0.92 - u) / 0.2, 0.0, 1.0);
-            const taper = math.clamp((1.06 - u) / 0.34, 0.0, 1.0);
-            const thick = (1.2 * m + 0.14) * taper;
-            const lower = if (u > 1.0) top - thick else @max(hw, top - thick);
-            if (a > lower and a <= top) {
-                if (top - a < 0.08) return [3]f32{ 40, 215, 255 }; // electric-blue fin edge
-                const fc: [3]f32 = if (dorsal) .{ 20, 60, 175 } else .{ 26, 84, 200 };
-                return fc;
             }
         }
         return null;
