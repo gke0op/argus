@@ -1,9 +1,12 @@
 // @argus-theme: custom_shader
 // ============================================================================
-// OPUS BLACK HOLE // themes/Opus_Black_Hole.zig
+// OPUS QUASAR // themes/Opus_Quasar.zig
 //
-// A spinning (Kerr) black hole with a thin accretion disk, rendered from the
-// physics rather than tuned by eye. Audited independently (Gemini 4 Argon; Claude
+// A quasar: a spinning (Kerr) supermassive black hole feeding a luminous thin accretion
+// disk, seen up close, rendered from the physics rather than tuned by eye. No telescope can
+// resolve a real quasar disk (we know them from their light: spectra, variability,
+// microlensing); this is what that physics predicts. The Event Horizon Telescope's images
+// (M87*, Sgr A*) are a different, starving kind of black hole: hot, faint, see-through flows. Audited independently (Gemini 4 Argon; Claude
 // Opus with its own code): every item under "computed" was re-derived and checked.
 //
 // What is computed, not chosen:
@@ -166,7 +169,7 @@ const SPOT_AMP: f32 = 6.0; // peak emissivity boost (hotter gas: T rises as (1 +
 const HALF_PI: f64 = math.pi / 2.0;
 /// Built by Argus's GPU path (src/gpu/bh_export.zig): the GPU traces the image itself at the
 /// window's native size, so init() skips the CPU trace and draw() runs it only if it's ever called.
-const gpu_traced = @hasDecl(@import("root"), "argus_gpu_traces_opus_black_hole");
+const gpu_traced = @hasDecl(@import("root"), "argus_gpu_traces_opus_quasar");
 const K_NEAR: f64 = 0.08; // tuned against the Bardeen test: ~1e-5 M shadow-edge error
 const MAX_STEPS: u32 = 40_000;
 

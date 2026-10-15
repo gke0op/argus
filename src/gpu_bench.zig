@@ -1,7 +1,7 @@
 // ============================================================================
 // ARGUS GPU // src/gpu_bench.zig
 //
-// Headless check of Opus_Black_Hole's GPU path against the theme's own CPU path:
+// Headless check of Opus_Quasar's GPU path against the theme's own CPU path:
 //   1. Shadow edge: the GPU's f32 geodesics bisected against Bardeen's analytic
 //      critical curve (the theme's CPU test does the same in f64).
 //   2. 1920x1200: CPU trace + draw() vs GPU meter + trace + shade, same step() state;
@@ -185,7 +185,7 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    std.debug.print("========================================================================\n ARGUS GPU // Opus_Black_Hole GPU trace vs CPU\n------------------------------------------------------------------------\n", .{});
+    std.debug.print("========================================================================\n ARGUS GPU // Opus_Quasar GPU trace vs CPU\n------------------------------------------------------------------------\n", .{});
     var t0 = std.Io.Clock.awake.now(io);
     const st = try theme.State.init(alloc, W, H, 1.0);
     defer st.deinit(alloc);

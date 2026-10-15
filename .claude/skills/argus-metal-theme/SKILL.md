@@ -186,7 +186,7 @@ Explain the one mental shift up front: you write the rule for one pixel, and the
 |---|---|
 | `src/gpu/argus_prelude.metal` | the prelude (helpers, `ArgusFrame`) |
 | `src/gpu/metal_theme.zig` | compiles themes, directives, state ping-pong, encodes frames |
-| `src/gpu/presenter.zig` | CAMetalLayer per Space window; Zig + Metal hybrids (Opus_Black_Hole) |
+| `src/gpu/presenter.zig` | CAMetalLayer per Space window; Zig + Metal hybrids (Opus_Quasar) |
 | `src/theme_harness.zig` | `make harness`; `.metal` files take the GPU path |
 | `themes/Tutorial_*.metal` | the two tutorials |
 | `tools/gpu_probes/` | `make gpu-probes`: one-cost-each probe kernels behind section 5 |
@@ -194,5 +194,5 @@ Explain the one mental shift up front: you write the rule for one pixel, and the
 | `apple_gpu.md` | the Apple GPU as Argus drives it: measured + sourced |
 
 Zig + Metal hybrids (a Zig theme whose per-pixel draw runs as a Metal kernel over its
-CPU-built tables) exist as a prototype for `Opus_Black_Hole` only (`src/gpu/bh_*.zig`,
+CPU-built tables) exist as a prototype for `Opus_Quasar` only (`src/gpu/bh_*.zig`,
 `make gpu-bench`). They aren't a general SDK feature yet.

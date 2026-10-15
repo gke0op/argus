@@ -1,7 +1,7 @@
 // ============================================================================
 // ARGUS GPU // src/gpu/bh_export.zig
 //
-// Root of the GPU build of themes/Opus_Black_Hole.zig (the default; `--cpu` turns it off).
+// Root of the GPU build of themes/Opus_Quasar.zig (the default; `--cpu` turns it off).
 // Compiled as
 //   zig build-lib --dep theme -Mroot=src/gpu/bh_export.zig -Mtheme=<theme path>
 // it exports the theme's normal SDK symbols (from the theme's own `comptime` block)
@@ -12,7 +12,7 @@
 const theme = @import("theme");
 const bt = @import("bh_tables.zig");
 
-pub const argus_gpu_traces_opus_black_hole = true;
+pub const argus_gpu_traces_opus_quasar = true;
 
 comptime {
     _ = theme; // pulls in the theme's sdk.exportTheme(State)
