@@ -20,7 +20,7 @@ pub const EMIT_N = 1024;
 pub const BB_N = 1024;
 pub const PT_N = 4096;
 pub const NR = 2048; // turbulence rows
-pub const N_OCT = 3; // turbulence octaves
+pub const N_OCT = 2; // turbulence octaves
 pub const NBAND = 12; // turbulence lifetime bands
 
 /// One generation of eddies (mirrors the theme's TurbGen and `struct TurbGen`).
