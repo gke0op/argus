@@ -179,6 +179,8 @@ const MacBridge = struct {
     themes: pl.ThemeList = .{},
     browse_idx: ?usize = null, // stepper position, kept even when that theme failed to load
     slider_drag: bool = false,
+    strip_scroll: f64 = 0.0, // points the Spaces strip is scrolled right (more than 7 Spaces)
+    msgRetF64: MsgSendRetF64,
     // One-line note under the selected Space ("Loading Echo…", "Couldn't load …").
     note_buf: [96]u8 = undefined,
     note_len: usize = 0,
@@ -745,7 +747,7 @@ const MacBridge = struct {
     /// the selected Space on the Settings face, otherwise the active Space.
     pub fn dropTarget(self: *const MacBridge, x: f64, top_y: f64) usize {
         if (self.pop_face == .settings) return @min(self.sel_space, self.obs.n_spaces -| 1);
-        if (pl.hitSpaces(x, top_y, self.obs.n_spaces, false)) |h| switch (h) {
+        if (pl.hitSpaces(x, top_y, self.obs.n_spaces, false, self.strip_scroll)) |h| switch (h) {
             .space_thumb => |i| return i,
             else => {},
         };
@@ -883,11 +885,21 @@ const MacBridge = struct {
         self.playPauseIcon(ctx, H, pl.pause_btn.x + pl.pause_btn.w * 0.5, 18.0, paused);
         self.gearIcon(ctx, H, pl.gear_btn.x + pl.gear_btn.w * 0.5, 18.0);
 
-        // Horizontal bare-texture panorama strip (Spaces I..VIII)
+        // Horizontal bare-texture panorama strip: 7 fixed-size slots, scrolled sideways beyond that.
         const visible = @max(@as(usize, 1), @min(self.obs.n_spaces, MAX_SPACES));
+        self.strip_scroll = pl.clampScroll(self.strip_scroll, visible);
+        self.CGContextSaveGState(ctx);
+        defer self.CGContextRestoreGState(ctx);
+        const clip = pl.strip;
+        if (self.CGPathCreateWithRoundedRect(.{ .origin = .{ .x = clip.x, .y = H - clip.y - clip.h }, .size = .{ .width = clip.w, .height = clip.h } }, 4.5, 4.5, null)) |path| {
+            self.CGContextAddPath(ctx, path);
+            self.CGContextClip(ctx);
+            self.CGPathRelease(path);
+        }
         for (0..visible) |idx| {
             const sp = &self.obs.spaces[idx];
-            const r = pl.thumb(idx, visible);
+            const r = pl.thumb(idx, self.strip_scroll);
+            if (r.x + r.w < clip.x or r.x > clip.x + clip.w) continue; // scrolled out of view
             const is_active = (idx == self.obs.active_space_idx);
             const is_drag_hover = (self.obs.drag_hover_idx != null and self.obs.drag_hover_idx.? == idx);
 
@@ -1528,6 +1540,13 @@ fn onDraggingEntered(_: ?*anyopaque, _: ?*anyopaque, sender: ?*anyopaque) callco
     const b = g_bridge orelse return 0;
     const loc = b.msgRetPoint(sender, b.sel_registerName("draggingLocation"));
     const top_y = (pl.SPACES_H - 1.0) - loc.y;
+    // Holding a dragged file near either end of the strip scrolls it to the hidden Spaces.
+    if (b.pop_face == .spaces) {
+        const edge: f64 = 28.0;
+        if (loc.x < pl.strip.x + edge) b.strip_scroll -= 8.0;
+        if (loc.x > pl.strip.x + pl.strip.w - edge) b.strip_scroll += 8.0;
+        b.strip_scroll = pl.clampScroll(b.strip_scroll, b.obs.n_spaces);
+    }
     b.obs.drag_hover_idx = b.dropTarget(loc.x, top_y);
     b.flushPopoverLayer();
     return 1; // NSDragOperationCopy
@@ -1607,6 +1626,7 @@ fn onStatusItemClick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c
         b.slider_drag = false;
         b.note_len = 0;
         b.syncSpacesFromSkyLight(false);
+        b.strip_scroll = pl.scrollToShow(b.obs.active_space_idx, b.strip_scroll, b.obs.n_spaces);
         b.renderAllSpaces();
         const mouse = b.msgRetPoint(b.NSEvent, b.sel_registerName("mouseLocation"));
         const pop_w: f64 = @floatFromInt(POPOVER_W);
@@ -1639,7 +1659,7 @@ fn onPopoverMouseDown(_: ?*anyopaque, _: ?*anyopaque, event: ?*anyopaque) callco
     const hit = if (b.pop_face == .settings)
         pl.hitSettings(p.x, p.y)
     else
-        pl.hitSpaces(p.x, p.y, b.obs.n_spaces, b.obs.paused);
+        pl.hitSpaces(p.x, p.y, b.obs.n_spaces, b.obs.paused, b.strip_scroll);
     if (hit) |h| handlePopoverHit(b, h);
     b.renderActiveDesktopSpace();
     b.flushPopoverLayer();
@@ -1675,6 +1695,21 @@ fn handlePopoverHit(b: *MacBridge, hit: pl.Hit) void {
         .reload_on_edit => b.setHotReload(!b.hot_reload),
         .launch_at_login => b.setLaunchAtLogin(!b.launch_at_login),
     }
+}
+
+/// Trackpad swipes and mouse wheels scroll the Spaces strip sideways when there are more than 7.
+fn onPopoverScrollWheel(_: ?*anyopaque, _: ?*anyopaque, event: ?*anyopaque) callconv(.c) void {
+    const b = g_bridge orelse return;
+    if (b.pop_face != .spaces or pl.maxScroll(b.obs.n_spaces) == 0.0) return;
+    const dx = b.msgRetF64(event, b.sel_registerName("scrollingDeltaX"));
+    const dy = b.msgRetF64(event, b.sel_registerName("scrollingDeltaY"));
+    // Line-based wheels report a few lines per notch; trackpads report points.
+    const precise = (b.msgRetInt(event, b.sel_registerName("hasPreciseScrollingDeltas")) & 0xff) != 0;
+    const d = (if (@abs(dx) > @abs(dy)) dx else dy) * @as(f64, if (precise) 1.0 else 12.0);
+    const next = pl.clampScroll(b.strip_scroll - d, b.obs.n_spaces);
+    if (next == b.strip_scroll) return;
+    b.strip_scroll = next;
+    b.flushPopoverLayer();
 }
 
 fn onPopoverMouseDragged(_: ?*anyopaque, _: ?*anyopaque, event: ?*anyopaque) callconv(.c) void {
@@ -2087,6 +2122,7 @@ pub fn main(init: std.process.Init) !void {
     _ = class_addMethod(pop_view_cls, sel_registerName("mouseDown:"), @ptrCast(&onPopoverMouseDown), "v@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("mouseDragged:"), @ptrCast(&onPopoverMouseDragged), "v@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("mouseUp:"), @ptrCast(&onPopoverMouseUp), "v@:@");
+    _ = class_addMethod(pop_view_cls, sel_registerName("scrollWheel:"), @ptrCast(&onPopoverScrollWheel), "v@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("acceptsFirstMouse:"), @ptrCast(&onAcceptsFirstMouse), "B@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("draggingEntered:"), @ptrCast(&onDraggingEntered), "Q@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("draggingUpdated:"), @ptrCast(&onDraggingUpdated), "Q@:@");
@@ -2217,6 +2253,7 @@ pub fn main(init: std.process.Init) !void {
         .msgId2 = msgId2,
         .msgInitWin = msgInitWin,
         .msgSetFrame = msgSetFrame,
+        .msgRetF64 = msgRetF64,
         .msgUTF8 = msgUTF8,
         .msgRetPoint = msgRetPoint,
         .msgRetRect = msgRetRect,

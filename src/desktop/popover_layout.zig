@@ -35,16 +35,38 @@ pub const STRIP_GAP: f64 = 8.0;
 pub const THUMB_Y: f64 = 34.0;
 pub const THUMB_H: f64 = 50.0;
 
-/// Thumbnail slot `idx` of `n` in the Spaces strip.
-pub fn thumb(idx: usize, n_raw: usize) Rect {
-    const n = @max(@as(usize, 1), @min(n_raw, sc.MAX_SPACES));
-    const step = (W - STRIP_PAD_X * 2.0) / @as(f64, @floatFromInt(n));
+/// The strip always has room for 7 thumbnails of one fixed size: fewer Spaces leave empty room
+/// on the right, more scroll sideways inside the same box.
+pub const STRIP_SLOTS: usize = 7;
+pub const STRIP_STEP: f64 = (W - STRIP_PAD_X * 2.0) / @as(f64, @floatFromInt(STRIP_SLOTS));
+/// The visible window of the strip; thumbnails scrolled past its edges are clipped.
+pub const strip = Rect{ .x = STRIP_PAD_X, .y = THUMB_Y - 4.0, .w = W - STRIP_PAD_X * 2.0, .h = THUMB_H + 8.0 };
+
+/// Thumbnail `idx` with the strip scrolled `scroll` points to the right.
+pub fn thumb(idx: usize, scroll: f64) Rect {
     return .{
-        .x = STRIP_PAD_X + @as(f64, @floatFromInt(idx)) * step + STRIP_GAP * 0.5,
+        .x = STRIP_PAD_X + @as(f64, @floatFromInt(idx)) * STRIP_STEP + STRIP_GAP * 0.5 - scroll,
         .y = THUMB_Y,
-        .w = @max(28.0, step - STRIP_GAP),
+        .w = STRIP_STEP - STRIP_GAP,
         .h = THUMB_H,
     };
+}
+
+pub fn maxScroll(n_spaces: usize) f64 {
+    const n = @min(n_spaces, sc.MAX_SPACES);
+    if (n <= STRIP_SLOTS) return 0.0;
+    return @as(f64, @floatFromInt(n - STRIP_SLOTS)) * STRIP_STEP;
+}
+
+pub fn clampScroll(scroll: f64, n_spaces: usize) f64 {
+    return std.math.clamp(scroll, 0.0, maxScroll(n_spaces));
+}
+
+/// The scroll nearest to `scroll` that shows thumbnail `idx` whole.
+pub fn scrollToShow(idx: usize, scroll: f64, n_spaces: usize) f64 {
+    const left = @as(f64, @floatFromInt(idx)) * STRIP_STEP;
+    const right = left + STRIP_STEP - strip.w;
+    return clampScroll(std.math.clamp(scroll, right, left), n_spaces);
 }
 
 // ---- Settings view (same 680x98 box: header, then two rows of controls) ------------------
@@ -120,18 +142,16 @@ pub const Hit = union(enum) {
     launch_at_login,
 };
 
-pub fn hitSpaces(x: f64, y: f64, n_spaces: usize, paused: bool) ?Hit {
+pub fn hitSpaces(x: f64, y: f64, n_spaces: usize, paused: bool, scroll: f64) ?Hit {
     if (themes_icon.contains(x, y)) return .open_themes;
     if (pause_btn.contains(x, y)) return .toggle_pause;
     if (paused and paused_chip.contains(x, y)) return .toggle_pause;
     if (gear_btn.contains(x, y)) return .open_settings;
-    const n = @max(@as(usize, 1), @min(n_spaces, sc.MAX_SPACES));
-    for (0..n) |i| {
-        const r = thumb(i, n);
-        // Generous vertical band; the gaps between thumbnails belong to the nearer one.
-        if (x >= r.x - STRIP_GAP * 0.5 and x < r.x + r.w + STRIP_GAP * 0.5 and y >= 30.0 and y <= 92.0) return .{ .space_thumb = i };
-    }
-    return null;
+    // Generous vertical band; the gaps between thumbnails belong to the nearer one.
+    if (y < 30.0 or y > 92.0 or x < strip.x or x >= strip.x + strip.w) return null;
+    const i: usize = @intFromFloat(@floor((x - STRIP_PAD_X + scroll) / STRIP_STEP));
+    if (i >= @min(n_spaces, sc.MAX_SPACES)) return null;
+    return .{ .space_thumb = i };
 }
 
 pub fn hitSettings(x: f64, y: f64) ?Hit {
@@ -208,16 +228,27 @@ pub const ThemeList = struct {
 };
 
 test "popover layout: every control hits where it is drawn, inside the box" {
-    for ([_]usize{ 1, 3, 8, 16 }) |n| {
+    for ([_]usize{ 1, 3, 7, 8, 16 }) |n| {
+        // Every Space can be scrolled into view and then hits where it is drawn, inside the strip.
         for (0..n) |i| {
-            const t = thumb(i, n);
-            try std.testing.expectEqual(Hit{ .space_thumb = i }, hitSpaces(t.x + t.w * 0.5, t.y + t.h * 0.5, n, false).?);
+            const sc_x = scrollToShow(i, 0.0, n);
+            const t = thumb(i, sc_x);
+            try std.testing.expect(t.x >= strip.x and t.x + t.w <= strip.x + strip.w);
+            try std.testing.expectEqual(Hit{ .space_thumb = i }, hitSpaces(t.x + t.w * 0.5, t.y + t.h * 0.5, n, false, sc_x).?);
         }
+        // Thumbnails keep one size whatever the count.
+        try std.testing.expectApproxEqAbs(thumb(0, 0).w, STRIP_STEP - STRIP_GAP, 1e-9);
     }
-    try std.testing.expectEqual(Hit.open_settings, hitSpaces(W - 20, 18, 8, false).?);
-    try std.testing.expectEqual(Hit.toggle_pause, hitSpaces(W - 48, 18, 8, false).?);
-    try std.testing.expect(hitSpaces(W - 100, 18, 8, false) == null);
-    try std.testing.expectEqual(Hit.toggle_pause, hitSpaces(W - 100, 18, 8, true).?);
+    // Fewer than 7: empty room on the right that hits nothing, and no scrolling.
+    try std.testing.expect(hitSpaces(thumb(5, 0).x + 10, THUMB_Y + 10, 3, false, 0) == null);
+    try std.testing.expectEqual(@as(f64, 0), maxScroll(3));
+    try std.testing.expectEqual(@as(f64, 0), maxScroll(7));
+    try std.testing.expectApproxEqAbs(STRIP_STEP * 5, maxScroll(12), 1e-9);
+    try std.testing.expectApproxEqAbs(maxScroll(12), clampScroll(1e6, 12), 1e-9);
+    try std.testing.expectEqual(Hit.open_settings, hitSpaces(W - 20, 18, 8, false, 0).?);
+    try std.testing.expectEqual(Hit.toggle_pause, hitSpaces(W - 48, 18, 8, false, 0).?);
+    try std.testing.expect(hitSpaces(W - 100, 18, 8, false, 0) == null);
+    try std.testing.expectEqual(Hit.toggle_pause, hitSpaces(W - 100, 18, 8, true, 0).?);
 
     try std.testing.expectEqual(Hit.back, hitSettings(30, 18).?);
     try std.testing.expectEqual(Hit.back, hitSettings(preview.x + preview.w * 0.5, preview.y + preview.h * 0.5).?);
