@@ -981,10 +981,12 @@ const MacBridge = struct {
         self.fillR(ctx, H, .{ .x = pl.BLOCK_RULE_X, .y = pl.ROW_A_Y + 2.0, .w = 1.0, .h = pl.ROW_B_Y + pl.ROW_H - pl.ROW_A_Y - 4.0 }, 0.0, C_RULE);
 
         // Right: 2x2 switches
-        self.switchCell(ctx, H, pl.cell(0, 0), "Mission Control", g_pictures.missionControlStills());
-        self.switchCell(ctx, H, pl.cell(1, 0), "Smooth swipes", self.warm_neighbors);
-        self.switchCell(ctx, H, pl.cell(0, 1), "Live reload", self.hot_reload);
-        self.switchCell(ctx, H, pl.cell(1, 1), "Open at login", self.launch_at_login);
+        // No "Show themes in Mission Control" switch in v1: on macOS 26 setting a Space's still also
+        // becomes the default picture for new Spaces, so the feature needs a cleaner design before
+        // it is offered. The setting (mission_control_stills, off by default) and its code remain.
+        self.switchCell(ctx, H, pl.cell(0, 0), "Smooth swipes", self.warm_neighbors);
+        self.switchCell(ctx, H, pl.cell(1, 0), "Live reload", self.hot_reload);
+        self.switchCell(ctx, H, pl.cell(0, 1), "Open at login", self.launch_at_login);
     }
 
     /// `text` shortened with an ellipsis (copied into `buf`) until it fits `max_w` points.
@@ -1669,7 +1671,6 @@ fn handlePopoverHit(b: *MacBridge, hit: pl.Hit) void {
             b.setSpeed(d, false);
             b.slider_drag = true; // saved on mouse up
         },
-        .mc_stills => g_pictures.setMissionControlStills(!g_pictures.missionControlStills()),
         .smooth_swipes => b.setWarmNeighbors(!b.warm_neighbors),
         .reload_on_edit => b.setHotReload(!b.hot_reload),
         .launch_at_login => b.setLaunchAtLogin(!b.launch_at_login),

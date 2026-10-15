@@ -67,7 +67,7 @@ pub const stepper_next = Rect{ .x = stepper.x + stepper.w - 32, .y = stepper.y, 
 pub const slider = Rect{ .x = LX + 62, .y = ROW_B_Y, .w = 140, .h = ROW_H };
 pub const BLOCK_RULE_X: f64 = 352.0;
 
-// Right block: a 2x2 grid of switches, each cell clickable as a whole.
+// Right block: a grid of switches (two per row), each cell clickable as a whole.
 pub const GX: f64 = 370.0;
 pub const CELL_W: f64 = 148.0;
 
@@ -115,7 +115,6 @@ pub const Hit = union(enum) {
     prev_theme,
     next_theme,
     speed: usize,
-    mc_stills,
     smooth_swipes,
     reload_on_edit,
     launch_at_login,
@@ -143,10 +142,9 @@ pub fn hitSettings(x: f64, y: f64) ?Hit {
     if (stepper_next.contains(x, y)) return .next_theme;
     // The slider's knob overhangs its track; give it a few points of slack either side.
     if (x >= slider.x - 8 and x < slider.x + slider.w + 8 and y >= slider.y and y < slider.y + slider.h) return .{ .speed = detentAt(x) };
-    if (cell(0, 0).contains(x, y)) return .mc_stills;
-    if (cell(1, 0).contains(x, y)) return .smooth_swipes;
-    if (cell(0, 1).contains(x, y)) return .reload_on_edit;
-    if (cell(1, 1).contains(x, y)) return .launch_at_login;
+    if (cell(0, 0).contains(x, y)) return .smooth_swipes;
+    if (cell(1, 0).contains(x, y)) return .reload_on_edit;
+    if (cell(0, 1).contains(x, y)) return .launch_at_login;
     return null;
 }
 
@@ -229,10 +227,10 @@ test "popover layout: every control hits where it is drawn, inside the box" {
     try std.testing.expectEqual(Hit.prev_theme, hitSettings(stepper.x + 10, ROW_A_Y + 10).?);
     try std.testing.expectEqual(Hit.next_theme, hitSettings(stepper.x + stepper.w - 10, ROW_A_Y + 10).?);
     try std.testing.expect(hitSettings(stepper.x + stepper.w * 0.5, ROW_A_Y + 10) == null);
-    try std.testing.expectEqual(Hit.mc_stills, hitSettings(GX + 10, ROW_A_Y + 10).?);
-    try std.testing.expectEqual(Hit.smooth_swipes, hitSettings(GX + CELL_W + 10, ROW_A_Y + 10).?);
-    try std.testing.expectEqual(Hit.reload_on_edit, hitSettings(GX + 10, ROW_B_Y + 10).?);
-    try std.testing.expectEqual(Hit.launch_at_login, hitSettings(GX + CELL_W + 10, ROW_B_Y + 10).?);
+    try std.testing.expectEqual(Hit.smooth_swipes, hitSettings(GX + 10, ROW_A_Y + 10).?);
+    try std.testing.expectEqual(Hit.reload_on_edit, hitSettings(GX + CELL_W + 10, ROW_A_Y + 10).?);
+    try std.testing.expectEqual(Hit.launch_at_login, hitSettings(GX + 10, ROW_B_Y + 10).?);
+    try std.testing.expect(hitSettings(GX + CELL_W + 10, ROW_B_Y + 10) == null);
     // Nothing leaves the original box or crosses the block divider.
     try std.testing.expect(ROW_B_Y + ROW_H <= SPACES_H - 6);
     try std.testing.expect(cell(1, 1).x + cell(1, 1).w <= W - 14);

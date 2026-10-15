@@ -21,8 +21,8 @@ make harness THEME=themes/Tutorial_Tides.metal   # same, on the GPU for Metal th
 
 Click the eye in the menu bar for the Spaces strip: drop a theme or picture on any Space,
 pause with ⏸ (the eye closes while paused). The gear, or a click on a thumbnail, turns the
-same box into Settings: step a Space's theme (or back to macOS Default), speed, Mission
-Control stills, smooth swipes, live reload and open at login. Settings live in `.argus_settings.conf` next to
+same box into Settings: step a Space's theme (or back to macOS Default), speed, smooth
+swipes, live reload and open at login. Settings live in `.argus_settings.conf` next to
 Argus.app, one `key=value` per line.
 
 ## Write your own theme
