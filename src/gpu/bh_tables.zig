@@ -208,7 +208,8 @@ pub fn ttabBytes(st: anytype) []const u8 {
 }
 
 /// Bytes per traced pixel kept on the GPU: record (6) + background (4, RGB9E5) + the share of
-/// the background that lies behind the animated gas (1) + its line-of-sight slant ln(1/mu) (1).
+/// the background that lies behind the animated gas (1) + its line-of-sight slant ln(1/mu) (1)
+/// + the transmission of faint gas in front of it (1).
 /// The trace also needs 2 bytes per pixel of light-travel phase until the footprint pass is done.
-pub const BYTES_PER_PIXEL: usize = 12;
+pub const BYTES_PER_PIXEL: usize = 13;
 pub const TEMP_BYTES_PER_PIXEL: usize = 2;

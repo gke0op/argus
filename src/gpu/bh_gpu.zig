@@ -90,6 +90,7 @@ pub const Engine = struct {
     tq: mtl.Id, // light-travel phase: only until the footprint pass has run
     bfrac: mtl.Id, // share of bg behind the animated gas (dimmed by it every frame)
     lmu: mtl.Id, // ln(1/mu) of the animated gas: its line-of-sight slant
+    ftr: mtl.Id, // transmission of faint gas in front of the animated gas (255 = none)
     tiles: [MAX_TILES]mtl.Id = @splat(null),
     tile_rows: u32 = 0,
     n_tiles: usize = 0,
@@ -116,8 +117,9 @@ pub const Engine = struct {
             .tq = mtl.msg(mtl.Id, dev, "newBufferWithLength:options:", .{ n * 2, BUF_PRIVATE }),
             .bfrac = mtl.msg(mtl.Id, dev, "newBufferWithLength:options:", .{ n, BUF_PRIVATE }),
             .lmu = mtl.msg(mtl.Id, dev, "newBufferWithLength:options:", .{ n, BUF_PRIVATE }),
+            .ftr = mtl.msg(mtl.Id, dev, "newBufferWithLength:options:", .{ n, BUF_PRIVATE }),
         };
-        if (e.trace_queue == null or e.stat == null or e.ttab == null or e.noise == null or e.recs == null or e.bg == null or e.tq == null or e.bfrac == null or e.lmu == null) {
+        if (e.trace_queue == null or e.stat == null or e.ttab == null or e.noise == null or e.recs == null or e.bg == null or e.tq == null or e.bfrac == null or e.lmu == null or e.ftr == null) {
             e.deinit();
             return error.MetalAlloc;
         }
@@ -165,6 +167,7 @@ pub const Engine = struct {
             mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.tq, @as(usize, 0), @as(usize, 5) });
             mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.bfrac, @as(usize, 0), @as(usize, 6) });
             mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.lmu, @as(usize, 0), @as(usize, 7) });
+            mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.ftr, @as(usize, 0), @as(usize, 8) });
             self.k.trace.dispatch(enc, self.params.width, rows);
             mtl.msg(void, enc, "endEncoding", .{});
             mtl.msg(void, cb, "commit", .{});
@@ -235,6 +238,7 @@ pub const Engine = struct {
         mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.ttab, @as(usize, 0), @as(usize, 7) });
         mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.bfrac, @as(usize, 0), @as(usize, 8) });
         mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.lmu, @as(usize, 0), @as(usize, 9) });
+        mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.ftr, @as(usize, 0), @as(usize, 10) });
         mtl.msg(void, enc, "setTexture:atIndex:", .{ tex, @as(usize, 0) });
         self.k.shade.dispatch(enc, out_w, out_h);
         mtl.msg(void, enc, "endEncoding", .{});
@@ -266,7 +270,7 @@ pub const Engine = struct {
     pub fn deinit(self: *Engine) void {
         for (self.tiles) |cb| mtl.release(cb);
         mtl.release(self.footprint_cb);
-        for ([_]mtl.Id{ self.stat, self.ttab, self.noise, self.recs, self.bg, self.tq, self.bfrac, self.lmu, self.trace_queue }) |o| mtl.release(o);
+        for ([_]mtl.Id{ self.stat, self.ttab, self.noise, self.recs, self.bg, self.tq, self.bfrac, self.lmu, self.ftr, self.trace_queue }) |o| mtl.release(o);
         self.* = undefined;
     }
 
