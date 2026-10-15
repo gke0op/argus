@@ -1,0 +1,7 @@
+.{
+    .name = .argus,
+    .version = "0.1.35",
+    .fingerprint = 0x759ab16767d65eb8,
+    .minimum_zig_version = "0.17.0",
+    .paths = .{ "build.zig", "build.zig.zon", "src", "themes" },
+}

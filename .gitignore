@@ -1,0 +1,13 @@
+.zig-cache/
+zig-cache/
+zig-out/
+.DS_Store
+*.o
+argus-desktop
+kronos-tui
+Argus.app/Contents/MacOS/
+Argus.app/Contents/_CodeSignature/
+.argus_spaces.conf
+.argus_dropped_space_*.img
+*.ppm
+.toolchain/
