@@ -66,7 +66,6 @@ const MsgSendUIntRetId = *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c
 const MsgSendId2 = *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void;
 const MsgSendInitWin = *const fn (?*anyopaque, ?*anyopaque, CGRect, usize, usize, bool) callconv(.c) ?*anyopaque;
 const MsgSendSetFrame = *const fn (?*anyopaque, ?*anyopaque, CGRect, bool) callconv(.c) void;
-const MsgSendSetFrameAnim = *const fn (?*anyopaque, ?*anyopaque, CGRect, bool, bool) callconv(.c) void;
 const MsgSendStatusItem = *const fn (?*anyopaque, ?*anyopaque, f64) callconv(.c) ?*anyopaque;
 const MsgSendUTF8 = *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque;
 const MsgSendTimer = *const fn (?*anyopaque, ?*anyopaque, f64, ?*anyopaque, ?*anyopaque, ?*anyopaque, bool) callconv(.c) ?*anyopaque;
@@ -96,7 +95,6 @@ const MacBridge = struct {
     msgId2: MsgSendId2,
     msgInitWin: MsgSendInitWin,
     msgSetFrame: MsgSendSetFrame,
-    msgSetFrameAnim: MsgSendSetFrameAnim,
     msgUTF8: MsgSendUTF8,
     msgRetPoint: MsgSendRetPoint,
     msgRetRect: MsgSendRetRect,
@@ -163,7 +161,6 @@ const MacBridge = struct {
     dict_body: ?*anyopaque,
     dict_small: ?*anyopaque,
     dict_mono: ?*anyopaque,
-    dict_caps: ?*anyopaque,
 
     ns_app: ?*anyopaque,
     NSWindow: ?*anyopaque,
@@ -175,8 +172,7 @@ const MacBridge = struct {
     native_data_providers: [MAX_SPACES]?*anyopaque = @splat(null),
     popover_win: ?*anyopaque,
     popover_layer: ?*anyopaque,
-    popover_bitmap_ctx: ?*anyopaque, // full height: the Settings face
-    popover_spaces_ctx: ?*anyopaque, // top POPOVER_H rows: the Spaces face
+    popover_bitmap_ctx: ?*anyopaque,
     // Popover: which face shows, the Space the Settings view edits, and its theme stepper.
     pop_face: PopFace = .spaces,
     sel_space: usize = 0,
@@ -745,10 +741,6 @@ const MacBridge = struct {
     // @2X RETINA BARE-TEXTURE PANORAMA POPOVER (No Glass/Blur/Sheen Effects)
     // ========================================================================
 
-    pub fn popHeight(self: *const MacBridge) f64 {
-        return if (self.pop_face == .settings) pl.SETTINGS_H else pl.SPACES_H;
-    }
-
     /// The Space a file dropped at (x, top_y) goes to: the thumbnail under it on the Spaces face,
     /// the selected Space on the Settings face, otherwise the active Space.
     pub fn dropTarget(self: *const MacBridge, x: f64, top_y: f64) usize {
@@ -761,9 +753,9 @@ const MacBridge = struct {
     }
 
     pub fn renderStatsPopover(self: *MacBridge) void {
-        const ctx = if (self.pop_face == .settings) self.popover_bitmap_ctx else self.popover_spaces_ctx;
+        const ctx = self.popover_bitmap_ctx;
         const W = pl.W;
-        const H = self.popHeight();
+        const H = pl.SPACES_H;
         const scale_f: f64 = @floatFromInt(POPOVER_SCALE);
 
         // Scale the CoreGraphics CTM by 2.0x so all textures & CoreText glyphs rasterize at native Retina resolution!
@@ -875,26 +867,6 @@ const MacBridge = struct {
         self.segment(ctx, H, tip, cy, tail, cy + 5.0, 1.8, c);
     }
 
-    fn toggleSwitch(self: *MacBridge, ctx: ?*anyopaque, H: f64, x: f64, top_y: f64, on: bool) void {
-        self.fillR(ctx, H, .{ .x = x, .y = top_y, .w = 30.0, .h = 17.0 }, 8.5, if (on) C_ACCENT else C_OFF);
-        self.disc(ctx, H, if (on) x + 21.5 else x + 8.5, top_y + 8.5, 7.0, .{ 1.0, 1.0, 1.0, 1.0 });
-    }
-
-    fn toggleRow(self: *MacBridge, ctx: ?*anyopaque, H: f64, top_y: f64, text: []const u8, on: bool) void {
-        self.drawLabel(ctx, H, pl.RX, top_y + 2.0, text, self.dict_body, C_BODY, .left);
-        self.toggleSwitch(ctx, H, pl.RX + pl.RW - 30.0, top_y + 1.0, on);
-    }
-
-    fn drawButton(self: *MacBridge, ctx: ?*anyopaque, H: f64, r: pl.Rect, text: []const u8) void {
-        self.fillR(ctx, H, r, 6.0, .{ 0.20, 0.20, 0.24, 1.0 });
-        self.strokeR(ctx, H, r, 6.0, 1.0, .{ 0.32, 0.32, 0.38, 0.9 });
-        self.drawLabel(ctx, H, r.x + r.w * 0.5, r.y + 5.5, text, self.dict_small, C_BODY, .center);
-    }
-
-    fn sectionTitle(self: *MacBridge, ctx: ?*anyopaque, H: f64, x: f64, top_y: f64, text: []const u8) void {
-        self.drawLabel(ctx, H, x, top_y, text, self.dict_caps, C_DIM, .left);
-    }
-
     // ---- Spaces face ----------------------------------------------------------------------
 
     fn drawSpacesFace(self: *MacBridge, ctx: ?*anyopaque, H: f64) void {
@@ -957,117 +929,62 @@ const MacBridge = struct {
         const sel = @min(self.sel_space, n - 1);
         const sp = &self.obs.spaces[sel];
 
-        // Header: back to the Spaces strip | Settings | Quit
+        // Header: back to the Spaces strip | Settings (or a passing note) | Quit
         self.chevron(ctx, H, 20.0, 18.0, true, C_ICON);
         self.drawLabel(ctx, H, 31.0, 12.0, "Spaces", self.dict_small, C_MUTED, .left);
-        self.drawLabel(ctx, H, W * 0.5, 10.5, "Settings", self.dict_title, C_TITLE, .center);
-        self.drawLabel(ctx, H, W - 20.0, 11.5, "Quit", self.dict_small, C_MUTED, .right);
-        self.fillR(ctx, H, .{ .x = 16.0, .y = pl.HEADER_RULE_Y, .w = W - 32.0, .h = 1.0 }, 0.0, C_RULE);
-
-        // ---- Left column: the selected Space ----
-        self.sectionTitle(ctx, H, pl.LX, 45.0, "SPACE");
-        for (0..n) |i| {
-            const r = pl.numeral(i, n);
-            if (i == sel) self.fillR(ctx, H, r, 6.0, .{ 1.0, 1.0, 1.0, 0.12 });
-            self.drawLabel(ctx, H, r.x + r.w * 0.5, r.y + 4.0, romanNumeral(self.obs.spaces[i].index_1based), self.dict_small, if (i == sel) C_TITLE else C_MUTED, .center);
-            if (i == self.obs.active_space_idx) self.disc(ctx, H, r.x + r.w * 0.5, r.y + r.h + 3.5, 1.6, C_MUTED);
-        }
-
-        const pv = pl.preview;
-        self.drawSpaceThumbnail(ctx, H, pv.x, pv.y, pv.w, pv.h, sp);
-        if (self.obs.drag_hover_idx != null) {
-            self.strokeR(ctx, H, .{ .x = pv.x - 1.0, .y = pv.y - 1.0, .w = pv.w + 2.0, .h = pv.h + 2.0 }, 6.0, 1.5, .{ 1.0, 1.0, 1.0, 1.0 });
+        if (self.note_len > 0) {
+            self.drawLabel(ctx, H, W * 0.5, 12.0, self.note_buf[0..self.note_len], self.dict_small, if (self.note_error) C_ERROR else C_AMBER, .center);
         } else {
-            self.strokeR(ctx, H, pv, 4.5, 1.0, .{ 1.0, 1.0, 1.0, 0.10 });
+            self.drawLabel(ctx, H, W * 0.5, 10.5, "Settings", self.dict_title, C_TITLE, .center);
         }
+        self.drawLabel(ctx, H, W - 20.0, 11.5, "Quit", self.dict_small, C_MUTED, .right);
 
-        // Theme stepper: ‹ Name ›
+        // Row A, left: which Space (click to move on), and its theme stepper ‹ Name ›
+        var sp_buf: [16]u8 = undefined;
+        const sp_txt = std.fmt.bufPrint(&sp_buf, "Space {s}", .{romanNumeral(sp.index_1based)}) catch "Space";
+        self.drawLabel(ctx, H, pl.LX, pl.ROW_A_Y + 5.0, sp_txt, self.dict_small, C_BODY, .left);
+
         const st = pl.stepper;
-        self.drawLabel(ctx, H, st.x, 96.0, "Theme", self.dict_small, C_DIM, .left);
-        self.fillR(ctx, H, st, 7.0, .{ 0.118, 0.118, 0.137, 1.0 });
-        self.strokeR(ctx, H, st, 7.0, 1.0, .{ 1.0, 1.0, 1.0, 0.08 });
-        self.chevron(ctx, H, st.x + 10.0, st.y + st.h * 0.5, true, C_MUTED);
-        self.chevron(ctx, H, st.x + st.w - 15.0, st.y + st.h * 0.5, false, C_MUTED);
-
+        self.fillR(ctx, H, st, 6.0, .{ 0.118, 0.118, 0.137, 1.0 });
+        // A file dragged over the Settings face lands on this Space: outline its theme.
+        self.strokeR(ctx, H, st, 6.0, 1.0, if (self.obs.drag_hover_idx != null) .{ 1.0, 1.0, 1.0, 1.0 } else .{ 1.0, 1.0, 1.0, 0.08 });
+        self.chevron(ctx, H, st.x + 11.0, st.y + st.h * 0.5, true, C_MUTED);
+        self.chevron(ctx, H, st.x + st.w - 16.0, st.y + st.h * 0.5, false, C_MUTED);
         var name_buf: [64]u8 = undefined;
-        const file = std.Io.Dir.path.basename(sp.getPath());
         const name: []const u8 = switch (sp.mode) {
-            .custom_shader => displayName(file, &name_buf),
+            .custom_shader => displayName(std.Io.Dir.path.basename(sp.getPath()), &name_buf),
             .picture => "Picture",
             .passthrough => "macOS Default",
         };
-        const name_dict = if (self.textWidth(name, self.dict_body) > st.w - 44.0) self.dict_small else self.dict_body;
-        const name_y: f64 = if (name_dict == self.dict_body) st.y + 7.0 else st.y + 7.5;
-        self.drawLabel(ctx, H, st.x + st.w * 0.5, name_y, name, name_dict, C_TITLE, .center);
+        const name_dict = if (self.textWidth(name, self.dict_body) > st.w - 64.0) self.dict_small else self.dict_body;
+        self.drawLabel(ctx, H, st.x + st.w * 0.5, st.y + @as(f64, if (name_dict == self.dict_body) 4.5 else 5.5), name, name_dict, C_TITLE, .center);
 
-        // What it is, then how it is running (or the current note).
-        var kind_buf: [96]u8 = undefined;
-        const kind: []const u8 = switch (sp.mode) {
-            .custom_shader => blk: {
-                const what = if (sp.metal_theme) "Metal theme" else if (self.gpu[sel] != null) "Zig theme on the GPU" else "Zig theme";
-                if (self.themes.indexOf(file)) |ti| {
-                    break :blk std.fmt.bufPrint(&kind_buf, "{d} of {d}  \xc2\xb7  {s}", .{ ti + 1, self.themes.n, what }) catch what;
-                }
-                break :blk what;
-            },
-            .picture => displayName(file, &kind_buf),
-            .passthrough => "Your macOS wallpaper",
-        };
-        self.drawLabel(ctx, H, st.x, 146.0, kind, self.dict_small, C_DIM, .left);
-
-        if (self.note_len > 0) {
-            self.drawLabel(ctx, H, st.x, 161.0, self.note_buf[0..self.note_len], self.dict_small, if (self.note_error) C_ERROR else C_AMBER, .left);
-        } else if (sp.mode == .custom_shader) {
-            const run: []const u8 = if (self.obs.paused) "Paused" else if (sel == self.obs.active_space_idx) "Live on this Space" else "Live when on screen";
-            self.drawLabel(ctx, H, st.x, 161.0, run, self.dict_small, if (self.obs.paused) C_AMBER else C_DIM, .left);
-        }
-
-        self.drawButton(ctx, H, pl.choose_btn, "Choose File\xe2\x80\xa6");
-        self.drawButton(ctx, H, pl.default_btn, "macOS Default");
-        self.drawButton(ctx, H, pl.reveal_btn, "Show in Finder");
-        self.drawLabel(ctx, H, pl.LX, 236.0, "Tip: drop a theme or picture here, or on any thumbnail.", self.dict_small, C_DIM, .left);
-
-        self.fillR(ctx, H, .{ .x = pl.COLUMN_RULE_X, .y = 46.0, .w = 1.0, .h = 214.0 }, 0.0, C_RULE);
-
-        // ---- Right column: global controls ----
-        self.sectionTitle(ctx, H, pl.RX, 45.0, "PLAYBACK");
-        self.toggleRow(ctx, H, pl.ROW_ANIMATE_Y, "Animate", !self.obs.paused);
-
-        self.drawLabel(ctx, H, pl.RX, pl.SPEED_Y, "Speed", self.dict_body, C_BODY, .left);
+        // Row B, left: speed in five detents
+        self.drawLabel(ctx, H, pl.LX, pl.ROW_B_Y + 5.0, "Speed", self.dict_small, C_BODY, .left);
         const si = pl.speedIndex(self.obs.spin_mult);
-        const speed_txt = [_][]const u8{ "\xc2\xbc\xc3\x97", "\xc2\xbd\xc3\x97", "1\xc3\x97", "1\xc2\xbd\xc3\x97", "2\xc3\x97" };
-        self.drawLabel(ctx, H, pl.RX + pl.RW, pl.SPEED_Y + 1.0, speed_txt[si], self.dict_mono, C_MUTED, .right);
         const sl = pl.slider;
-        const track_y = sl.y + 12.0;
+        const track_y = sl.y + 9.0;
         const knob_x = sl.x + sl.w * pl.detentT(si);
         self.fillR(ctx, H, .{ .x = sl.x, .y = track_y, .w = sl.w, .h = 4.0 }, 2.0, C_OFF);
         self.fillR(ctx, H, .{ .x = sl.x, .y = track_y, .w = knob_x - sl.x, .h = 4.0 }, 2.0, C_ACCENT);
-        for (0..pl.SPEEDS.len) |i| {
-            self.fillR(ctx, H, .{ .x = sl.x + sl.w * pl.detentT(i) - 0.75, .y = track_y + 8.0, .w = 1.5, .h = 4.0 }, 0.5, C_DIM);
-        }
-        self.disc(ctx, H, knob_x, track_y + 2.0, 8.0, .{ 1.0, 1.0, 1.0, 1.0 });
+        self.disc(ctx, H, knob_x, track_y + 2.0, 6.5, .{ 1.0, 1.0, 1.0, 1.0 });
+        const speed_txt = [_][]const u8{ "\xc2\xbc\xc3\x97", "\xc2\xbd\xc3\x97", "1\xc3\x97", "1\xc2\xbd\xc3\x97", "2\xc3\x97" };
+        self.drawLabel(ctx, H, st.x + st.w, pl.ROW_B_Y + 5.0, speed_txt[si], self.dict_small, C_MUTED, .right);
 
-        self.sectionTitle(ctx, H, pl.RX, 131.0, "DESKTOP");
-        self.toggleRow(ctx, H, pl.ROW_STILLS_Y, "Show themes in Mission Control", g_pictures.missionControlStills());
-        self.toggleRow(ctx, H, pl.ROW_SWIPES_Y, "Smooth Space swipes", self.warm_neighbors);
-        self.toggleRow(ctx, H, pl.ROW_RELOAD_Y, "Reload themes when edited", self.hot_reload);
+        self.fillR(ctx, H, .{ .x = pl.BLOCK_RULE_X, .y = pl.ROW_A_Y + 2.0, .w = 1.0, .h = pl.ROW_B_Y + pl.ROW_H - pl.ROW_A_Y - 4.0 }, 0.0, C_RULE);
 
-        self.sectionTitle(ctx, H, pl.RX, 227.0, "SYSTEM");
-        self.toggleRow(ctx, H, pl.ROW_LOGIN_Y, "Launch at login", self.launch_at_login);
+        // Right: 2x2 switches
+        self.switchCell(ctx, H, pl.cell(0, 0), "Mission Control", g_pictures.missionControlStills());
+        self.switchCell(ctx, H, pl.cell(1, 0), "Smooth swipes", self.warm_neighbors);
+        self.switchCell(ctx, H, pl.cell(0, 1), "Live reload", self.hot_reload);
+        self.switchCell(ctx, H, pl.cell(1, 1), "Open at login", self.launch_at_login);
+    }
 
-        // ---- Footer ----
-        self.fillR(ctx, H, .{ .x = 16.0, .y = pl.FOOTER_RULE_Y, .w = W - 32.0, .h = 1.0 }, 0.0, C_RULE);
-        self.themesIcon(ctx, H, 20.0, 283.0);
-        self.drawLabel(ctx, H, 42.0, 284.0, "Open Themes Folder", self.dict_small, C_BODY, .left);
-
-        var live: usize = 0;
-        for (self.obs.spaces[0..n]) |s| {
-            if (s.mode == .custom_shader) live += 1;
-        }
-        var stat_buf: [96]u8 = undefined;
-        const stat = std.fmt.bufPrint(&stat_buf, "{d} Spaces  \xc2\xb7  {d} themed  \xc2\xb7  30 fps", .{ n, live }) catch "";
-        self.drawLabel(ctx, H, W * 0.5 + 30.0, 284.0, stat, self.dict_small, C_DIM, .center);
-        self.drawLabel(ctx, H, W - 20.0, 284.0, "Rests on lock & fullscreen", self.dict_small, C_DIM, .right);
+    fn switchCell(self: *MacBridge, ctx: ?*anyopaque, H: f64, r: pl.Rect, text: []const u8, on: bool) void {
+        const ty = r.y + (r.h - 15.0) * 0.5;
+        self.fillR(ctx, H, .{ .x = r.x, .y = ty, .w = 26.0, .h = 15.0 }, 7.5, if (on) C_ACCENT else C_OFF);
+        self.disc(ctx, H, if (on) r.x + 18.5 else r.x + 7.5, ty + 7.5, 6.0, .{ 1.0, 1.0, 1.0, 1.0 });
+        self.drawLabel(ctx, H, r.x + 34.0, r.y + 5.0, text, self.dict_small, if (on) C_BODY else C_MUTED, .left);
     }
 
     fn drawSpaceThumbnail(self: *MacBridge, ctx: ?*anyopaque, h_total: f64, x: f64, top_y: f64, w: f64, h: f64, sp: *const SpaceConfig) void {
@@ -1091,7 +1008,7 @@ const MacBridge = struct {
 
     pub fn flushPopoverLayer(self: *MacBridge) void {
         self.renderStatsPopover();
-        const ctx = if (self.pop_face == .settings) self.popover_bitmap_ctx else self.popover_spaces_ctx;
+        const ctx = self.popover_bitmap_ctx;
         if (self.CGBitmapContextCreateImage(ctx)) |cg_img| {
             self.msgId(self.popover_layer, self.sel_set_contents, cg_img);
             self.msgVoid(self.CATransaction, self.sel_flush);
@@ -1114,7 +1031,7 @@ const MacBridge = struct {
         const finalize: *const fn (?*anyopaque) callconv(.c) bool = @ptrCast(@alignCast(std.c.dlsym(lib, "CGImageDestinationFinalize") orelse return));
         self.pop_face = face;
         self.renderStatsPopover();
-        const img = self.CGBitmapContextCreateImage(if (face == .settings) self.popover_bitmap_ctx else self.popover_spaces_ctx) orelse return;
+        const img = self.CGBitmapContextCreateImage(self.popover_bitmap_ctx) orelse return;
         defer self.CGImageRelease(img);
         var path_buf: [1024]u8 = undefined;
         const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, name }) catch return;
@@ -1132,8 +1049,7 @@ const MacBridge = struct {
     // POPOVER COMMAND & CONTROL: the Spaces strip flips into Settings in the same window
     // ========================================================================
 
-    /// Flips the popover between its faces. The window keeps its top edge under the menu bar and
-    /// grows (or shrinks) with an animated resize while the contents crossfade.
+    /// Flips the popover between its faces inside the same box; the contents crossfade.
     pub fn setPopFace(self: *MacBridge, face: PopFace) void {
         if (face == self.pop_face) return;
         self.pop_face = face;
@@ -1143,24 +1059,8 @@ const MacBridge = struct {
             self.browse_idx = null;
             self.note_len = 0;
         }
-        const frame = self.msgRetRect(self.popover_win, self.sel_registerName("frame"));
-        const h = self.popHeight();
-        const new_frame = CGRect{
-            .origin = .{ .x = frame.origin.x, .y = frame.origin.y + frame.size.height - h },
-            .size = .{ .width = frame.size.width, .height = h },
-        };
-        const sel_anim = self.sel_registerName("setFrame:display:animate:");
-        // Growing: show the taller face first so the resize reveals it; shrinking: the reverse.
-        if (face == .settings) {
-            self.crossfadePopover();
-            self.flushPopoverLayer();
-            self.msgSetFrameAnim(self.popover_win, sel_anim, new_frame, true, true);
-        } else {
-            self.msgSetFrameAnim(self.popover_win, sel_anim, new_frame, true, true);
-            self.crossfadePopover();
-            self.flushPopoverLayer();
-        }
-        self.msgVoid(self.popover_win, self.sel_registerName("invalidateShadow"));
+        self.crossfadePopover();
+        self.flushPopoverLayer();
     }
 
     /// The next `contents` change on the popover layer fades over 0.18 s instead of snapping.
@@ -1203,15 +1103,14 @@ const MacBridge = struct {
         const idx = @min(self.sel_space, self.obs.n_spaces -| 1);
         const sp = &self.obs.spaces[idx];
         self.themes.scan();
-        const current = self.browse_idx orelse if (sp.mode == .custom_shader)
-            self.themes.indexOf(std.Io.Dir.path.basename(sp.getPath()))
-        else
-            null;
-        const next = self.themes.step(current, delta) orelse {
-            self.setNote(true, "No themes in the themes folder", .{});
-            return;
+        const current = self.browse_idx orelse switch (sp.mode) {
+            .custom_shader => self.themes.indexOf(std.Io.Dir.path.basename(sp.getPath())),
+            .passthrough => self.themes.n,
+            .picture => null,
         };
+        const next = self.themes.step(current, delta);
         self.browse_idx = next;
+        if (next == self.themes.n) return self.resetSpaceToDefault(idx); // the "macOS Default" stop
         const file = self.themes.name(next);
         var name_buf: [64]u8 = undefined;
         const name = displayName(file, &name_buf);
@@ -1237,30 +1136,7 @@ const MacBridge = struct {
         sp.unloadShader();
         sp.setPath("");
         self.applyThemeModeToSpace(idx, .passthrough);
-        self.browse_idx = null;
         self.note_len = 0;
-    }
-
-    pub fn chooseFileForSpace(self: *MacBridge, idx: usize) void {
-        var buf: [1024]u8 = undefined;
-        const path = self.promptOpenFile(&buf) orelse return;
-        self.setNote(false, "Loading {s}\xe2\x80\xa6", .{std.Io.Dir.path.basename(path)});
-        self.flushPopoverLayer();
-        if (self.assignFileToSpace(idx, path)) {
-            self.note_len = 0;
-            self.browse_idx = null;
-        } else {
-            self.setNote(true, "Couldn't load {s}", .{std.Io.Dir.path.basename(path)});
-        }
-    }
-
-    /// Selects the Space's theme or picture in Finder (the themes folder for an untouched Space).
-    pub fn revealSpaceFile(self: *MacBridge, idx: usize) void {
-        const path = if (idx < self.obs.n_spaces) self.obs.spaces[idx].getPath() else "";
-        const has_file = path.len > 0 and self.obs.spaces[idx].mode != .passthrough;
-        _ = std.process.spawn(g_io, .{
-            .argv = if (has_file) &[_][]const u8{ "/usr/bin/open", "-R", path } else &[_][]const u8{ "/usr/bin/open", "themes" },
-        }) catch {};
     }
 
     pub fn setWarmNeighbors(self: *MacBridge, on: bool) void {
@@ -1626,7 +1502,7 @@ fn onPrepareForDragOperation(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) cal
 fn onDraggingEntered(_: ?*anyopaque, _: ?*anyopaque, sender: ?*anyopaque) callconv(.c) usize {
     const b = g_bridge orelse return 0;
     const loc = b.msgRetPoint(sender, b.sel_registerName("draggingLocation"));
-    const top_y = (b.popHeight() - 1.0) - loc.y;
+    const top_y = (pl.SPACES_H - 1.0) - loc.y;
     b.obs.drag_hover_idx = b.dropTarget(loc.x, top_y);
     b.flushPopoverLayer();
     return 1; // NSDragOperationCopy
@@ -1645,7 +1521,7 @@ fn onDraggingExited(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c)
 fn onPerformDragOperation(_: ?*anyopaque, _: ?*anyopaque, sender: ?*anyopaque) callconv(.c) bool {
     const b = g_bridge orelse return false;
     const loc = b.msgRetPoint(sender, b.sel_registerName("draggingLocation"));
-    const top_y = (b.popHeight() - 1.0) - loc.y;
+    const top_y = (pl.SPACES_H - 1.0) - loc.y;
 
     const target_idx: usize = b.obs.drag_hover_idx orelse b.dropTarget(loc.x, top_y);
     b.obs.drag_hover_idx = null;
@@ -1729,14 +1605,14 @@ fn onStatusItemClick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c
 /// Popover point (top-left origin) of a mouse event.
 fn popoverPoint(b: *MacBridge, event: ?*anyopaque) CGPoint {
     const loc = b.msgRetPoint(event, b.sel_registerName("locationInWindow"));
-    return .{ .x = loc.x, .y = b.popHeight() - loc.y };
+    return .{ .x = loc.x, .y = pl.SPACES_H - loc.y };
 }
 
 fn onPopoverMouseDown(_: ?*anyopaque, _: ?*anyopaque, event: ?*anyopaque) callconv(.c) void {
     const b = g_bridge orelse return;
     const p = popoverPoint(b, event);
     const hit = if (b.pop_face == .settings)
-        pl.hitSettings(p.x, p.y, b.obs.n_spaces)
+        pl.hitSettings(p.x, p.y)
     else
         pl.hitSpaces(p.x, p.y, b.obs.n_spaces, b.obs.paused);
     if (hit) |h| handlePopoverHit(b, h);
@@ -1748,7 +1624,7 @@ fn handlePopoverHit(b: *MacBridge, hit: pl.Hit) void {
     const sel = @min(b.sel_space, b.obs.n_spaces -| 1);
     switch (hit) {
         .open_themes => b.openThemesFolder(),
-        .toggle_pause, .animate => b.setPaused(!b.obs.paused),
+        .toggle_pause => b.setPaused(!b.obs.paused),
         .open_settings => {
             b.sel_space = b.obs.active_space_idx;
             b.setPopFace(.settings);
@@ -1759,16 +1635,13 @@ fn handlePopoverHit(b: *MacBridge, hit: pl.Hit) void {
         },
         .back => b.setPopFace(.spaces),
         .quit => quitArgus(b),
-        .select_space => |i| {
-            b.sel_space = i;
+        .next_space => {
+            b.sel_space = (sel + 1) % @max(@as(usize, 1), b.obs.n_spaces);
             b.browse_idx = null;
             b.note_len = 0;
         },
         .prev_theme => b.stepTheme(-1),
         .next_theme => b.stepTheme(1),
-        .choose_file => b.chooseFileForSpace(sel),
-        .reset_default => b.resetSpaceToDefault(sel),
-        .reveal => b.revealSpaceFile(sel),
         .speed => |d| {
             b.setSpeed(d, false);
             b.slider_drag = true; // saved on mouse up
@@ -1919,19 +1792,7 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
         b.writePopoverPng(.spaces, dir, "popover_spaces_paused.png");
         b.setNote(true, "Couldn't load Example_Theme", .{});
         b.writePopoverPng(.settings, dir, "popover_settings_paused.png");
-        b.obs.paused = false;
-        b.note_len = 0;
-        // Then open the real window and flip it, so the resize can be checked on screen.
-        onStatusItemClick(null, null, null);
-        b.setPopFace(.settings);
-        const f = b.msgRetRect(b.popover_win, b.sel_registerName("frame"));
-        std.debug.print("snapshot: settings frame y={d} h={d}\n", .{ f.origin.y, f.size.height });
-    } else if (b.frame_idx == 150) {
-        b.setPopFace(.spaces);
-        const f = b.msgRetRect(b.popover_win, b.sel_registerName("frame"));
-        std.debug.print("snapshot: spaces frame y={d} h={d}\n", .{ f.origin.y, f.size.height });
-    } else if (b.frame_idx == 210) {
-        quitArgus(b);
+        std.process.exit(0);
     };
 
     if (b.note_until != 0 and b.frame_idx >= b.note_until) {
@@ -2177,20 +2038,17 @@ pub fn main(init: std.process.Init) !void {
     const ct_body = CTFontCreateWithName(cf_font_ui, 12.0, null);
     const ct_small = CTFontCreateWithName(cf_font_ui, 10.5, null);
     const ct_mono = CTFontCreateWithName(cf_font_mono, 11.0, null);
-    const ct_caps = CTFontCreateWithName(cf_font_bold, 9.0, null);
 
     var keys = [2]?*const anyopaque{ kCTFontAttributeName_ptr.*, kCTForegroundColorFromContext_ptr.* };
     var vals_title = [2]?*const anyopaque{ ct_title, kCFBooleanTrue_ptr.* };
     var vals_body = [2]?*const anyopaque{ ct_body, kCFBooleanTrue_ptr.* };
     var vals_small = [2]?*const anyopaque{ ct_small, kCFBooleanTrue_ptr.* };
     var vals_mono = [2]?*const anyopaque{ ct_mono, kCFBooleanTrue_ptr.* };
-    var vals_caps = [2]?*const anyopaque{ ct_caps, kCFBooleanTrue_ptr.* };
 
     const dict_title = CFDictionaryCreate(null, &keys, &vals_title, 2, null, null);
     const dict_body = CFDictionaryCreate(null, &keys, &vals_body, 2, null, null);
     const dict_small = CFDictionaryCreate(null, &keys, &vals_small, 2, null, null);
     const dict_mono = CFDictionaryCreate(null, &keys, &vals_mono, 2, null, null);
-    const dict_caps = CFDictionaryCreate(null, &keys, &vals_caps, 2, null, null);
 
     // 1. Register Objective-C Controller & Drag-and-Drop Popover View Classes
     const NSObject = objc_getClass("NSObject") orelse return error.NoNSObject;
@@ -2260,9 +2118,6 @@ pub fn main(init: std.process.Init) !void {
     msgId(popover_win, sel_registerName("setContentView:"), pop_view);
     const popover_layer = msg0(pop_view, sel_registerName("layer"));
     msgFloat(popover_layer, sel_registerName("setContentsScale:"), @floatFromInt(POPOVER_SCALE));
-    // Pin the face to the top edge, so the window's animated resize reveals or clips it, never stretches it.
-    msgId(popover_layer, sel_registerName("setContentsGravity:"), msgUTF8(objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), "top"));
-
     // Register Popover View & Window for Finder/Browser/Photos Drag-and-Drop
     const NSString = objc_getClass("NSString") orelse return error.NoNSString;
     const NSArray = objc_getClass("NSArray") orelse return error.NoNSArray;
@@ -2322,17 +2177,6 @@ pub fn main(init: std.process.Init) !void {
         color_space,
         1 | (4 << 12),
     ) orelse return error.BitmapContextFailed;
-    // The Spaces face is the top POPOVER_H rows of the same buffer (row 0 is the top).
-    const popover_spaces_ctx = CGBitmapContextCreate(
-        @ptrCast(&obs.popover_pixels),
-        POPOVER_BMP_W,
-        POPOVER_H * POPOVER_SCALE,
-        8,
-        POPOVER_BMP_W * 4,
-        color_space,
-        1 | (4 << 12),
-    ) orelse return error.BitmapContextFailed;
-
     var bridge = MacBridge{
         .obs = obs,
         .objc_getClass = objc_getClass,
@@ -2349,7 +2193,6 @@ pub fn main(init: std.process.Init) !void {
         .msgId2 = msgId2,
         .msgInitWin = msgInitWin,
         .msgSetFrame = msgSetFrame,
-        .msgSetFrameAnim = @ptrCast(msgSend_raw),
         .msgUTF8 = msgUTF8,
         .msgRetPoint = msgRetPoint,
         .msgRetRect = msgRetRect,
@@ -2408,7 +2251,6 @@ pub fn main(init: std.process.Init) !void {
         .dict_body = dict_body,
         .dict_small = dict_small,
         .dict_mono = dict_mono,
-        .dict_caps = dict_caps,
         .ns_app = ns_app,
         .NSWindow = NSWindow,
         .NSNumber = NSNumber,
@@ -2420,7 +2262,6 @@ pub fn main(init: std.process.Init) !void {
         .popover_win = popover_win,
         .popover_layer = popover_layer,
         .popover_bitmap_ctx = popover_bitmap_ctx,
-        .popover_spaces_ctx = popover_spaces_ctx,
         .status_button = status_button,
         .NSImage = objc_getClass("NSImage"),
         .glyph_pt = glyph_pt,
