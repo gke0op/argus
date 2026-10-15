@@ -1324,6 +1324,12 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
                 break;
             }
         }
+    } else if (!b.obs.paused and !b.screen_locked) {
+        // A fullscreen app's Space is active. Our windows are normally all hidden, but Mission Control
+        // opened from there shows a desktop Space behind its thumbnails: keep whatever is on screen live.
+        for (0..b.obs.n_spaces) |idx| {
+            if (isAnimatedSpaceMode(b.obs.spaces[idx].mode) and b.renderIfDue(idx, 0)) rendered_any = true;
+        }
     }
 
     if (b.perf_log and (b.frame_idx % 30) == 29) {
