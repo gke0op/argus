@@ -33,4 +33,8 @@ Themes added for this release:
   more (blacktip reef shark, green turtle, parrotfish) are carried over from
   Opus_Coral_Reef.
 
+- `themes/Opus_Night_Tide.metal`: written by Claude Opus. A Metal theme of
+  bioluminescent surf on a moonless night; the flash behaviour follows the
+  published dinoflagellate research cited in its header.
+
 The repository contains no third-party source code or data.
