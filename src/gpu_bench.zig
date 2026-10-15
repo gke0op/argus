@@ -39,7 +39,7 @@ fn saveRgba(path: []const u8, px: []const u32) void {
 }
 
 /// Traces at w x h and shades one sRGB frame into `out` (w*h RGBA8). Returns timings.
-fn gpuFrame(st: *theme.State, w: u32, h: u32, frames: usize, out: []u32, io: std.Io) !struct { meter_ms: f64, trace_ms: f64, shade_ms: f64, hdr_ms: f64, exposure: f32 } {
+fn gpuFrame(st: *theme.State, w: u32, h: u32, frames: usize, out: []u32, io: std.Io) !struct { meter_ms: f64, trace_ms: f64, shade_ms: f64, hdr_ms: f64, paced_hdr_ms: f64, exposure: f32 } {
     var stat: bt.Static = undefined;
     bt.fillStatic(st, &stat);
     var params: bt.TraceParams = undefined;
@@ -79,6 +79,29 @@ fn gpuFrame(st: *theme.State, w: u32, h: u32, frames: usize, out: []u32, io: std
         mtl.msg(void, cb, "waitUntilCompleted", .{});
         if (hdr) hdr_ms += gpuMs(cb) else shade_ms += gpuMs(cb);
     }
+    // The live cost: HDR frames paced like the app (one every 33 ms). At this light periodic
+    // load the GPU stays at a low clock, so frames take longer than back-to-back above.
+    var paced: [45]f64 = undefined;
+    for (&paced) |*v| {
+        const t_start = std.Io.Clock.awake.now(io);
+        const pool = mtl.poolPush();
+        defer mtl.poolPop(pool);
+        st.step(0.008);
+        bt.fillFrame(st, &frame);
+        const cb = mtl.msg(mtl.Id, queue, "commandBuffer", .{});
+        e.encodeShade(cb, &frame, tex10, w, h, 4.0, .pq);
+        mtl.msg(void, cb, "commit", .{});
+        mtl.msg(void, cb, "waitUntilCompleted", .{});
+        v.* = gpuMs(cb);
+        const spent_ms = msSince(io, t_start);
+        if (spent_ms < 33.333) {
+            const ns: u64 = @intFromFloat((33.333 - spent_ms) * 1e6);
+            const ts: std.c.timespec = .{ .sec = 0, .nsec = @intCast(ns) };
+            _ = std.c.nanosleep(&ts, null);
+        }
+    }
+    std.mem.sort(f64, &paced, {}, std.sort.asc(f64));
+
     // Final sRGB frame for comparison / viewing, at the last step state.
     {
         const pool = mtl.poolPush();
@@ -92,7 +115,7 @@ fn gpuFrame(st: *theme.State, w: u32, h: u32, frames: usize, out: []u32, io: std
         });
     }
     const half: f64 = @floatFromInt(@max(frames / 2, 1));
-    return .{ .meter_ms = meter_ms, .trace_ms = trace_ms, .shade_ms = shade_ms / half, .hdr_ms = hdr_ms / half, .exposure = expo };
+    return .{ .meter_ms = meter_ms, .trace_ms = trace_ms, .shade_ms = shade_ms / half, .hdr_ms = hdr_ms / half, .paced_hdr_ms = paced[paced.len / 2], .exposure = expo };
 }
 
 /// Bardeen (1973) critical curve, as in the theme's test.
@@ -207,6 +230,7 @@ pub fn main(init: std.process.Init) !void {
     saveRgba("/tmp/argus_bh_native.rgba", nat);
     std.debug.print(" {d}x{d} GPU meter / trace  : {d:.1} ms / {d:.1} ms (2x2 samples per pixel)\n", .{ nw, nh, g2.meter_ms, g2.trace_ms });
     std.debug.print(" {d}x{d} shade sRGB / HDR10 : {d:.3} / {d:.3} ms GPU per frame ({d} frames)\n", .{ nw, nh, g2.shade_ms, g2.hdr_ms, frames });
+    std.debug.print(" {d}x{d} HDR10 paced 30 FPS : {d:.3} ms GPU per frame (the live cost: lower clock between frames)\n", .{ nw, nh, g2.paced_hdr_ms });
     std.debug.print(" traced image memory         : {d:.1} MB kept (+{d:.1} MB while tracing)\n========================================================================\n", .{
         @as(f64, @floatFromInt(@as(usize, nw) * nh * bt.BYTES_PER_PIXEL)) / 1e6,
         @as(f64, @floatFromInt(@as(usize, nw) * nh * bt.TEMP_BYTES_PER_PIXEL)) / 1e6,
