@@ -216,12 +216,20 @@ static void groundTexel(uint tu, uint tv, thread float& h, thread float3& c) {
     if (on_reef < 0.2f) {
         const float meadow = sstep(0.52f, 0.68f, valueNoise(wx, wz, 12, 14));
         const float cover = meadow * (0.15f + 0.3f * valueNoise(wx, wz, 96, 15));
-        if (hash01(tu, tv, 16) < cover) {
+        // Under the blades the meadow floor reads as a dim green mat (lower blades,
+        // rhizomes, the shade of the canopy), not bright sand. Besides being how a
+        // meadow looks, that keeps each 3 cm blade close in tone to what's behind
+        // it, so the thousands of pixel-sized blades don't shimmer as the diver
+        // drifts (bright sand between dark spikes did).
+        const float mat = max(sstep(0.0f, 0.25f, cover), 0.6f * meadow);   // reaches the meadow's edges too
+        const float3 floor_c = mix(mix(c, float3(176, 170, 140), 0.35f * meadow), float3(92, 116, 70), 0.75f * mat);
+        // At the very edge of a meadow, where the mat is thinnest, blades thin out first.
+        if (hash01(tu, tv, 16) < cover * sstep(0.15f, 0.5f, meadow)) {
             // One texel (3 cm) blade: Thalassia straps and shorter Halodule.
             h += 0.10f + 0.22f * hash01(tu, tv, 17);
-            c = mix(float3(74, 138, 64), float3(126, 122, 70), hash01(tu, tv, 18));
+            c = mix(float3(84, 132, 68), float3(116, 124, 72), hash01(tu, tv, 18));
         } else if (meadow > 0.0f) {
-            c = mix(c, float3(176, 170, 140), 0.35f * meadow);   // rhizome-darkened sand
+            c = floor_c;
         }
     }
 }
@@ -1180,8 +1188,12 @@ kernel void argus_step(constant ArgusFrame& f [[buffer(0)]],
         const float lam = max(0.0f, (-gx * 0.30f + 0.88f + gz * 0.36f) * inv);
         const float around = 0.25f * (hRead(prev, iu + 6, iv) + hRead(prev, iu - 6, iv) + hRead(prev, iu, iv + 6) + hRead(prev, iu, iv - 6));
         const float cavity = clamp(1.0f + 1.6f * (hc - around), 0.55f, 1.15f);
-        const float lit = (0.42f + 0.80f * lam) * cavity * (0.92f + 0.03f * hc);
+        float lit = (0.42f + 0.80f * lam) * cavity * (0.92f + 0.03f * hc);
         const float4 a = prev.read(gid);
+        // Seagrass (green albedo): the blades are one-texel spikes, so their slopes
+        // would light as hard bright and dark facets that shimmer as the diver
+        // drifts. Light the meadow almost flat instead, as a soft canopy is.
+        if (a.g > a.r + 0.02f && a.g > a.b * 1.4f) lit = mix(lit, 0.98f, 0.8f);
         next.write(float4(saturate(a.rgb * lit * float3(0.84f, 1.0f, 1.02f)), a.a), gid);
         return;
     }
