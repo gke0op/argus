@@ -179,6 +179,8 @@ const MacBridge = struct {
     themes: pl.ThemeList = .{},
     browse_idx: ?usize = null, // stepper position, kept even when that theme failed to load
     slider_drag: bool = false,
+    strip_scroll: f64 = 0.0, // points the Spaces strip is scrolled right (more than 7 Spaces)
+    msgRetF64: MsgSendRetF64,
     // One-line note under the selected Space ("Loading Echo…", "Couldn't load …").
     note_buf: [96]u8 = undefined,
     note_len: usize = 0,
@@ -745,7 +747,7 @@ const MacBridge = struct {
     /// the selected Space on the Settings face, otherwise the active Space.
     pub fn dropTarget(self: *const MacBridge, x: f64, top_y: f64) usize {
         if (self.pop_face == .settings) return @min(self.sel_space, self.obs.n_spaces -| 1);
-        if (pl.hitSpaces(x, top_y, self.obs.n_spaces, false)) |h| switch (h) {
+        if (pl.hitSpaces(x, top_y, self.obs.n_spaces, false, self.strip_scroll)) |h| switch (h) {
             .space_thumb => |i| return i,
             else => {},
         };
@@ -883,30 +885,43 @@ const MacBridge = struct {
         self.playPauseIcon(ctx, H, pl.pause_btn.x + pl.pause_btn.w * 0.5, 18.0, paused);
         self.gearIcon(ctx, H, pl.gear_btn.x + pl.gear_btn.w * 0.5, 18.0);
 
-        // Horizontal bare-texture panorama strip (Spaces I..VIII)
+        // Horizontal bare-texture panorama strip: 7 fixed-size slots, scrolled sideways beyond that.
         const visible = @max(@as(usize, 1), @min(self.obs.n_spaces, MAX_SPACES));
+        self.strip_scroll = pl.clampScroll(self.strip_scroll, visible);
+        self.CGContextSaveGState(ctx);
+        defer self.CGContextRestoreGState(ctx);
+        const clip = pl.strip;
+        if (self.CGPathCreateWithRoundedRect(.{ .origin = .{ .x = clip.x, .y = H - clip.y - clip.h }, .size = .{ .width = clip.w, .height = clip.h } }, 4.5, 4.5, null)) |path| {
+            self.CGContextAddPath(ctx, path);
+            self.CGContextClip(ctx);
+            self.CGPathRelease(path);
+        }
         for (0..visible) |idx| {
             const sp = &self.obs.spaces[idx];
-            const r = pl.thumb(idx, visible);
-            const is_active = (idx == self.obs.active_space_idx);
+            const r = pl.thumb(idx, self.strip_scroll);
+            if (r.x + r.w < clip.x or r.x > clip.x + clip.w) continue; // scrolled out of view
             const is_drag_hover = (self.obs.drag_hover_idx != null and self.obs.drag_hover_idx.? == idx);
-
-            // Bare 16:10 Texture Frame (actual CGImage texture, zero sheen/blur overlays)
-            self.drawSpaceThumbnail(ctx, H, r.x, r.y, r.w, r.h, sp);
-            if (paused and sp.cg_image != null) self.fillR(ctx, H, r, 4.5, .{ 0.0, 0.0, 0.0, 0.35 });
-
-            const ring = pl.Rect{ .x = r.x - 1.0, .y = r.y - 1.0, .w = r.w + 2.0, .h = r.h + 2.0 };
-            if (is_drag_hover) {
-                self.strokeR(ctx, H, ring, 5.0, 1.5, .{ 1.0, 1.0, 1.0, 1.0 });
-            } else if (is_active) {
-                self.strokeR(ctx, H, ring, 5.0, 1.2, .{ 0.92, 0.94, 0.98, 0.95 });
-            }
-
-            // Bare Roman Numeral (I..VIII) in the top-left corner inside the frame (no box, no effects)
-            const roman = romanNumeral(sp.index_1based);
-            const col: Rgba = if (is_active) .{ 1.0, 1.0, 1.0, 1.0 } else .{ 0.78, 0.80, 0.86, 0.92 };
-            self.drawLabel(ctx, H, r.x + 5.5, r.y + 4.0, roman, self.dict_small, col, .left);
+            self.drawStripThumb(ctx, H, r, sp, idx == self.obs.active_space_idx, is_drag_hover);
         }
+    }
+
+    /// One Space thumbnail as the strip shows it: the frame, dimmed while paused, a ring when it is
+    /// the highlighted Space (or a drop target), and its numeral.
+    fn drawStripThumb(self: *MacBridge, ctx: ?*anyopaque, H: f64, r: pl.Rect, sp: *const SpaceConfig, highlighted: bool, drag_hover: bool) void {
+        // Bare 16:10 Texture Frame (actual CGImage texture, zero sheen/blur overlays)
+        self.drawSpaceThumbnail(ctx, H, r.x, r.y, r.w, r.h, sp);
+        if (self.obs.paused and sp.cg_image != null) self.fillR(ctx, H, r, 4.5, .{ 0.0, 0.0, 0.0, 0.35 });
+
+        const ring = pl.Rect{ .x = r.x - 1.0, .y = r.y - 1.0, .w = r.w + 2.0, .h = r.h + 2.0 };
+        if (drag_hover) {
+            self.strokeR(ctx, H, ring, 5.0, 1.5, .{ 1.0, 1.0, 1.0, 1.0 });
+        } else if (highlighted) {
+            self.strokeR(ctx, H, ring, 5.0, 1.2, .{ 0.92, 0.94, 0.98, 0.95 });
+        }
+
+        // Bare Roman Numeral (I..VIII) in the top-left corner inside the frame (no box, no effects)
+        const col: Rgba = if (highlighted) .{ 1.0, 1.0, 1.0, 1.0 } else .{ 0.78, 0.80, 0.86, 0.92 };
+        self.drawLabel(ctx, H, r.x + 5.5, r.y + 4.0, romanNumeral(sp.index_1based), self.dict_small, col, .left);
     }
 
     // ---- Settings face --------------------------------------------------------------------
@@ -939,11 +954,9 @@ const MacBridge = struct {
         }
         self.drawLabel(ctx, H, W - 20.0, 11.5, "Quit", self.dict_small, C_MUTED, .right);
 
-        // Mini preview of the selected Space (click to go back), like its strip thumbnail.
-        const pv = pl.preview;
-        self.drawSpaceThumbnail(ctx, H, pv.x, pv.y, pv.w, pv.h, sp);
-        self.strokeR(ctx, H, .{ .x = pv.x - 1.0, .y = pv.y - 1.0, .w = pv.w + 2.0, .h = pv.h + 2.0 }, 5.0, 1.2, .{ 0.92, 0.94, 0.98, 0.95 });
-        self.drawLabel(ctx, H, pv.x + 5.5, pv.y + 4.0, romanNumeral(sp.index_1based), self.dict_small, .{ 1.0, 1.0, 1.0, 1.0 }, .left);
+        // Mini preview of the selected Space (click to go back): the strip's first slot, drawn by
+        // the same code as a selected strip thumbnail.
+        self.drawStripThumb(ctx, H, pl.preview, sp, true, false);
 
         // Row A, left: which Space (click to move on), and its theme stepper ‹ Name ›
         var sp_buf: [16]u8 = undefined;
@@ -1528,6 +1541,13 @@ fn onDraggingEntered(_: ?*anyopaque, _: ?*anyopaque, sender: ?*anyopaque) callco
     const b = g_bridge orelse return 0;
     const loc = b.msgRetPoint(sender, b.sel_registerName("draggingLocation"));
     const top_y = (pl.SPACES_H - 1.0) - loc.y;
+    // Holding a dragged file near either end of the strip scrolls it to the hidden Spaces.
+    if (b.pop_face == .spaces) {
+        const edge: f64 = 28.0;
+        if (loc.x < pl.strip.x + edge) b.strip_scroll -= 8.0;
+        if (loc.x > pl.strip.x + pl.strip.w - edge) b.strip_scroll += 8.0;
+        b.strip_scroll = pl.clampScroll(b.strip_scroll, b.obs.n_spaces);
+    }
     b.obs.drag_hover_idx = b.dropTarget(loc.x, top_y);
     b.flushPopoverLayer();
     return 1; // NSDragOperationCopy
@@ -1607,6 +1627,7 @@ fn onStatusItemClick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c
         b.slider_drag = false;
         b.note_len = 0;
         b.syncSpacesFromSkyLight(false);
+        b.strip_scroll = pl.scrollToShow(b.obs.active_space_idx, b.strip_scroll, b.obs.n_spaces);
         b.renderAllSpaces();
         const mouse = b.msgRetPoint(b.NSEvent, b.sel_registerName("mouseLocation"));
         const pop_w: f64 = @floatFromInt(POPOVER_W);
@@ -1639,7 +1660,7 @@ fn onPopoverMouseDown(_: ?*anyopaque, _: ?*anyopaque, event: ?*anyopaque) callco
     const hit = if (b.pop_face == .settings)
         pl.hitSettings(p.x, p.y)
     else
-        pl.hitSpaces(p.x, p.y, b.obs.n_spaces, b.obs.paused);
+        pl.hitSpaces(p.x, p.y, b.obs.n_spaces, b.obs.paused, b.strip_scroll);
     if (hit) |h| handlePopoverHit(b, h);
     b.renderActiveDesktopSpace();
     b.flushPopoverLayer();
@@ -1675,6 +1696,21 @@ fn handlePopoverHit(b: *MacBridge, hit: pl.Hit) void {
         .reload_on_edit => b.setHotReload(!b.hot_reload),
         .launch_at_login => b.setLaunchAtLogin(!b.launch_at_login),
     }
+}
+
+/// Trackpad swipes and mouse wheels scroll the Spaces strip sideways when there are more than 7.
+fn onPopoverScrollWheel(_: ?*anyopaque, _: ?*anyopaque, event: ?*anyopaque) callconv(.c) void {
+    const b = g_bridge orelse return;
+    if (b.pop_face != .spaces or pl.maxScroll(b.obs.n_spaces) == 0.0) return;
+    const dx = b.msgRetF64(event, b.sel_registerName("scrollingDeltaX"));
+    const dy = b.msgRetF64(event, b.sel_registerName("scrollingDeltaY"));
+    // Line-based wheels report a few lines per notch; trackpads report points.
+    const precise = (b.msgRetInt(event, b.sel_registerName("hasPreciseScrollingDeltas")) & 0xff) != 0;
+    const d = (if (@abs(dx) > @abs(dy)) dx else dy) * @as(f64, if (precise) 1.0 else 12.0);
+    const next = pl.clampScroll(b.strip_scroll - d, b.obs.n_spaces);
+    if (next == b.strip_scroll) return;
+    b.strip_scroll = next;
+    b.flushPopoverLayer();
 }
 
 fn onPopoverMouseDragged(_: ?*anyopaque, _: ?*anyopaque, event: ?*anyopaque) callconv(.c) void {
@@ -2089,6 +2125,7 @@ pub fn main(init: std.process.Init) !void {
     _ = class_addMethod(pop_view_cls, sel_registerName("mouseDown:"), @ptrCast(&onPopoverMouseDown), "v@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("mouseDragged:"), @ptrCast(&onPopoverMouseDragged), "v@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("mouseUp:"), @ptrCast(&onPopoverMouseUp), "v@:@");
+    _ = class_addMethod(pop_view_cls, sel_registerName("scrollWheel:"), @ptrCast(&onPopoverScrollWheel), "v@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("acceptsFirstMouse:"), @ptrCast(&onAcceptsFirstMouse), "B@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("draggingEntered:"), @ptrCast(&onDraggingEntered), "Q@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("draggingUpdated:"), @ptrCast(&onDraggingUpdated), "Q@:@");
@@ -2219,6 +2256,7 @@ pub fn main(init: std.process.Init) !void {
         .msgId2 = msgId2,
         .msgInitWin = msgInitWin,
         .msgSetFrame = msgSetFrame,
+        .msgRetF64 = msgRetF64,
         .msgUTF8 = msgUTF8,
         .msgRetPoint = msgRetPoint,
         .msgRetRect = msgRetRect,
