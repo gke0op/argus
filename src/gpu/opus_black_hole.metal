@@ -27,7 +27,9 @@ constant uint NSPOT = 6;
 constant uint EMIT_N = 1024;
 constant float EMIT_X0 = -7.0f;
 constant float EMIT_X1 = 4.0f;
-constant float TURB = 0.4f;
+constant float TURB_SIGMA = 0.5f; // log-normal emissivity, as the theme
+constant float NOISE_STD = 40.0f;  // noise table byte levels per standard deviation
+constant float PEAK_BOOST = 3.0f;  // exp(2.6 sigma - sigma^2/2): how far turbulence brightens gas, as the theme
 constant float TAU_NOISE = 1.2f;
 constant uint BB_N = 1024;
 constant float BB_TMIN = 300.0f;
@@ -505,7 +507,7 @@ static void addSample(thread Px& px, constant TraceParams& P, constant Static& s
     const float tau = opticalDepth(h0.r);
     const Sample smp = shadeDisk(P, st, ttab, alpha, h0.r, h0.ph, h0.t);
     if (h0.r > SPOT_RMAX) {
-        const bool dim = luma(smp.rgb) * P.exposure * 2.0f < EMIT_FLOOR;
+        const bool dim = luma(smp.rgb) * P.exposure * PEAK_BOOST < EMIT_FLOOR;
         if (tau * exp(TAU_NOISE) < TAU_MIN || dim) {
             // Too thin or too cool to show even when stirred: baked at its mean opacity.
             if (tau < TAU_BEHIND) px.bg += exp(-tau) * behind(P, st, ttab, alpha, h1, h2, foot);
@@ -710,6 +712,29 @@ kernel void bh_footprint(constant TraceParams& P [[buffer(0)]],
 
 // ---------------------------------------------------------------- per-frame shading
 
+// Turbulence planes (2 x R_BINS x NP bytes: coarse eddies, fine detail) for generation g at pixel phase phi (Q16) and
+// radial position rbf (bins): bilinear over the two nearest bins and phase cells, centred at 0.
+static float2 noiseBilinear(device const uchar* noise, constant Frame& fr, uint g, ushort phi, float rbf) {
+    const float xr = clamp(rbf - 0.5f, 0.0f, float(R_BINS - 1));
+    const uint b0 = uint(xr);
+    const uint b1 = min(b0 + 1, R_BINS - 1);
+    const float tr = xr - float(b0);
+    float2 v[2];
+    for (uint k = 0; k < 2; k++) {
+        const uint b = k == 0 ? b0 : b1;
+        const ushort q = ushort(phi - fr.gshift[g][b]);
+        const uint p0 = q >> 6;
+        const uint p1 = (p0 + 1) & (NP - 1);
+        const float tp = float(q & 63u) / 64.0f;
+        const uint row = fr.grow[g][b] * NP;
+        constexpr uint PLANE = R_BINS * NP;
+        const float2 a = float2(float(noise[row + p0]), float(noise[PLANE + row + p0]));
+        const float2 c = float2(float(noise[row + p1]), float(noise[PLANE + row + p1]));
+        v[k] = mix(a, c, tp);
+    }
+    return mix(v[0], v[1], tr) - 128.0f;
+}
+
 // One pixel of the theme's draw(), composited before tone mapping (light adds in linear).
 static float3 shadePre(uint x, uint y, constant TraceParams& P, device const float* ttab,
                        device const Rec* recs, device const uint* bg, device const uchar* bfrac,
@@ -722,9 +747,6 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     const uint fr_q = (rc.meta >> 4) & FR_MAX;
     const uint fp_q = (rc.meta >> 9) & FP_MAX;
 
-    const float amp = TURB * fr.gnorm / 128.0f;
-    const float w0 = fr.gw[0] * amp;
-    const float w1 = fr.gw[1] * amp;
     const uint rb = rc.rbin / R_FRAC;
     const float rbf = float(rc.rbin) / float(R_FRAC);
     // Observed temperature, as the trace's shadeDisk had it: T(r) and the Kerr redshift for
@@ -734,20 +756,27 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     const Orbit o = orbitAt(P.a, r);
     const float tobs = temperature(P, ttab, r) / (o.ut * (1.0f - o.om * L));
     const float3 rgb = bbLookup(st, tobs);
-    const uint pa = ushort(rc.phi - fr.gshift[0][rb]) >> 6;
-    const uint pb = ushort(rc.phi - fr.gshift[1][rb]) >> 6;
-    const float na = float(int(noise[fr.grow[0][rb] * NP + pa]) - 128);
-    const float nb = float(int(noise[fr.grow[1][rb] * NP + pb]) - 128);
+    // Turbulence, two channels per cell (coarse eddies, fine detail), interpolated between the
+    // two nearest radial bins (each rotated by its own Omega) and the two nearest phase cells.
+    const float2 na = noiseBilinear(noise, fr, 0, rc.phi, rbf);
+    const float2 nb = noiseBilinear(noise, fr, 1, rc.phi, rbf);
     const float frf = float(fr_q);
     const float fpf = float(fp_q) * 64.0f;
-    const float tex = 1.0f / (1.0f + (frf * frf) / 64.0f + (fpf * fpf) / 116000.0f);
-    float k = max(0.0f, 1.0f + tex * (w0 * na + w1 * nb)) * exposure;
+    const float tex_c = 1.0f / (1.0f + (frf * frf) / 36.0f + (fpf * fpf) / 4000000.0f);
+    const float tex_f = 1.0f / (1.0f + (frf * frf) / 2.25f + (fpf * fpf) / 250000.0f);
+    const float ms = fr.gnorm / NOISE_STD;
+    const float mc = (fr.gw[0] * na.x + fr.gw[1] * nb.x) * ms;
+    const float mf = (fr.gw[0] * na.y + fr.gw[1] * nb.y) * ms;
+    const float m = (tex_c * mc + tex_f * mf) * 0.70710678f;
+    const float vm = 0.5f * (tex_c * tex_c + tex_f * tex_f);
+    // MRI-like turbulence, log-normal with its mean kept at 1.
+    float k = exp(TURB_SIGMA * m - 0.5f * TURB_SIGMA * TURB_SIGMA * vm) * exposure;
 
     const float tau_b = st.tau_tab[rb];
     const bool thin = tau_b < TAU_BEHIND;
     float emit = 1.0f;
     if (thin) {
-        const float nt = clamp((fr.gw[0] * na + fr.gw[1] * nb) * fr.gnorm / 128.0f * tex, -1.0f, 1.0f);
+        const float nt = clamp(0.33f * m, -1.0f, 1.0f); // column density: tau * e^(1.2 nt)
         const float xi = clamp((st.lntau_tab[rb] + TAU_NOISE * nt - EMIT_X0) * (float(EMIT_N) / (EMIT_X1 - EMIT_X0)), 0.0f, float(EMIT_N) - 0.001f);
         const uint ii = uint(xi);
         const float fr_e = xi - float(ii);

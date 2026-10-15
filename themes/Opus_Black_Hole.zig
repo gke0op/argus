@@ -32,8 +32,14 @@
 //    accretion rate (T_peak ~ (Mdot / M^2)^(1/4)). Hotter disks look bluer-white;
 //    most of a 5,000 K disk is honestly a warm off-white, not orange.
 //  * Time-lapse: one inner-disk orbit takes ~10 s on screen (in reality hours).
-//  * Turbulence: emissivity fluctuations advected at the true Keplerian rate
-//    and refreshed every few inner orbits; the amplitude is a modelling choice.
+//  * Turbulence, shaped like the magnetorotational turbulence of real disks: eddies
+//    stretched along the orbit (~5% of r radially, ~0.2 rad in azimuth) and tilted
+//    into trailing spirals (~14 deg), three octaves falling as k^(-1/3) (2D Kolmogorov),
+//    and log-normal emissivity, exp(0.5 m - 0.125), so filaments are bright and gaps dark
+//    while the mean is unchanged. Advected at the true Keplerian rate, so it shears;
+//    refreshed in two cross-faded generations of 60 M. Eddy lifetimes do not yet scale
+//    with the local orbital period (that naively winds the pattern into radial stripes).
+//    The CPU fallback draws the coarse eddies only; the GPU adds the fine octaves.
 //  * Hot spots: plasma clumps on exact Kerr orbits (like Sgr A* flares). Each one
 //    shows up in every lensed image at once, its orbital phase lagging by each image's
 //    light-travel time (its birth and fade do not lag: not modelled), and
@@ -80,7 +86,10 @@ const T_REF: f64 = OBS_R + 2.0 * @log(OBS_R / 2.0);
 const HALF_H: f64 = 15.5; // half the screen height, in units of M
 const TIME_LAPSE: f64 = 10.0; // M of coordinate time per unit of Argus dt
 const LIFE_M: f64 = 60.0; // turbulence generation lifetime, in M
-const TURB: f32 = 0.4;
+const TURB_SIGMA: f32 = 0.5; // log-normal emissivity: exp(sigma m - sigma^2 / 2), m ~ unit Gaussian
+const NOISE_STD: f32 = 40.0; // noise table byte levels per standard deviation
+const PEAK_BOOST: f64 = 3.0; // exp(2.6 sigma - sigma^2/2): turbulence brightens gas up to ~this much
+const EXP_N: usize = 1024; // exp table over [-4, 4] for the CPU draw
 const EXPO_TARGET: f64 = 7.0; // 99th-percentile disk luminance maps here before tone mapping
 const STAR_GAIN: f64 = 0.8;
 const STAR_CELL: f64 = 8.0e-3; // star grid spacing on the sky, radians (resolution-independent)
@@ -532,7 +541,8 @@ pub const State = struct {
     ttab: [PT_N]f32,
     bb: [BB_N][3]f32,
     srgb: [4096]u8,
-    noise: [R_BINS][NP]u8,
+    noise: [2][R_BINS][NP]u8, // turbulence planes: [0] coarse eddies (octave 0), [1] fine detail (octaves 1-2)
+    exp_tab: [EXP_N + 1]f32,
 
     pub fn init(alloc: std.mem.Allocator, w: usize, h: usize, scale: f64) !*State {
         const n_px = w * h;
@@ -630,37 +640,63 @@ pub const State = struct {
             const v = @as(f64, @floatFromInt(k)) / 255.0;
             self.lin8[k] = @floatCast(if (v <= 0.04045) v / 12.92 else math.pow(f64, (v + 0.055) / 1.055, 2.4));
         }
-        // Tileable turbulence: two octaves of smoothed value noise, periodic in r-bin and phi.
-        for (0..R_BINS) |ri| {
-            for (0..NP) |pi| {
-                var v: f64 = 0.0;
-                var amp: f64 = 1.0;
-                var gr: usize = 24;
-                var gp: usize = 96;
-                for (0..2) |oct| {
-                    const fr = @as(f64, @floatFromInt(ri)) * @as(f64, @floatFromInt(gr)) / @as(f64, @floatFromInt(R_BINS));
-                    const fp = @as(f64, @floatFromInt(pi)) * @as(f64, @floatFromInt(gp)) / @as(f64, @floatFromInt(NP));
-                    const ir: usize = @intFromFloat(@floor(fr));
-                    const ip: usize = @intFromFloat(@floor(fp));
-                    var ur = fr - @floor(fr);
-                    var up = fp - @floor(fp);
-                    ur = ur * ur * (3.0 - 2.0 * ur);
-                    up = up * up * (3.0 - 2.0 * up);
-                    const seed: u64 = 0xB1AC_401E + oct * 0x1000_0000;
-                    const v00 = unitf(mix64(seed ^ (ir % gr) * 0x10001 ^ (ip % gp) << 20));
-                    const v10 = unitf(mix64(seed ^ ((ir + 1) % gr) * 0x10001 ^ (ip % gp) << 20));
-                    const v01 = unitf(mix64(seed ^ (ir % gr) * 0x10001 ^ ((ip + 1) % gp) << 20));
-                    const v11 = unitf(mix64(seed ^ ((ir + 1) % gr) * 0x10001 ^ ((ip + 1) % gp) << 20));
-                    const top = v00 + (v01 - v00) * up;
-                    const bot = v10 + (v11 - v10) * up;
-                    v += amp * (2.0 * (top + (bot - top) * ur) - 1.0);
-                    amp *= 0.5;
-                    gr *= 2;
-                    gp *= 2;
+        // MRI-like turbulence, periodic in r-bin and phi: eddies ~6 bins (5% of r) by 1/32 turn,
+        // tilted into trailing spirals by 16/3 phi-cells per bin (~14 deg; 384 x 16/3 = 2048 wraps
+        // exactly), three octaves with amplitude ratio 2^(-1/3). Coarse eddies and fine detail are
+        // kept apart so each is filtered against its own scale. Two passes: moments, then bytes.
+        for (0..2) |ch| {
+            const lo: usize = if (ch == 0) 0 else 1;
+            const hi: usize = if (ch == 0) 1 else 3;
+            var sum: f64 = 0.0;
+            var sum2: f64 = 0.0;
+            for (0..2) |pass| {
+                const mean = sum / @as(f64, R_BINS * NP);
+                const sd = @sqrt(@max(sum2 / @as(f64, R_BINS * NP) - mean * mean, 1e-12));
+                for (0..R_BINS) |ri| {
+                    for (0..NP) |pi| {
+                        const v = turbulence(ri, pi, lo, hi);
+                        if (pass == 0) {
+                            sum += v;
+                            sum2 += v * v;
+                        } else {
+                            self.noise[ch][ri][pi] = @intFromFloat(math.clamp(128.0 + @as(f64, NOISE_STD) * (v - mean) / sd, 0.0, 255.0));
+                        }
+                    }
                 }
-                self.noise[ri][pi] = @intFromFloat(math.clamp(128.0 + 70.0 * v, 0.0, 255.0));
             }
         }
+        for (0..EXP_N + 1) |k| self.exp_tab[k] = @floatCast(@exp(-4.0 + 8.0 * @as(f64, @floatFromInt(k)) / @as(f64, @floatFromInt(EXP_N))));
+    }
+
+    /// Octaves [lo, hi) of the anisotropic, tilted turbulence field (unnormalised).
+    fn turbulence(ri: usize, pi: usize, lo: usize, hi: usize) f64 {
+        const tilt: f64 = 16.0 / 3.0; // phi-table cells per radial bin (trailing)
+        var v: f64 = 0.0;
+        var amp: f64 = 1.0;
+        var gr: usize = 64;
+        var gp: usize = 32;
+        for (0..hi) |oct| {
+            const fr = @as(f64, @floatFromInt(ri)) * @as(f64, @floatFromInt(gr)) / @as(f64, @floatFromInt(R_BINS));
+            const fp = (@as(f64, @floatFromInt(pi)) + tilt * @as(f64, @floatFromInt(ri))) * @as(f64, @floatFromInt(gp)) / @as(f64, @floatFromInt(NP));
+            const ir: usize = @intFromFloat(@floor(fr));
+            const ip: usize = @intFromFloat(@floor(fp));
+            var ur = fr - @floor(fr);
+            var up = fp - @floor(fp);
+            ur = ur * ur * (3.0 - 2.0 * ur);
+            up = up * up * (3.0 - 2.0 * up);
+            const seed: u64 = 0xB1AC_401E + oct * 0x1000_0000;
+            const v00 = unitf(mix64(seed ^ (ir % gr) * 0x10001 ^ (ip % gp) << 20));
+            const v10 = unitf(mix64(seed ^ ((ir + 1) % gr) * 0x10001 ^ (ip % gp) << 20));
+            const v01 = unitf(mix64(seed ^ (ir % gr) * 0x10001 ^ ((ip + 1) % gp) << 20));
+            const v11 = unitf(mix64(seed ^ ((ir + 1) % gr) * 0x10001 ^ ((ip + 1) % gp) << 20));
+            const top = v00 + (v01 - v00) * up;
+            const bot = v10 + (v11 - v10) * up;
+            if (oct >= lo) v += amp * (2.0 * (top + (bot - top) * ur) - 1.0);
+            amp *= 0.7937005259840998; // 2^(-1/3)
+            gr *= 2;
+            gp *= 2;
+        }
+        return v;
     }
 
     fn temperature(self: *const State, r: f64) f64 {
@@ -1089,7 +1125,7 @@ pub const State = struct {
                             }
                             if (hit.kind == .disk and hit.r > SPOT_RMAX) {
                                 const tau = opticalDepth(hit.r);
-                                const dim = luma(self.shadeDisk(fx, hit.r, hit.ph, hit.t).rgb) * self.exposure * 2.0 < EMIT_FLOOR;
+                                const dim = luma(self.shadeDisk(fx, hit.r, hit.ph, hit.t).rgb) * self.exposure * PEAK_BOOST < EMIT_FLOOR;
                                 if (tau * @exp(@as(f64, TAU_NOISE)) < TAU_MIN or dim) {
                                     // Gas too thin or too cool to show even when turbulence stirs it:
                                     // baked into the background at its mean opacity, not redrawn per frame.
@@ -1247,6 +1283,15 @@ pub const State = struct {
         return !math.isFinite(self.t_m) or !math.isFinite(self.exposure);
     }
 
+    /// Turbulence (coarse, fine) for generation g at pixel phase phi (Q16) and radial bin rbf,
+    /// nearest cell, centred at 0 (the GPU path interpolates between cells).
+    inline fn noiseAt(self: *const State, g: usize, phi: u16, rbf: f32) [2]f32 {
+        const b: usize = @min(@as(usize, @intFromFloat(rbf)), R_BINS - 1);
+        const q = phi -% self.gshift[g][b];
+        const row = self.grow[g][b];
+        return .{ @as(f32, @floatFromInt(self.noise[0][row][q >> 6])) - 128.0, @as(f32, @floatFromInt(self.noise[1][row][q >> 6])) - 128.0 };
+    }
+
     pub fn draw(self: *const State, buf: []u32, stride: usize) void {
         // GPU builds trace on the GPU; if the CPU draw is used after all (no Metal), trace now, once.
         if (self.deferred) @constCast(self).traceNow();
@@ -1254,9 +1299,7 @@ pub const State = struct {
         if (w == 0 or self.h == 0 or stride < w) return;
         const h: usize = @min(self.h, buf.len / stride);
         const expo = self.exposure;
-        const amp = TURB * self.gnorm / 128.0;
-        const w0 = self.gw[0] * amp;
-        const w1 = self.gw[1] * amp;
+        const mscale = self.gnorm / NOISE_STD; // byte noise -> unit-variance m
 
         const last_buf_idx = (h - 1) * stride + (w - 1);
         const last_bg_idx = (h - 1) * w + (w - 1);
@@ -1284,22 +1327,24 @@ pub const State = struct {
                 if (rc.cov == 0) continue;
                 const rb = rc.rbin / R_FRAC;
                 const rbf = @as(f32, @floatFromInt(rc.rbin)) / @as(f32, @floatFromInt(R_FRAC));
-                const pa = (rc.phi -% self.gshift[0][rb]) >> 6;
-                const pb = (rc.phi -% self.gshift[1][rb]) >> 6;
-                const na: f32 = @floatFromInt(@as(i32, self.noise[self.grow[0][rb]][pa]) - 128);
-                const nb: f32 = @floatFromInt(@as(i32, self.noise[self.grow[1][rb]][pb]) - 128);
+                // CPU fallback: the coarse eddies only (nearest cell), log-normal like the GPU path;
+                // the GPU adds the fine octaves and interpolates between cells.
+                const ca = self.noiseAt(0, rc.phi, rbf)[0];
+                const cb = self.noiseAt(1, rc.phi, rbf)[0];
                 const frf: f32 = @floatFromInt(rc.fr);
                 const fpf: f32 = @as(f32, @floatFromInt(rc.fp)) * 64.0;
-                // Turbulence cells are ~16 r-bins by ~683 Q16 units; unresolved texture averages out.
-                const tex = 1.0 / (1.0 + (frf * frf) / 64.0 + (fpf * fpf) / 116_000.0);
-                var k = @max(0.0, 1.0 + tex * (w0 * na + w1 * nb)) * expo;
+                const tex_c = 1.0 / (1.0 + (frf * frf) / 36.0 + (fpf * fpf) / 4_000_000.0);
+                const m = (self.gw[0] * ca + self.gw[1] * cb) * mscale * tex_c;
+                const ex = math.clamp((TURB_SIGMA * m - 0.5 * TURB_SIGMA * TURB_SIGMA * tex_c * tex_c + 4.0) * (@as(f32, EXP_N) / 8.0), 0.0, @as(f32, EXP_N) - 0.001);
+                const ei: usize = @intFromFloat(ex);
+                var k = (self.exp_tab[ei] + (self.exp_tab[ei + 1] - self.exp_tab[ei]) * (ex - @as(f32, @floatFromInt(ei)))) * expo;
                 // Translucent outer gas: emitted fraction 1 - e^-tau, column density stirred by
                 // the same turbulence (unresolved texture averages out, as above).
                 const tau_b = self.tau_tab[rb];
                 const thin = tau_b < TAU_BEHIND;
                 var emit: f32 = 1.0;
                 if (thin) {
-                    const nt = math.clamp((self.gw[0] * na + self.gw[1] * nb) * self.gnorm / 128.0 * tex, -1.0, 1.0);
+                    const nt = math.clamp(0.33 * m, -1.0, 1.0); // column density: tau * e^(1.2 nt)
                     const xi = math.clamp((self.lntau_tab[rb] + TAU_NOISE * nt - EMIT_X0) * (@as(f32, EMIT_N) / (EMIT_X1 - EMIT_X0)), 0.0, @as(f32, EMIT_N) - 0.001);
                     const ii: usize = @intFromFloat(xi);
                     const fr_e = xi - @as(f32, @floatFromInt(ii));
