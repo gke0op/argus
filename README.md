@@ -17,6 +17,14 @@ make harness THEME=themes/Echo.zig        # verify and benchmark a theme headles
 make harness THEME=themes/Tutorial_Tides.metal   # same, on the GPU for Metal themes
 ```
 
+## Menu bar controls
+
+Click the eye in the menu bar for the Spaces strip: drop a theme or picture on any Space,
+pause with ⏸ (the eye closes while paused). The gear, or a click on a thumbnail, turns the
+same popover into Settings: pick each Space's theme, speed, Mission Control stills, smooth
+swipes, hot reload and launch at login. Settings live in `.argus_settings.conf` next to
+Argus.app, one `key=value` per line.
+
 ## Write your own theme
 
 The native way is a Metal kernel: one `.metal` file that answers "what colour is this

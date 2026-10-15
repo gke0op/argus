@@ -14,12 +14,14 @@ pub const NATIVE_H: usize = 1200;
 pub const NATIVE_PIXELS: usize = NATIVE_W * NATIVE_H;
 pub const NATIVE_SCALE: f64 = 2.0;
 
-// @2x Retina Panorama Popover (680x98 logical points -> 1360x196 Retina pixels)
+// @2x Retina Panorama Popover (680x98 logical points -> 1360x196 Retina pixels). It grows to
+// 680x318 for the Settings view; the bitmap is sized for the taller face (popover_layout.zig).
 pub const POPOVER_W: usize = 680;
 pub const POPOVER_H: usize = 98;
+pub const SETTINGS_H: usize = 318;
 pub const POPOVER_SCALE: usize = 2;
 pub const POPOVER_BMP_W: usize = POPOVER_W * POPOVER_SCALE;
-pub const POPOVER_BMP_H: usize = POPOVER_H * POPOVER_SCALE;
+pub const POPOVER_BMP_H: usize = SETTINGS_H * POPOVER_SCALE;
 pub const POPOVER_PIXELS: usize = POPOVER_BMP_W * POPOVER_BMP_H;
 
 pub const SPACE_LIST_TOP: f64 = 34.0;

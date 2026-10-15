@@ -11,3 +11,4 @@ Argus.app/Contents/_CodeSignature/
 .argus_dropped_space_*.img
 *.ppm
 .toolchain/
+.argus_settings.conf
