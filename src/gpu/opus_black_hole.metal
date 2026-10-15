@@ -345,6 +345,15 @@ static float lnTab(constant TraceParams& P, device const float* tab, float r) {
 }
 static float tauExt(constant TraceParams& P, device const float* ttab, float r) { return exp(lnTab(P, ttab + PT_N, r)); }
 static float tauEm(constant TraceParams& P, device const float* ttab, float r) { return exp(lnTab(P, ttab + 2 * PT_N, r)); }
+// Spectral dilution f^-4 of the colour-corrected blackbody (the theme's colourFactor).
+static float dilution(constant TraceParams& P, device const float* ttab, float r) { return exp(lnTab(P, ttab + 3 * PT_N, r)); }
+
+constant float LIMB_B = 2.06f; // electron-scattering limb darkening I(mu) ~ 1 + LIMB_B mu, as the theme
+// Limb darkening at ln(1/mu) = lmu, weighted by the vertical extinction depth (the theme's limbFactor).
+static float limbFactor(float lmu, float tau_ext) {
+    const float ld = (1.0f + LIMB_B * exp(-lmu)) / (2.0f * (0.5f + LIMB_B / 3.0f));
+    return 1.0f + (ld - 1.0f) * (1.0f - exp(-tau_ext));
+}
 
 constant float MU_MIN = 0.0067f;  // grazing limit for 1/mu, as the theme
 constant float LMU_SCALE = 51.0f; // ln(1/mu) per byte level
@@ -372,9 +381,12 @@ static float slantTau(constant TraceParams& P, device const float* ttab, float a
     return tauExt(P, ttab, h.r) * exp(lnInvMu(P, alpha, h));
 }
 
-// Fraction of a blackbody the gas emits along the line of sight: 1 - e^(-tau_* / mu).
+// What the gas sends along the line of sight per unit of the colour blackbody B(f T_s):
+// emitted fraction 1 - e^(-tau_* / mu) x limb darkening x spectral dilution (the theme's emitWeight).
 static float emitFrac(constant TraceParams& P, device const float* ttab, float alpha, Hit h) {
-    return 1.0f - exp(-tauEm(P, ttab, h.r) * exp(lnInvMu(P, alpha, h)));
+    const float lmu = lnInvMu(P, alpha, h);
+    const float te = tauExt(P, ttab, h.r);
+    return (1.0f - exp(-tauEm(P, ttab, h.r) * exp(lmu))) * limbFactor(lmu, te) * dilution(P, ttab, h.r);
 }
 
 static float temperature(constant TraceParams& P, device const float* ttab, float r) {
@@ -590,7 +602,7 @@ kernel void bh_meter(constant TraceParams& P [[buffer(0)]],
     Ray ray = startRay(P, ab.x, ab.y);
     const Hit h = traceNext(P, ray, true);
     float y = 0.0f;
-    if (h.kind == KIND_DISK && h.r <= EXPO_R) y = luma(shadeDisk(P, st, ttab, ab.x, h.r, h.ph, h.t).rgb);
+    if (h.kind == KIND_DISK && h.r <= EXPO_R) y = luma(shadeDisk(P, st, ttab, ab.x, h.r, h.ph, h.t).rgb) * emitFrac(P, ttab, ab.x, h);
     lum[gid.y * P.grid_w + gid.x] = y;
 }
 
@@ -875,7 +887,7 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     const float lmu_f = float(lmuq[i]) / LMU_SCALE;
     const float lt_los = st.lntau_tab[rb] + lmu_f;
     const bool thin = lt_los < log(TAU_BEHIND);
-    const float emit = oneMinusExpExp(st, st.lnem_tab[rb] + lmu_f);
+    const float emit = oneMinusExpExp(st, st.lnem_tab[rb] + lmu_f) * limbFactor(lmu_f, exp(st.lntau_tab[rb])) * dilution(P, ttab, r);
     const float trans = 1.0f - oneMinusExpExp(st, lt_los);
     k *= emit;
 
