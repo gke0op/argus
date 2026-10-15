@@ -554,8 +554,8 @@ pub const DesktopPictures = struct {
         var cur_buf: [URL_MAX]u8 = undefined;
         if (n.currentDesktopURL(&cur_buf)) |cur| {
             // Only undo our own still; if the user chose another picture meanwhile, keep theirs.
-            if (self.isOurs(cur)) {
-                if (self.originalFor(space_uuid, cur)) |orig| _ = n.setDesktopURL(orig);
+            if (self.isOurs(cur) and !self.setUserPicture(space_uuid, cur)) {
+                return; // nothing settable: keep the still (and the ledger) rather than a broken picture
             }
         }
         if (self.ledger.find(space_uuid)) |e| {
@@ -564,6 +564,19 @@ pub const DesktopPictures = struct {
                 self.saveLedger();
             }
         }
+    }
+
+    /// Sets the user's own picture behind our still `cur`. macOS refuses a file that has since been
+    /// moved or deleted, so this falls back to any other original the user had that still exists.
+    fn setUserPicture(self: *DesktopPictures, space_uuid: []const u8, cur: []const u8) bool {
+        const n = &self.native.?;
+        if (self.originalFor(space_uuid, cur)) |orig| {
+            if (n.setDesktopURL(orig)) return true;
+        }
+        for (self.ledger.entries[0..self.ledger.n]) |*e| {
+            if (e.orig_len > 0 and !self.isOurs(e.original()) and n.setDesktopURL(e.original())) return true;
+        }
+        return false;
     }
 
     /// Deletes stills older than PRUNE_DAYS that no Space is known to show. Startup only.
@@ -596,6 +609,13 @@ pub const DesktopPictures = struct {
         var ubuf: [UUID_MAX]u8 = @splat(0);
         const u = self.native.?.spaceUUID(space_id, &ubuf) orelse return;
         self.restore(u);
+        // macOS also copies the last picture set into the default that new Spaces start with, so a
+        // still set earlier on another Space would seed every Space created after Argus quits.
+        // Setting the active Space's own picture again makes a user picture the last one set.
+        var cur_buf: [URL_MAX]u8 = undefined;
+        if (self.native.?.currentDesktopURL(&cur_buf)) |cur| {
+            if (!self.isOurs(cur)) _ = self.native.?.setDesktopURL(cur);
+        }
     }
 };
 
