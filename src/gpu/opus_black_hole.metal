@@ -628,6 +628,7 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
                      device ushort* tq [[buffer(5)]],
                      device uchar* bfrac [[buffer(6)]],
                      device uchar* lmuq [[buffer(7)]],
+                     device uchar* ftrq [[buffer(8)]],
                      uint2 gid [[thread_position_in_grid]]) {
     const uint x = gid.x;
     const uint y = gid.y + P.row0;
@@ -735,7 +736,7 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
     int p = -1;
     uint covq = 0;
     for (int o = 0; o < 3 && p < 0; o++) {
-        const uint q = min(uint(px.wcnt[o] * float(COV_MAX) / float(N) + 0.5f), COV_MAX);
+        const uint q = min((px.cnt[o] * COV_MAX + N / 2) / N, COV_MAX);
         if (q > 0) {
             p = o;
             covq = q;
@@ -756,6 +757,9 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
     bg[idx] = packRGB9E5(bg_rgb / float(N));
     bfrac[idx] = uchar(lt > 1e-12f ? clamp(luma(under) / lt, 0.0f, 1.0f) * 255.0f + 0.5f : 0.0f);
     lmuq[idx] = uchar(lmu_p * LMU_SCALE + 0.5f);
+    // Mean transmission of faint gas in front of the animated samples (kept apart from the 4-bit
+    // coverage, so a thinning lane fades in smoothly).
+    ftrq[idx] = uchar(p >= 0 && px.cnt[p] > 0 ? clamp(px.wcnt[p] / float(px.cnt[p]), 0.0f, 1.0f) * 255.0f + 0.5f : 255.0f);
     recs[idx] = p >= 0 ? Rec{ushort(px.first[p].rbin), ushort(px.first[p].phi), ushort(covq)} : Rec{0, 0, 0};
     tq[idx] = p >= 0 ? ushort(px.first[p].tq) : ushort(0);
 }
@@ -849,7 +853,7 @@ static float turbOctave(device const uchar* noise, constant Static& st, constant
 
 // One pixel of the theme's draw(), composited before tone mapping (light adds in linear).
 static float3 shadePre(uint x, uint y, constant TraceParams& P, device const float* ttab,
-                       device const Rec* recs, device const uint* bg, device const uchar* bfrac, device const uchar* lmuq,
+                       device const Rec* recs, device const uint* bg, device const uchar* bfrac, device const uchar* lmuq, device const uchar* ftrq,
                        device const uchar* noise, constant Static& st, constant Frame& fr, float exposure) {
     const uint i = y * P.width + x;
     const float3 bgv = unpackRGB9E5(bg[i]);
@@ -899,7 +903,9 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     const float lmu_f = float(lmuq[i]) / LMU_SCALE;
     const float lt_los = st.lntau_tab[rb] + lmu_f;
     const bool thin = lt_los < log(TAU_BEHIND);
-    const float emit = oneMinusExpExp(st, st.lnem_tab[rb] + lmu_f) * limbFactor(lmu_f, exp(st.lntau_tab[rb])) * dilution(P, ttab, r);
+    // Faint gas in front (the transmission byte) dims it like the gas's own emission factors.
+    const float emit = oneMinusExpExp(st, st.lnem_tab[rb] + lmu_f) * limbFactor(lmu_f, exp(st.lntau_tab[rb])) * dilution(P, ttab, r) *
+        (float(ftrq[i]) / 255.0f);
     const float trans = 1.0f - oneMinusExpExp(st, lt_los);
     k *= emit;
 
@@ -972,6 +978,7 @@ kernel void bh_shade(device const Rec* recs [[buffer(0)]],
                      device const float* ttab [[buffer(7)]],
                      device const uchar* bfrac [[buffer(8)]],
                      device const uchar* lmuq [[buffer(9)]],
+                     device const uchar* ftrq [[buffer(10)]],
                      texture2d<float, access::write> out [[texture(0)]],
                      uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= v.out_w || gid.y >= v.out_h) return;
@@ -979,7 +986,7 @@ kernel void bh_shade(device const Rec* recs [[buffer(0)]],
     const uint x = min(uint((float(gid.x) + 0.5f) * float(v.width) / float(v.out_w)), v.width - 1);
     const uint y = min(uint((float(gid.y) + 0.5f) * float(v.height) / float(v.out_h)), v.height - 1);
     float3 c = float3(0.0f);
-    if (y < v.rows_done) c = toneMap(shadePre(x, y, P, ttab, recs, bg, bfrac, lmuq, noise, st, fr, v.exposure), max(v.headroom, 1.0f));
+    if (y < v.rows_done) c = toneMap(shadePre(x, y, P, ttab, recs, bg, bfrac, lmuq, ftrq, noise, st, fr, v.exposure), max(v.headroom, 1.0f));
     c = max(c, 0.0f);
     if (v.out_mode == OUT_SRGB) c = float3(srgbEncode(min(c.x, 1.0f)), srgbEncode(min(c.y, 1.0f)), srgbEncode(min(c.z, 1.0f)));
     else if (v.out_mode == OUT_PQ) c = pqEncode(c);
