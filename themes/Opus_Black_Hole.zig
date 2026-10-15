@@ -22,11 +22,16 @@
 //    reverses (10 M), so the flux drops below Page-Thorne (0.86 at 5 M, 0.50 at 10 M). Beyond
 //    it the disk spreads outward, and its dissipation, temperature and opacity fall off
 //    together, so it thins out with no edge. The stress follows the closure, not the local
-//    pressure: alpha P = W holds exactly only at the flux peak, where it is set. Scaled to a
-//    5e9 solar-mass hole at 3% of Eddington (alpha = 0.1): peak 37,000 K, blue-white, as real
-//    thin disks around such holes are. Opacity: electron scattering + Kramers absorption;
-//    where the gas thins, it emits as a grey isothermal slab (energy-conserving source
-//    temperature) and the light behind is dimmed by the extinction depth.
+//    pressure: W = 1.5 alpha (P/rho) r holds only at the flux peak, where it is set (further
+//    out the closure's stress implies alpha >> 1). Scaled to a 5e9 solar-mass hole whose
+//    ISCO accretion rate is 3% of Eddington's (alpha = 0.1); the snapshot shines at ~1.5% of
+//    L_Edd, because its inflow stops at 10 M. Peak 37,000 K, blue-white, as real thin disks
+//    around such holes are. Local structure: scale height from hydrostatic balance with gas +
+//    radiation pressure, midplane temperature from radiative diffusion, electron scattering +
+//    Kramers absorption at that temperature. Where the gas thins it emits as a grey isothermal
+//    slab (energy-conserving source temperature; emission depth sqrt(tau_a tau_ext) where
+//    scattering is thick, tau_a (1 + tau_es) where thin) and dims the light behind by the
+//    extinction depth.
 //  * Color: each point radiates as a blackbody at T(r) ~ F^(1/4). The observed
 //    spectrum is exactly a blackbody at g*T, with g the full Kerr redshift
 //    (gravitational + Doppler), so color AND brightness come from Planck's law
@@ -40,29 +45,38 @@
 //
 // What is chosen (stated honestly):
 //  * Spin a = 0.94 M, inclination 80 deg (steeply tilted).
-//  * The disk's parameters: mass 5e9 Msun, Eddington ratio 0.03, alpha 0.1, the initial ring
+//  * The disk's parameters: mass 5e9 Msun, ISCO accretion rate 3% of Eddington, alpha 0.1, the initial ring
 //    (8 M, width 1.6 M) and the snapshot (mass flux reversing at 10 M). The Sigma-independent
 //    stress is what gives the soft outer fade: a stress that grows with Sigma (a pure alpha
-//    closure) makes a sharp front instead (Mummery & Balbus 2019). Opacity: grey, no
-//    hydrogen-recombination or dust opacity below ~1e4 K.
+//    closure) makes a sharp front instead (Mummery & Balbus 2019). Opacity: grey, and an
+//    extrapolation beyond ~35 M: there the gas is below ~5000 K and neutral, so electron
+//    scattering and Kramers (which need free electrons) do not apply, and the true opacity
+//    (H-, molecules, dust) is not modelled. Sigma falls an e-fold per ~5 M out there, so the
+//    fade is robust but its exact radius and its colour are not computed physics. Colour
+//    correction of the scattering-dominated inner disk is not modelled either.
 //  * Time-lapse: one ISCO orbit takes ~2.4 s on screen, one at r = 6 M ~10 s (in
 //    reality ~7 and ~28 days for this 5e9 solar-mass hole).
 //  * Turbulence: procedural noise carrying the measured statistics of magnetorotational
 //    turbulence, not simulated MHD (Guan et al. 2009; Beckwith, Armitage & Simon 2011;
-//    Hirose et al. 2009). Eddies 0.25 H radially by 1.75 H along the orbit (axis ratio 7;
-//    H/r = 0.01 is our choice, this disk computes 0.006 at the peak), born trailing ~31 deg
-//    and wound tighter by shear; two octaves with amplitude 2^(-5j/6), a k^(-11/3) per-mode
-//    spectrum; octave j lives P(r) 2^(-2j/3) (correlation time ~ half an orbit, shorter for
-//    small eddies), on phase-locked lifetime bands L0 2^n blended across radius so
-//    neighbouring radii never drift apart into stripes. Each band is two staggered
-//    generations cross-faded with variance-preserving weights, every one advected at its
-//    own Kerr Omega(r). Dissipation is log-normal, exp(0.2 m - 0.02 var m) with mean 1
-//    (sigma 0.2: a radiatively efficient thin disk, ~5% temperature ripples), and the gas
-//    temperature follows it as T ~ eps^(1/4), so it changes colour as well as brightness.
-//    Each octave is filtered by the pixel's footprint on the disk: below the eddy size it
-//    averages out. The CPU fallback draws the coarse octave only, on a coarse grid (one
-//    value per radial bin and 1/512 turn per frame, interpolated), as brightness at fixed colour, and
-//    bakes the pixels it cannot visibly change; the GPU draws both octaves per pixel.
+//    Hirose et al. 2009). As rendered (time-averaged 1/e correlation ellipse, measured on the
+//    tables): eddies ~1.8 H along the orbit by ~0.25 H radially (axis ratio ~7), trailing
+//    12-14 deg; H/r = 0.01 is our choice (this disk: 0.006-0.012 at the peak, by convention).
+//    They get there physically: born leading ~31 deg, swung by the Kerr shear through radial
+//    to trailing (the birth shape is fitted to that outcome). Two octaves with amplitude
+//    2^(-5j/6), a k^(-11/3) per-mode spectrum; octave j lives P(r) 2^(-2j/3) (correlation
+//    time ~ half an orbit, shorter for small eddies), on phase-locked lifetime bands L0 2^n
+//    blended across radius so neighbouring radii never drift apart into stripes. Each band
+//    is two staggered, independent generations cross-faded with variance-preserving weights,
+//    every one advected at its own Kerr Omega(r). Dissipation is log-normal,
+//    exp(0.2 m - 0.02 var m) with mean 1 (sigma 0.2: a radiatively efficient thin disk, ~5%
+//    temperature ripples), and the gas temperature follows it as T ~ eps^(1/4), so it
+//    changes colour as well as brightness. Interpolated so the variance holds between table
+//    cells, and filtered by the pixel's footprint on the disk as a box average does
+//    (~ (footprint / eddy)^(-1/2) per axis). The CPU fallback draws a stand-in for the
+//    coarse octave as a ~1-bin pixel sees it (point samples per radial bin and 1/512 turn,
+//    tent-filtered, scaled to the box-averaged rms), as brightness scaled by the blackbody's
+//    response to the temperature change, and bakes the pixels it cannot change by an 8-bit
+//    level; the GPU draws both octaves per pixel.
 //  * Hot spots: plasma clumps on exact Kerr orbits (like Sgr A* flares). Each appears
 //    in the direct image and the lowest-order lensed image of each pixel, its orbital
 //    phase lagging by that image's light-travel time (birth and fade do not lag; spots
@@ -90,7 +104,7 @@ const sdk = @import("argus_theme_sdk.zig");
 
 pub const SPIN: f64 = 0.94;
 pub const INCL: f64 = 80.0 * math.pi / 180.0;
-pub const R_OUT: f64 = 85.0; // geometry only: the computed disk's extinction depth is ~1e-4 here
+pub const R_OUT: f64 = 85.0; // geometry only: the computed disk's extinction depth is ~2e-3 here
 // Gas denser than this (line of sight) is drawn opaque: e^-40 of what lies behind leaks, under
 // 1e-3 of display white even behind the brightest disk (light is composited before tone mapping).
 const TAU_BEHIND: f64 = 40.0;
@@ -113,21 +127,24 @@ const TIME_LAPSE: f64 = 10.0; // M of coordinate time per unit of Argus dt
 // simulations (Guan et al. 2009, ApJ 694, 1010; Beckwith, Armitage & Simon 2011, MNRAS 416, 361).
 const TURB_SIGMA: f32 = 0.2; // rms of ln(dissipation) at the photosphere: thermal thin disk
 const NOISE_STD: f32 = 40.0; // noise table byte levels per standard deviation
-pub const H_OVER_R: f64 = 0.01; // disk scale height (this disk: 0.006 computed at the peak, ~0.014 textbook)
+pub const H_OVER_R: f64 = 0.01; // disk scale height (this disk: 0.006-0.012 at the peak depending on convention)
 pub const NR: usize = 2048; // turbulence rows across the radial span (eddies are smaller than a radial bin)
 pub const N_OCT: usize = 2; // octaves, amplitude 2^(-5j/6): a k^(-11/3) per-mode spectrum (Beckwith 2011). A third
 // (0.03 H radially) would be finer than a table row, and than a Retina pixel's footprint on the disk.
 pub const NBAND: usize = 12; // lifetime bands L0 * 2^n, phase-locked to global time
 pub const BAND_L0: f64 = 4.0; // M: the shortest lifetime band
 const OCT_AMP = [N_OCT]f32{ 1.0, 0.5612310241546865 };
-const EDDY_MIN_H: f64 = 0.25; // correlation lengths in H: radial 0.25, azimuthal 1.75 (axis ratio 7)
-const EDDY_MAJ_H: f64 = 1.75;
-const TILT_ROWS: f64 = 2.0; // noise rows per phase cell along an eddy's long axis: trailing ~31 deg at birth,
-// wound tighter by shear (exact wrap: NP * 2 = 2 NR, a whole number of cells per octave)
+// Birth eddies (value-noise cells of 2 x these, in H), born leading and swung by shear to
+// trailing: fitted so the time-averaged rendered 1/e ellipse is the measured MRI one, ~1.8 H
+// along the orbit by ~0.25 H radially (ratio ~7), trailing 12-14 deg (notes:
+// opus-audit2-turbulence-fit.md). Octave 1 renders ~0.9 x 0.2 H.
+const EDDY_MIN_H: f64 = 0.294;
+const EDDY_MAJ_H: f64 = 0.556;
+const TILT_ROWS: f64 = -2.0; // noise rows per phase cell along a birth eddy's long axis: leading ~31 deg
+// (exact wrap: NP * 2 = NR rows, a whole number of cells per octave)
 const MU_MIN: f64 = 0.0067; // grazing limit for 1/mu (ln 150 = 5.0)
 const LMU_SCALE: f64 = 51.0; // ln(1/mu) per byte level: 0..255 covers mu down to MU_MIN
-const PEAK_BOOST: f64 = 3.0; // how far turbulence can brighten gas in the visible: eps = 1.65 at 2.6 sigma, which is
-// T x 1.13, and on the Wien side of a ~3000 K spectrum that brightens the visible ~3x
+const RESP_SCALE: f32 = 32.0; // Rec.resp units per unit d ln Y / d ln eps
 const EXP_N: usize = 1024; // exp table over [-4, 4] for the CPU draw
 const EXPO_TARGET: f64 = 7.0; // 99th-percentile disk luminance maps here before tone mapping
 const STAR_GAIN: f64 = 0.8;
@@ -215,7 +232,7 @@ pub fn pageThorne(a: f64, r_in: f64, r_max: f64, out: *[PT_N]f64) void {
 // spreading outward and its surface density, dissipation and opacity fall off together.
 
 pub const BH_MASS_SUN: f64 = 5.0e9; // a quasar-class supermassive hole
-pub const EDD_RATIO: f64 = 0.03; // L / L_Edd: comfortably a thin disk (>~ 0.01)
+pub const EDD_RATIO: f64 = 0.03; // ISCO accretion rate / (L_Edd / (eta c^2)): a thin disk (>~ 0.01)
 pub const ALPHA_VISC: f64 = 0.1; // Shakura-Sunyaev alpha
 pub const RING_R0: f64 = 8.0; // M: where the gas was deposited
 const RING_D: f64 = 1.6; // M: initial ring width
@@ -419,24 +436,29 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
         if (fg[i] > fg[ipk]) ipk = i;
     }
     const Local = struct { sigma: f64, tes: f64, ta: f64, tc: f64, cs2: f64, rho: f64 };
+    // Local structure: Sigma from the flux and the closure's stress; scale height from vertical
+    // hydrostatic balance with the local gas + radiation pressure; midplane temperature from
+    // radiative diffusion (uniform heating: T_c^4 = (3/8 tau_half + 1) T_eff^4). Iterated jointly.
     const local = struct {
         fn f(aa: f64, rr: f64, fphys: f64, wphys: f64, rgc: f64, tgc: f64) Local {
             const teff4 = fphys / SIGMA_SB;
             const om = omegaK(aa, rr) / tgc;
             const domp = @abs(omegaPrime(aa, rr)) / tgc / rgc;
             const sg = 2.0 * fphys / (uT(aa, rr) * wphys * domp);
-            const cs2 = wphys / (1.5 * ALPHA_VISC * rr * rgc);
-            const hh = @sqrt(cs2) / om;
-            const rho = sg / (2.0 * hh);
             var tc = @sqrt(@sqrt(teff4));
+            var cs2 = K_BOLTZ * tc / (0.6 * M_PROTON);
+            var rho: f64 = sg * om / (2.0 * @sqrt(cs2));
             var tes: f64 = 0.0;
             var ta: f64 = 0.0;
-            for (0..60) |_| {
+            for (0..200) |_| {
+                rho = sg * om / (2.0 * @sqrt(cs2)); // Sigma / 2H, H = c_s / Omega
                 tes = KAPPA_ES * sg / 2.0;
                 ta = KAPPA_KRAMERS * rho * math.pow(f64, @max(tc, 1.0), -3.5) * sg / 2.0;
                 const tn = @sqrt(@sqrt(0.375 * (tes + ta) * teff4 + teff4));
-                if (@abs(tn - tc) < 1e-7 * tc) break;
-                tc = tn;
+                const cn = K_BOLTZ * tn / (0.6 * M_PROTON) + A_RAD * math.pow(f64, tn, 4) / (3.0 * rho);
+                if (@abs(tn - tc) < 1e-9 * tc and @abs(cn - cs2) < 1e-9 * cs2) break;
+                tc = 0.5 * (tc + tn);
+                cs2 = @sqrt(cs2 * cn);
             }
             return .{ .sigma = sg, .tes = tes, .ta = ta, .tc = tc, .cs2 = cs2, .rho = rho };
         }
@@ -470,13 +492,19 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
         // Through the whole slab (both halves): a crossing ray and the slab's emission see 2x
         // the midplane-to-surface depths that set the midplane temperature above.
         const tes_f = 2.0 * lk.tes;
+        // Emission depth: the thermalisation depth sqrt(tau_a tau_ext) where scattering is thick,
+        // the absorption depth lengthened by the scattering path, tau_a (1 + tau_es), where it is
+        // thin (an effectively thin slab emits 2 tau_a sigma T^4 per face, scattering or not).
+        // Absorption stays at the midplane temperature: evaluated at the hotter source
+        // temperature of the thin tail it runs away (free-free cooling falls as the gas heats),
+        // the sign that neither Kramers nor electron scattering applies there (see header).
         const ta_f = 2.0 * lk.ta;
-        const tst = @sqrt(ta_f * (ta_f + tes_f));
-        const emiss = 1.0 - 2.0 * expE3(tst); // grey isothermal slab: flux out = sigma T_s^4 (1 - 2 E3)
+        const tem = @min(ta_f * (1.0 + tes_f), @sqrt(ta_f * (ta_f + tes_f)));
+        const emiss = 1.0 - 2.0 * expE3(tem); // grey isothermal slab: flux out = sigma T_s^4 (1 - 2 E3)
         const ts = @min(@sqrt(@sqrt(fphys / (SIGMA_SB * @max(emiss, 1e-300)))), T_MAX_SOURCE);
         out.T[k] = @floatCast(ts);
         out.lt_ext[k] = @floatCast(@max(@log(tes_f + ta_f), -60.0));
-        out.lt_em[k] = @floatCast(@max(@log(tst), -60.0));
+        out.lt_em[k] = @floatCast(@max(@log(tem), -60.0));
         if (rk < 30.0) out.t_peak = @max(out.t_peak, ts);
     }
 }
@@ -788,7 +816,7 @@ const NP: usize = 1024;
 const BLOCK: usize = 4;
 
 const FR_Q = R_FRAC / 4; // footprint unit: a quarter radial bin (eddies are below a bin)
-const FR_SAT: u8 = 76; // 19 bins: where the GPU's 5-bit footprint saturates
+const FR_SAT: u8 = 73; // quarter bins: where the GPU's 5-bit footprint code saturates (12 + ceil(73/4) = 31)
 
 const Rec = extern struct {
     rgb: [3]f16, // linear HDR disk radiance (pre-exposure)
@@ -799,7 +827,7 @@ const Rec = extern struct {
     tobs: f16 = 0, // observed blackbody temperature g*T, for re-coloring hotter gas
     fp: u8 = 0, // pixel footprint: azimuthal extent in units of 64/65536 turn (saturating)
     bf: u8 = 0, // share of bg (luminance, /255) that lies behind this pixel's translucent gas
-    lmu: u8 = 0, // ln(1/mu) * LMU_SCALE: the slant of the line of sight through the gas
+    resp: u8 = 0, // CPU turbulence: d ln(luminance) / d ln(eps) at tobs (T ~ eps^(1/4)), * RESP_SCALE
     tq: u16 = 0, // light-travel phase Omega*t in 1/1024 turn, mod 64 turns: kept apart so it can be unwrapped
 };
 
@@ -848,14 +876,13 @@ pub const State = struct {
     band_kb: [NBAND]u32,
     gen: [N_OCT][NBAND][2]TurbGen, // per-frame generation constants (octave, band, A/B)
     gtab: [R_BINS][GT_NP]f32, // CPU path: coarse turbulence this frame per radial bin and phase slot
+    gtmp: [R_BINS][GT_NP]f32, // its unfiltered point samples
     band_n0: [R_BINS]u8, // CPU path: octave-0 band below each bin and its two blend weights
     band_w: [R_BINS][2]f32,
     sband: [N_OCT][R_BINS]f32, // log2(lifetime / BAND_L0) per octave and radial bin
     om_row: [NR]f32, // Omega at each turbulence row
     cell_r0: f32, // octave-0 cell size: radial bins
     cell_p0: f32, // octave-0 cell size: azimuth, Q16
-    inv_cr2: f32, // 1 / cell_r0^2, 1 / cell_p0^2
-    inv_cp2: f32,
     om_tab: [R_BINS]f64,
     shear_tab: [R_BINS]f32, // |dOmega/d rbin| in Q16 per M: how fast a sheared spot's azimuth runs with radius
     lntau_tab: [R_BINS]f32, // ln vertical extinction depth per radial bin
@@ -966,8 +993,8 @@ pub const State = struct {
             const v = @as(f64, @floatFromInt(k)) / 255.0;
             self.lin8[k] = @floatCast(if (v <= 0.04045) v / 12.92 else math.pow(f64, (v + 0.055) / 1.055, 2.4));
         }
-        // Turbulence planes, periodic in row and phase: octave j has cells of 2 x (0.25, 1.75) H
-        // / 2^j (value-noise cells are ~2 e-folding lengths). The long axis is tilted by shearing
+        // Turbulence planes, periodic in row and phase: octave j has birth cells of 2 x (EDDY_MIN_H,
+        // EDDY_MAJ_H) H / 2^j (correlation falls to 1/e at ~0.77 cell). The long axis is tilted by shearing
         // the radial coordinate along the azimuth (TILT_ROWS rows per phase cell); the cell sizes
         // are corrected by cos(tilt) so the eddy keeps its width across and length along its axis.
         // Normalised per plane: two passes, moments then bytes.
@@ -978,8 +1005,6 @@ pub const State = struct {
         const cell_ph = 2.0 * EDDY_MAJ_H * H_OVER_R / dphi_cell * cos_tilt;
         self.cell_r0 = @floatCast(2.0 * EDDY_MIN_H * H_OVER_R / (self.lnr_span / @as(f64, @floatFromInt(R_BINS))));
         self.cell_p0 = @floatCast(2.0 * EDDY_MAJ_H * H_OVER_R / (2.0 * math.pi) * 65536.0);
-        self.inv_cr2 = 1.0 / (self.cell_r0 * self.cell_r0);
-        self.inv_cp2 = 1.0 / (self.cell_p0 * self.cell_p0);
         for (0..N_OCT) |oct| {
             const sc = math.pow(f64, 2.0, @floatFromInt(oct));
             const gr: usize = @max(1, @as(usize, @intFromFloat(@round(@as(f64, NR) / (cell_rows / sc)))));
@@ -1025,8 +1050,10 @@ pub const State = struct {
 
     /// One octave of the tilted, anisotropic turbulence field at table row ri, phase cell pi.
     fn turbulence(ri: usize, pi: usize, oct: usize, gr: usize, gp: usize) f64 {
-        // Constant along ri + TILT_ROWS pi: outer gas lies at smaller phase, a trailing tilt.
-        const fr = (@as(f64, @floatFromInt(ri)) + TILT_ROWS * @as(f64, @floatFromInt(pi))) * @as(f64, @floatFromInt(gr)) / @as(f64, @floatFromInt(NR));
+        // Constant along ri + TILT_ROWS pi: with TILT_ROWS < 0 outer gas lies at larger phase, a
+        // leading tilt that shear swings through radial to trailing. (+NR keeps it positive; it is
+        // a whole number of cells.)
+        const fr = (@as(f64, @floatFromInt(ri)) + @as(f64, NR) + TILT_ROWS * @as(f64, @floatFromInt(pi))) * @as(f64, @floatFromInt(gr)) / @as(f64, @floatFromInt(NR));
         const fp = @as(f64, @floatFromInt(pi)) * @as(f64, @floatFromInt(gp)) / @as(f64, @floatFromInt(NP));
         const ir: usize = @intFromFloat(@floor(fr));
         const ip: usize = @intFromFloat(@floor(fp));
@@ -1078,6 +1105,24 @@ pub const State = struct {
         var c: [3]f64 = undefined;
         for (0..3) |i| c[i] = @as(f64, self.bb[xi][i]) * (1.0 - f) + @as(f64, self.bb[xi + 1][i]) * f;
         return c;
+    }
+
+    /// Luminance response of the blackbody at observed temperature T to a change of the local
+    /// dissipation eps (T ~ eps^(1/4)): d ln Y / d ln eps = (1/4) d ln Y / d ln T, as a byte.
+    fn respByte(self: *const State, T: f64) u8 {
+        const y1 = luma(self.bbLookup(T * 1.02));
+        const y0 = luma(self.bbLookup(T / 1.02));
+        if (!(y0 > 0.0) or !(y1 > 0.0)) return 0;
+        const r = 0.25 * @log(y1 / y0) / @log(1.02 * 1.02);
+        return @intFromFloat(@round(math.clamp(r * RESP_SCALE, 0.0, 255.0)));
+    }
+
+    /// How far turbulence can brighten gas at observed temperature T in the visible: its
+    /// dissipation at +2.6 sigma, eps = e^(2.6 sigma), raises T by eps^(1/4).
+    fn peakBoost(self: *const State, T: f64) f64 {
+        const y0 = luma(self.bbLookup(T));
+        if (!(y0 > 0.0)) return 1.0;
+        return @max(luma(self.bbLookup(T * @exp(2.6 * @as(f64, TURB_SIGMA) / 4.0))) / y0, 1.0);
     }
 
     fn alphaBeta(self: *const State, x: f64, y: f64) [2]f64 {
@@ -1512,7 +1557,8 @@ pub const State = struct {
                             }
                             if (hit.kind == .disk and hit.r > SPOT_RMAX) {
                                 const tau = self.slantTau(fx, hit);
-                                const dim = luma(self.shadeDisk(fx, hit.r, hit.ph, hit.t).rgb) * self.emitFrac(fx, hit) * self.exposure * PEAK_BOOST < EMIT_FLOOR;
+                                const sd = self.shadeDisk(fx, hit.r, hit.ph, hit.t);
+                                const dim = luma(sd.rgb) * self.emitFrac(fx, hit) * self.exposure * self.peakBoost(sd.tobs) < EMIT_FLOOR;
                                 if (tau < TAU_MIN or dim) {
                                     // Gas too thin or too cool to show even when turbulence stirs it:
                                     // baked into the background at its mean opacity, not redrawn per frame.
@@ -1542,8 +1588,8 @@ pub const State = struct {
                         }
                         const idx = py * w + px;
                         const fs: f64 = @floatFromInt(nsamp);
-                        // draw() composites translucent pixels as cov*c + (1 - bf*emit)*bg: only the light
-                        // behind the gas (share bf) is dimmed by it, not the sky beside it.
+                        // draw() composites translucent pixels as cov*c + (1 - bf)*bg, bf = share behind the
+                        // gas x its absorption: only the light behind the gas is dimmed, not the sky beside it.
                         // Static per pixel, so baked here: bf already carries the absorbed share,
                         // bf (1 - e^(-tau_ext/mu)), and rgb the emitted fraction 1 - e^(-tau_*/mu).
                         const lmu_q: u8 = @intFromFloat(@round(math.clamp(first_lmu * LMU_SCALE, 0.0, 255.0)));
@@ -1573,7 +1619,7 @@ pub const State = struct {
                                 .tobs = @floatCast(@min(first.tobs, 60000.0)),
                                 .tq = first.tq,
                                 .bf = bf,
-                                .lmu = lmu_q,
+                                .resp = self.respByte(first.tobs),
                             };
                             self.row_x0[py] = @min(self.row_x0[py], @as(u16, @intCast(px)));
                             self.row_x1[py] = @max(self.row_x1[py], @as(u16, @intCast(px + 1)));
@@ -1663,9 +1709,9 @@ pub const State = struct {
         }
     }
 
-    /// Turbulence that cannot change an 8-bit level (gas too dim, or eddies averaged out by the
-    /// footprint) leaves a pixel the same every frame unless a hot spot can reach it: those
-    /// pixels are composited once here, into the background, and draw() skips them.
+    /// Where turbulence cannot change an 8-bit level even at 3 sigma (dim enough gas, or eddies
+    /// averaged out by the footprint), a pixel is the same every frame unless a hot spot can
+    /// reach it: those pixels are composited once here, into the background, and draw() skips them.
     fn bakeStatic(self: *State) void {
         const span_bins = self.lnr_span / @as(f64, @floatFromInt(R_BINS));
         // Outermost bin a spot's mask can reach (step(): spot radius <= 5.35 r_in, +wr +12 bins).
@@ -1676,20 +1722,23 @@ pub const State = struct {
             if (rc.cov == 0 or rc.rbin / R_FRAC <= spot_bin_max) continue;
             const frf: f32 = @as(f32, @floatFromInt(rc.fr)) * 0.25;
             const fpf: f32 = @as(f32, @floatFromInt(rc.fp)) * 64.0;
-            const tex_c = 1.0 / (1.0 + frf * frf * self.inv_cr2 + fpf * fpf * self.inv_cp2);
-            if (!turbInvisible(rc, tex_c, self.exposure)) continue;
-            const k = @exp(-0.5 * TURB_SIGMA * TURB_SIGMA * tex_c * tex_c) * self.exposure;
+            const amp = GT_RMS * gridFoot(frf, fpf) * @as(f32, @floatFromInt(rc.resp)) / RESP_SCALE;
+            if (!turbBelowLevel(rc, amp, self.exposure)) continue;
+            const k = @exp(-0.5 * TURB_SIGMA * TURB_SIGMA * amp * amp) * self.exposure;
             const c = [3]f32{ @as(f32, rc.rgb[0]) * k, @as(f32, rc.rgb[1]) * k, @as(f32, rc.rgb[2]) * k };
             self.bg[i] = self.composite(rc, c, self.bg[i]);
             self.recs[i].cov = 0;
         }
     }
 
-    /// The ripple is below an 8-bit level: eddies averaged out below 1% rms by the footprint,
-    /// or gas too dim (linear < 0.02: a 5% change is < 1 level).
-    inline fn turbInvisible(rc: Rec, tex_c: f32, expo: f32) bool {
+    /// A 3-sigma turbulence ripple, e^(3 sigma amp) - 1 in linear light, moves this pixel by less
+    /// than one 8-bit sRGB level (slope of the sRGB curve at its tone-mapped luminance).
+    fn turbBelowLevel(rc: Rec, amp: f32, expo: f32) bool {
+        const cov = @as(f32, @floatFromInt(rc.cov)) / 255.0;
         const yl = (0.2126 * @as(f32, rc.rgb[0]) + 0.7152 * @as(f32, rc.rgb[1]) + 0.0722 * @as(f32, rc.rgb[2])) * expo;
-        return tex_c * TURB_SIGMA < 0.01 or yl < 0.02;
+        const v = cov * yl / (1.0 + yl);
+        const slope: f32 = if (v <= 0.0031308) 12.92 else 1.055 / 2.4 * math.pow(f32, v, -7.0 / 12.0);
+        return 255.0 * slope * v * (@exp(3.0 * TURB_SIGMA * amp) - 1.0) < 1.0;
     }
 
     // ---------------------------------------------------------------- per frame
@@ -1722,14 +1771,48 @@ pub const State = struct {
             }
         }
 
-        // CPU fallback: the coarse octave once per frame on a (radial bin, 1/GT_NP turn) grid,
-        // interpolated per pixel. Eddies are below a 1920-wide pixel anyway (the footprint
-        // filter keeps ~20% of their amplitude); the GPU path samples them exactly.
+        // CPU fallback: a stand-in for the coarse octave as a ~1-bin pixel sees it. Point samples
+        // on a (radial bin, 1/GT_NP turn) grid (nearly uncorrelated: the eddies are smaller),
+        // tent-filtered over the nodes, [1 2 3 2 1] radially x [1 2 1] in azimuth, and scaled to
+        // the rms the field has when box-averaged over such a footprint (GT_RMS, fitted). The
+        // GPU path samples the eddies themselves.
+        // (turbCoarse at every node, with the per-bin work hoisted: same row, Omega and bands.)
         for (0..R_BINS) |b| {
             const rbf = @as(f32, @floatFromInt(b)) + 0.5;
+            const row: usize = @min(@as(usize, @intFromFloat(rbf * (@as(f32, NR) / @as(f32, R_BINS)))), NR - 1);
+            const n0: usize = self.band_n0[b];
+            const om = self.om_row[row];
+            const out = &self.gtmp[b];
+            @memset(out, 0.0);
+            inline for (0..2) |kk| {
+                inline for (0..2) |gi| {
+                    const gn = self.gen[0][n0 + kk][gi];
+                    const wgt = self.band_w[b][kk] * gn.w / NOISE_STD;
+                    const shift: u16 = @truncate(@as(u32, @intFromFloat(om * gn.age_q)));
+                    const base: u16 = @as(u16, @truncate(gn.phoff)) +% shift;
+                    const src = &self.noise[0][(row + gn.rowoff) % NR];
+                    for (0..GT_NP) |pc| {
+                        const phi: u16 = @intCast((pc << (16 - GT_LOG2)) + (1 << (15 - GT_LOG2)));
+                        const q: u16 = phi -% base;
+                        out[pc] += wgt * (@as(f32, @floatFromInt(src[q >> 6])) - 128.0);
+                    }
+                }
+            }
+        }
+        const tr_w = [5]f32{ 1, 2, 3, 2, 1 };
+        const gain = GT_RMS / @sqrt((19.0 / 81.0) * (6.0 / 16.0)); // white-noise rms after the tent
+        for (0..R_BINS) |b| {
             for (0..GT_NP) |pc| {
-                const phi: u16 = @intCast((pc << (16 - GT_LOG2)) + (1 << (15 - GT_LOG2)));
-                self.gtab[b][pc] = self.turbCoarse(phi, rbf);
+                var acc: f32 = 0.0;
+                var wsum: f32 = 0.0;
+                for (0..5) |db| {
+                    const bb = @as(i64, @intCast(b)) + @as(i64, @intCast(db)) - 2;
+                    if (bb < 0 or bb >= R_BINS) continue;
+                    const row = &self.gtmp[@intCast(bb)];
+                    acc += tr_w[db] * (row[(pc + GT_NP - 1) & (GT_NP - 1)] + 2.0 * row[pc] + row[(pc + 1) & (GT_NP - 1)]);
+                    wsum += 4.0 * tr_w[db];
+                }
+                self.gtab[b][pc] = acc / wsum * gain;
             }
         }
 
@@ -1767,20 +1850,21 @@ pub const State = struct {
         return !math.isFinite(self.t_m) or !math.isFinite(self.exposure);
     }
 
-    /// The CPU turbulence grid at a pixel: bilinear between bin centres and phase slots.
+    /// The CPU turbulence grid at a pixel: variance-preserving interpolation between nodes
+    /// (separable, weights from tables).
     inline fn turbGrid(self: *const State, phi: u16, rbf: f32) f32 {
         const xb = math.clamp(rbf - 0.5, 0.0, @as(f32, R_BINS - 1) - 0.001);
         const b0: usize = @intFromFloat(xb);
-        const tb = xb - @as(f32, @floatFromInt(b0));
+        const tb: usize = @intFromFloat((xb - @as(f32, @floatFromInt(b0))) * @as(f32, GT_TQ));
         const q = phi -% (1 << (15 - GT_LOG2));
         const p0: usize = q >> (16 - GT_LOG2);
         const p1 = (p0 + 1) & (GT_NP - 1);
-        const tp = @as(f32, @floatFromInt(q & ((1 << (16 - GT_LOG2)) - 1))) / @as(f32, 1 << (16 - GT_LOG2));
+        const tp: usize = (q >> (16 - GT_LOG2 - GT_TQ_LOG2)) & (GT_TQ - 1);
         const r0 = &self.gtab[b0];
         const r1 = &self.gtab[@min(b0 + 1, R_BINS - 1)];
-        const g0 = r0[p0] + (r0[p1] - r0[p0]) * tp;
-        const g1 = r1[p0] + (r1[p1] - r1[p0]) * tp;
-        return g0 + (g1 - g0) * tb;
+        const wp = gt_wp[tp];
+        const wr = gt_wr[tb];
+        return wr[0] * (wp[0] * r0[p0] + wp[1] * r0[p1]) + wr[1] * (wp[0] * r1[p0] + wp[1] * r1[p1]);
     }
 
     /// Octave-0 turbulence at (phi, rbf) (unit variance, nearest cell): two lifetime bands blended
@@ -1841,20 +1925,34 @@ pub const State = struct {
             const row = buf[y * stride .. y * stride + w];
             const bg_row = self.bg[y * w .. y * w + w];
             const rec_row = self.recs[y * w .. y * w + w];
+            // The CPU grid is smooth over a cell (tent-filtered): a pixel within half a cell of
+            // the last lookup on this row reuses it.
+            var last_rbin: i32 = -1000;
+            var last_phi: u16 = 0;
+            var last_g: f32 = 0.0;
             for (x0..x1) |x| {
                 const rc = rec_row[x];
                 if (rc.cov == 0) continue;
                 const rb = rc.rbin / R_FRAC;
                 const rbf = @as(f32, @floatFromInt(rc.rbin)) / @as(f32, @floatFromInt(R_FRAC));
-                // CPU fallback: the coarse octave only, nearest cell, and as brightness at fixed colour;
-                // the GPU path adds the finer octaves, interpolates, and changes the temperature.
+                // CPU fallback: a stand-in for the coarse octave (see step()), as brightness at fixed
+                // colour; the GPU path samples both octaves per pixel and changes the temperature.
                 const frf: f32 = @as(f32, @floatFromInt(rc.fr)) * 0.25; // bins
                 const fpf: f32 = @as(f32, @floatFromInt(rc.fp)) * 64.0;
-                const tex_c = 1.0 / (1.0 + frf * frf * self.inv_cr2 + fpf * fpf * self.inv_cp2);
-                // Skip the lookups where the ripple cannot change an 8-bit level (see bakeStatic).
-                var m: f32 = 0.0;
-                if (!turbInvisible(rc, tex_c, expo)) m = self.turbGrid(rc.phi, rbf) * tex_c;
-                const ex = math.clamp((TURB_SIGMA * m - 0.5 * TURB_SIGMA * TURB_SIGMA * tex_c * tex_c + 4.0) * (@as(f32, EXP_N) / 8.0), 0.0, @as(f32, EXP_N) - 0.001);
+
+                // The GPU changes the temperature, T ~ eps^(1/4); here the brightness changes by the
+                // blackbody's response to that, d ln Y / d ln eps (baked per pixel), at fixed colour.
+                const amp = gridFoot(frf, fpf) * @as(f32, @floatFromInt(rc.resp)) / RESP_SCALE;
+                const drb: i32 = @as(i32, rc.rbin) - last_rbin;
+                const dph: i32 = @as(i16, @bitCast(rc.phi -% last_phi));
+                if (@abs(drb) > R_FRAC / 2 or @abs(dph) > (1 << (15 - GT_LOG2))) {
+                    last_g = self.turbGrid(rc.phi, rbf);
+                    last_rbin = rc.rbin;
+                    last_phi = rc.phi;
+                }
+                const m = last_g * amp;
+                const amp_rms = GT_RMS * amp;
+                const ex = math.clamp((TURB_SIGMA * m - 0.5 * TURB_SIGMA * TURB_SIGMA * amp_rms * amp_rms + 4.0) * (@as(f32, EXP_N) / 8.0), 0.0, @as(f32, EXP_N) - 0.001);
                 const ei: usize = @intFromFloat(ex);
                 var k = (self.exp_tab[ei] + (self.exp_tab[ei + 1] - self.exp_tab[ei]) * (ex - @as(f32, @floatFromInt(ei)))) * expo;
                 // The gas emits 1 - e^(-tau_*/mu) of a blackbody at its source temperature (baked into
@@ -1923,6 +2021,33 @@ pub const State = struct {
 
 const GT_LOG2 = 9; // CPU turbulence grid: 2^9 phase slots per turn (2 noise-table cells)
 const GT_NP = 1 << GT_LOG2;
+const GT_RMS: f32 = 0.367; // rms of the coarse octave box-averaged over +-2 bins x +-1 slot (fitted)
+const GT_RHO_R: f32 = 0.84; // neighbour correlation of the tent-filtered grid: radial, azimuthal
+const GT_RHO_P: f32 = 0.67;
+
+/// Footprint wider than the grid's own averaging (+-2 bins, +-1 slot): the box average falls
+/// further, ~ (extent ratio)^(-1/2) per axis.
+inline fn gridFoot(frf: f32, fpf: f32) f32 {
+    if (frf <= 2.0 and fpf <= 256.0) return 1.0;
+    return 1.0 / @sqrt(@max(frf * 0.5, 1.0) * @max(fpf * (1.0 / 256.0), 1.0));
+}
+
+const GT_TQ_LOG2 = 5; // interpolation weights quantised to 1/32 of a cell
+const GT_TQ = 1 << GT_TQ_LOG2;
+
+/// Weights of an interpolation that keeps the variance of a field whose neighbours correlate
+/// by rho: ((1 - t) a + t b) / sqrt((1 - t)^2 + t^2 + 2 t (1 - t) rho), tabulated at t = (i + 0.5) / GT_TQ.
+fn vmixWeights(comptime rho: f32) [GT_TQ][2]f32 {
+    var w: [GT_TQ][2]f32 = undefined;
+    for (0..GT_TQ) |i| {
+        const t = (@as(f32, @floatFromInt(i)) + 0.5) / @as(f32, GT_TQ);
+        const n = @sqrt((1.0 - t) * (1.0 - t) + t * t + 2.0 * t * (1.0 - t) * rho);
+        w[i] = .{ (1.0 - t) / n, t / n };
+    }
+    return w;
+}
+const gt_wp = vmixWeights(GT_RHO_P);
+const gt_wr = vmixWeights(GT_RHO_R);
 
 /// One generation of eddies: its weight now, its age (Q16 phase per unit Omega), and the offsets
 /// that make it an independent draw from the octave's noise plane. Laid out for the GPU.

@@ -29,12 +29,19 @@ constant float EMIT_X0 = -7.0f;
 constant float EMIT_X1 = 4.0f;
 constant float TURB_SIGMA = 0.2f; // rms of ln(dissipation): thermal thin disk, as the theme
 constant float NOISE_STD = 40.0f;  // noise table byte levels per standard deviation
-constant float PEAK_BOOST = 3.0f;  // how far turbulence can brighten gas in the visible, as the theme
+constant float PEAK_T = 1.1388f;    // e^(2.6 sigma / 4): turbulence at +2.6 sigma raises T by this, as the theme
 constant uint NR = 2048;           // turbulence rows
 constant uint N_OCT = 2;           // turbulence octaves, amplitude 2^(-5j/6)
 constant uint NBAND = 12;          // turbulence lifetime bands
 constant float OCT_AMP[N_OCT] = {1.0f, 0.5612310f};
 constant float OCT_NORM = 1.1467259f; // sqrt(sum of OCT_AMP^2)
+// Neighbour correlations of each octave's plane (rows, phase cells), for variance-preserving
+// interpolation; and the footprint filter's cell constants (box average of the rendered field).
+// Fitted to the planes (notes: opus-audit2-turbulence-fit.md); re-fit if the eddy shape changes.
+constant float RHO_ROW[N_OCT] = {0.40f, 0.26f};
+constant float RHO_PH[N_OCT] = {0.31f, 0.0f};
+constant float FOOT_CR[N_OCT] = {0.865f, 1.284f};
+constant float FOOT_CP[N_OCT] = {1.513f, 2.039f};
 constant uint BB_N = 1024;
 constant float BB_TMIN = 300.0f;
 constant float BB_TMAX = 80000.0f;
@@ -550,7 +557,10 @@ static void addSample(thread Px& px, constant TraceParams& P, constant Static& s
     const float tau = tauExt(P, ttab, h0.r) * exp(lmu);
     const Sample smp = shadeDisk(P, st, ttab, alpha, h0.r, h0.ph, h0.t);
     if (h0.r > SPOT_RMAX) {
-        const bool dim = luma(smp.rgb) * emitFrac(P, ttab, alpha, h0) * P.exposure * PEAK_BOOST < EMIT_FLOOR;
+        // Visible brightening by turbulence at +2.6 sigma (large on the Wien side of cool gas).
+        const float y0 = luma(smp.rgb);
+        const float boost = y0 > 0.0f ? max(luma(bbLookup(st, smp.tobs * PEAK_T)) / y0, 1.0f) : 1.0f;
+        const bool dim = y0 * emitFrac(P, ttab, alpha, h0) * P.exposure * boost < EMIT_FLOOR;
         if (tau < TAU_MIN || dim) {
             // Too thin or too cool to show even when stirred: baked at its mean opacity.
             if (tau < TAU_BEHIND) px.bg += exp(-tau) * behind(P, st, ttab, alpha, h1, h2, foot);
@@ -710,17 +720,18 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
     float3 beside = px.bg;
     for (int o = 0; o < 3; o++) if (o != p) beside += px.stat[o];
     // Light behind the animated gas (translucent pixels only) is dimmed every frame by that gas;
-    // light beside it is not. bh_shade composites cov*c + (1 - f*emit)*bg, where f is the share of
-    // bg that lies behind the gas: exact when both parts have the same colour.
+    // light beside it is not. bh_shade composites cov*c + (1 - f*(1 - trans))*bg, where f is the
+    // share of bg that lies behind the gas: exact when both parts have the same colour. The slant
+    // is quantised first, so this test and bh_shade's agree on which pixels are translucent.
     float3 under = float3(0.0f);
-    const float lmu_p = p >= 0 ? px.lmu[p] : 0.0f;
+    const float lmu_p = p >= 0 ? round(clamp(px.lmu[p] * LMU_SCALE, 0.0f, 255.0f)) / LMU_SCALE : 0.0f;
     if (p >= 0 && st.lntau_tab[px.first[p].rbin / R_FRAC] + lmu_p < log(TAU_BEHIND)) under = px.behind[p];
     const float3 bg_rgb = beside + under;
     const float lt = luma(bg_rgb);
     const uint idx = y * P.width + x;
     bg[idx] = packRGB9E5(bg_rgb / float(N));
     bfrac[idx] = uchar(lt > 1e-12f ? clamp(luma(under) / lt, 0.0f, 1.0f) * 255.0f + 0.5f : 0.0f);
-    lmuq[idx] = uchar(clamp(lmu_p * LMU_SCALE + 0.5f, 0.0f, 255.0f));
+    lmuq[idx] = uchar(lmu_p * LMU_SCALE + 0.5f);
     recs[idx] = p >= 0 ? Rec{ushort(px.first[p].rbin), ushort(px.first[p].phi), ushort(covq)} : Rec{0, 0, 0};
     tq[idx] = p >= 0 ? ushort(px.first[p].tq) : ushort(0);
 }
@@ -778,6 +789,12 @@ static float frBins(uint code) {
 // rows r0 and r0 + 1 at weight tr), lifetime band position sb: two bands blended across radius,
 // each two staggered generations, every generation advected at its own row's Omega since birth.
 // Unit variance before the bilinear filter.
+// Interpolation that keeps the variance of a field whose neighbours correlate by rho: linear
+// interpolation alone dips to (1 + rho) / 2 of it halfway, a visible contrast ripple.
+static float vmix(float a, float b, float t, float rho) {
+    return ((1.0f - t) * a + t * b) * rsqrt((1.0f - t) * (1.0f - t) + t * t + 2.0f * t * (1.0f - t) * rho);
+}
+
 static float turbOctave(device const uchar* noise, constant Static& st, constant Frame& fr, uint j,
                         ushort phi, uint r0, float tr, float sb) {
     device const uchar* plane = noise + j * NR * NP;
@@ -798,9 +815,9 @@ static float turbOctave(device const uchar* noise, constant Static& st, constant
                 const float pc = (qf - 65536.0f * floor(qf / 65536.0f)) / 64.0f;
                 const uint p0 = min(uint(pc), NP - 1);
                 const uint p1 = (p0 + 1) & (NP - 1);
-                v[rr] = mix(float(plane[row * NP + p0]), float(plane[row * NP + p1]), pc - float(p0));
+                v[rr] = vmix(float(plane[row * NP + p0]) - 128.0f, float(plane[row * NP + p1]) - 128.0f, pc - float(p0), RHO_PH[j]);
             }
-            g += wb * t.w * (mix(v[0], v[1], tr) - 128.0f);
+            g += wb * t.w * vmix(v[0], v[1], tr, RHO_ROW[j]);
         }
     }
     return g / NOISE_STD;
@@ -827,7 +844,7 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     const Orbit o = orbitAt(P.a, r);
     const float tobs = temperature(P, ttab, r) / (o.ut * (1.0f - o.om * L));
     // MRI turbulence (k^(-11/3), 2 octaves), each octave filtered by the pixel's footprint on the
-    // disk; octaves the footprint averages below 0.2% are skipped.
+    // disk (box average: ~ (footprint / eddy)^(-1/2) per axis); octaves below 0.2% are skipped.
     const float frf = frBins(fr_q);
     const float fpf = float(fp_q) * 64.0f;
     const float prow = clamp(rbf * (float(NR) / float(R_BINS)) - 0.5f, 0.0f, float(NR - 1));
@@ -842,7 +859,7 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
         const float sc = float(1u << j);
         const float er = frf * sc / st.cell_r0;
         const float ep = fpf * sc / st.cell_p0;
-        const float a = OCT_AMP[j] / (OCT_NORM * (1.0f + er * er + ep * ep));
+        const float a = OCT_AMP[j] / OCT_NORM * rsqrt(sqrt((1.0f + er * er / (FOOT_CR[j] * FOOT_CR[j])) * (1.0f + ep * ep / (FOOT_CP[j] * FOOT_CP[j]))));
         if (a * TURB_SIGMA < 0.002f) continue;
         const float sb = mix(st.sband[j][b0], st.sband[j][min(b0 + 1, R_BINS - 1)], tb);
         G += a * turbOctave(noise, st, fr, j, rc.phi, r0, trow, sb);
