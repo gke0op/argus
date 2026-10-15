@@ -1,7 +1,7 @@
 # Argus
 
 A bare-metal Zig live wallpaper engine for macOS: every Desktop Space runs its
-own theme, a single `.zig` file compiled on the fly.
+own theme, a single `.metal` (GPU) or `.zig` (CPU) file compiled on the fly.
 
 > The full README is on its way.
 
@@ -14,6 +14,15 @@ make run                                  # build Argus.app and start it
 make stop                                 # quit it
 make test                                 # run the test suites
 make harness THEME=themes/Echo.zig        # verify and benchmark a theme headlessly
+make harness THEME=themes/Tutorial_Tides.metal   # same, on the GPU for Metal themes
 ```
 
-Write your own theme: see `themes/argus_theme_sdk.zig` and `themes/Echo.zig`.
+## Write your own theme
+
+The native way is a Metal kernel: one `.metal` file that answers "what colour is this
+pixel?" and runs on the GPU for every pixel at once (0.5–2 ms per 1920x1200 frame, almost
+no CPU). Start with `themes/Tutorial_Tides.metal` (stateless) and
+`themes/Tutorial_Reef.metal` (a simulation with GPU state), then read
+`.claude/skills/argus-metal-theme/SKILL.md` for the full contract.
+
+CPU themes in Zig still work: see `themes/argus_theme_sdk.zig` and `themes/Echo.zig`.

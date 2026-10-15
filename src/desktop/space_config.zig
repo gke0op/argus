@@ -158,6 +158,16 @@ pub fn verifyDylibSafety(dylib_z: [:0]const u8) bool {
     return true;
 }
 
+/// Zig + Metal hybrids: themes with a Metal port (src/gpu/) are built through their export
+/// wrapper, so the GPU presenter can read their tables. On by default; `--cpu` turns it off.
+pub var gpu_ports = true;
+
+/// Set by the app: compiles a `.metal` theme source and reports whether it is loadable, so a
+/// broken edit never replaces a working theme. Null (tests, harness) accepts any source.
+pub var metal_validate: ?*const fn (src: []const u8, label: []const u8) bool = null;
+const GPU_PORT_THEME = "Opus_Black_Hole.zig";
+const GPU_PORT_ROOT = "-Mroot=src/gpu/bh_export.zig";
+
 pub const SpaceConfig = struct {
     space_id: u64 = 0,
     index_1based: usize = 1,
@@ -190,6 +200,8 @@ pub const SpaceConfig = struct {
     render_scale: f64 = NATIVE_SCALE,
     dylib_gen: u32 = 0,
     last_mtime: i96 = 0,
+    /// A Metal-only theme (`.metal`): drawn entirely on the GPU by the app's presenter.
+    metal_theme: bool = false,
 
     pub fn setLabel(self: *SpaceConfig, s: []const u8) void {
         const n = @min(self.label_buf.len, s.len);
@@ -226,6 +238,27 @@ pub const SpaceConfig = struct {
         self.theme_draw_fn = null;
         self.theme_has_nan_fn = null;
         self.custom_render_fn = null;
+        self.metal_theme = false;
+    }
+
+    /// Loads a Metal-only theme: no dylib, the app compiles and runs it on the GPU.
+    fn loadMetalTheme(self: *SpaceConfig, path: []const u8) bool {
+        var buf: [131072]u8 = undefined;
+        const src = std.Io.Dir.cwd().readFile(g_io, path, &buf) catch return false;
+        if (std.mem.indexOf(u8, src, "argus_draw") == null) return false;
+        if (metal_validate) |validate| {
+            if (!validate(src, std.Io.Dir.path.basename(path))) return false;
+        }
+        if (std.Io.Dir.cwd().statFile(g_io, path, .{})) |st| {
+            self.last_mtime = st.mtime.nanoseconds;
+        } else |_| {}
+        self.unloadShader();
+        self.dylib_gen +%= 1;
+        self.metal_theme = true;
+        self.mode = .custom_shader;
+        self.setPath(path);
+        self.setLabel(std.Io.Dir.path.basename(path));
+        return true;
     }
 
     /// Hot-compiles a standalone `.zig` file exporting either the stateful Argus Theme SDK
@@ -233,6 +266,7 @@ pub const SpaceConfig = struct {
     /// `aarch64-macos` `.dylib` using Zig 0.17.0, verifies it in an isolated watchdog subprocess
     /// first, and then loads its symbols via `dlopen` / `dlsym` at native 1920x1200 Retina resolution.
     pub fn compileAndLoadShader(self: *SpaceConfig, space_idx: usize, path: []const u8) bool {
+        if (std.mem.endsWith(u8, path, ".metal")) return self.loadMetalTheme(path);
         if (std.Io.Dir.cwd().statFile(g_io, path, .{})) |st| {
             self.last_mtime = st.mtime.nanoseconds;
         } else |_| {}
@@ -247,6 +281,8 @@ pub const SpaceConfig = struct {
             self.dylib_gen,
         }, 0) catch return false;
 
+        const gpu_port = gpu_ports and std.mem.eql(u8, std.Io.Dir.path.basename(path), GPU_PORT_THEME);
+
         // Content-addressed verified .dylib cache: hash source content so unchanged shaders
         // across app restarts or multiple Spaces skip `zig build-lib` and `--verify-dylib`!
         var src_hash: u64 = 0;
@@ -256,6 +292,7 @@ pub const SpaceConfig = struct {
         if (std.Io.Dir.cwd().readFile(g_io, path, &hash_read_buf)) |src_bytes| {
             if (src_bytes.len > 0) {
                 src_hash = std.hash.Wyhash.hash(0xA460_5017, src_bytes);
+                if (gpu_port) src_hash ^= 0x6770_755F_706F_7274; // separate cache entry for the GPU build
                 // v2: v1 cache entries carry path-derived install names that collide across themes.
                 if (std.fmt.bufPrint(&cache_buf, "/tmp/argus_cache_v2_{x}.dylib", .{src_hash})) |cp| {
                     cache_path = cp;
@@ -287,21 +324,12 @@ pub const SpaceConfig = struct {
                 "zig";
 
             const alloc = std.heap.page_allocator;
+            var mtheme_buf: [530]u8 = undefined;
+            const mtheme_arg = std.fmt.bufPrint(&mtheme_buf, "-Mtheme={s}", .{path}) catch return false;
+            const cpu_argv = [_][]const u8{ zig_bin, "build-lib", path, "-dynamic", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", emit_arg, "-install_name", iname_arg };
+            const gpu_argv = [_][]const u8{ zig_bin, "build-lib", "-dynamic", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", emit_arg, "-install_name", iname_arg, "--dep", "theme", GPU_PORT_ROOT, "-O", "ReleaseFast", mtheme_arg };
             const res = std.process.run(alloc, g_io, .{
-                .argv = &[_][]const u8{
-                    zig_bin,
-                    "build-lib",
-                    path,
-                    "-dynamic",
-                    "-O",
-                    "ReleaseFast",
-                    "-target",
-                    "aarch64-macos",
-                    "-lc",
-                    emit_arg,
-                    "-install_name",
-                    iname_arg,
-                },
+                .argv = if (gpu_port) &gpu_argv else &cpu_argv,
             }) catch return false;
             defer alloc.free(res.stdout);
             defer alloc.free(res.stderr);

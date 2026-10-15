@@ -2,12 +2,158 @@
 // ARGUS HEADLESS THEME HARNESS // src/theme_harness.zig
 //
 // Single-command compiler, benchmark, memory-audit, stride-canary, NaN-check,
-// and PNG-export harness for native Zig Argus themes:
+// and PNG-export harness for native Zig Argus themes, and (GPU mode) for Metal-only
+// themes, which it compiles with the Argus prelude and renders headless on the GPU:
 //
 //   zig run -O ReleaseFast -lc src/theme_harness.zig -- themes/Echo.zig --frames 120 --out /tmp/echo.png
+//   zig run -O ReleaseFast -lc src/theme_harness.zig -- themes/Tutorial_Tides.metal
 // ============================================================================
 
 const std = @import("std");
+const mtl = @import("gpu/metal.zig");
+const metal_theme = @import("gpu/metal_theme.zig");
+
+/// GPU frame budget for Metal themes: 120 FPS worth, leaving the GPU nearly idle at 30 FPS.
+const METAL_BUDGET_US: f64 = 8333.0;
+const METAL_DT: f32 = 1.0 / 30.0;
+
+const MetalRun = struct { ok: bool, gpu_us_avg: f64 = 0, gpu_us_worst: f64 = 0, err: [*:0]const u8 = "" };
+
+/// Renders `frames` frames of a compiled Metal theme into `out`; frame 0 lands in `first`, the last in `last`.
+fn runMetal(theme: *metal_theme.Theme, out: mtl.Id, frames: usize, first: ?[]f32, last: ?[]f32) MetalRun {
+    const w: usize = theme.frame.width;
+    const h: usize = theme.frame.height;
+    var total: f64 = 0;
+    var worst: f64 = 0;
+    for (0..frames) |f| {
+        const pool = mtl.poolPush();
+        defer mtl.poolPop(pool);
+        const cb = mtl.msg(mtl.Id, theme.queue, "commandBuffer", .{});
+        theme.encode(cb, out, METAL_DT);
+        mtl.msg(void, cb, "commit", .{});
+        mtl.msg(void, cb, "waitUntilCompleted", .{});
+        if (mtl.msg(usize, cb, "status", .{}) == 5) { // MTLCommandBufferStatusError
+            return .{ .ok = false, .err = mtl.describe(mtl.msg(mtl.Id, cb, "error", .{})) };
+        }
+        const us = (mtl.msg(f64, cb, "GPUEndTime", .{}) - mtl.msg(f64, cb, "GPUStartTime", .{})) * 1e6;
+        if (f > 0) { // frame 0 includes one-time init and pipeline warm-up
+            total += us;
+            worst = @max(worst, us);
+        }
+        const dst = if (f == 0) first else if (f == frames - 1) last else null;
+        if (dst) |d| mtl.msg(void, out, "getBytes:bytesPerRow:fromRegion:mipmapLevel:", .{
+            @as(*anyopaque, @ptrCast(d.ptr)), w * 16, mtl.MTLRegion{ .x = 0, .y = 0, .z = 0, .w = w, .h = h, .d = 1 }, @as(usize, 0),
+        });
+    }
+    return .{ .ok = true, .gpu_us_avg = total / @as(f64, @floatFromInt(@max(1, frames - 1))), .gpu_us_worst = worst };
+}
+
+fn packFloat(px: []const f32) u32 {
+    var c: [3]u32 = undefined;
+    for (0..3) |i| c[i] = @intFromFloat(@round(std.math.clamp(px[i], 0.0, 1.0) * 255.0));
+    return (@as(u32, 255) << 24) | (c[2] << 16) | (c[1] << 8) | c[0];
+}
+
+fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames: usize, width: usize, height: usize, out_png: []const u8) !void {
+    var src_buf: [131072]u8 = undefined;
+    const src = try std.Io.Dir.cwd().readFile(io, path, &src_buf);
+    const label = std.Io.Dir.path.basename(path);
+    const frames = @max(n_frames, 2);
+    var err_buf: [4096]u8 = undefined;
+
+    var theme = metal_theme.Theme.compile(src, label, @intCast(width), @intCast(height), 0x5EED, &err_buf) catch {
+        std.debug.print("METAL COMPILE FAILED: {s}\n{s}\nVerdict           : FAIL\n", .{ path, std.mem.sliceTo(&err_buf, 0) });
+        std.process.exit(1);
+    };
+    defer theme.deinit();
+
+    // Watchdog: a small 320x200 instance must run too (no size assumptions in the kernels).
+    var wd_ok = false;
+    if (metal_theme.Theme.compile(src, label, 320, 200, 1, &err_buf)) |wd_theme| {
+        var wd = wd_theme;
+        defer wd.deinit();
+        const wd_out = mtl.newTexture(wd.dev, mtl.PIXEL_RGBA32F, 320, 200, mtl.STORAGE_SHARED);
+        defer mtl.release(wd_out);
+        wd_ok = runMetal(&wd, wd_out, 3, null, null).ok;
+    } else |_| {}
+
+    const out = mtl.newTexture(theme.dev, mtl.PIXEL_RGBA32F, width, height, mtl.STORAGE_SHARED);
+    defer mtl.release(out);
+    const first = try alloc.alloc(f32, width * height * 4);
+    defer alloc.free(first);
+    const last = try alloc.alloc(f32, width * height * 4);
+    defer alloc.free(last);
+    const run = runMetal(&theme, out, frames, first, last);
+    if (!run.ok) {
+        std.debug.print("METAL RUN FAILED: {s}: {s}\nVerdict           : FAIL\n", .{ path, run.err });
+        std.process.exit(1);
+    }
+
+    var nan_detected = false;
+    for (first) |v| if (!std.math.isFinite(v)) {
+        nan_detected = true;
+        break;
+    };
+    for (last) |v| if (!std.math.isFinite(v)) {
+        nan_detected = true;
+        break;
+    };
+
+    const packed_px = try alloc.alloc(u32, width * height);
+    defer alloc.free(packed_px);
+    for (packed_px, 0..) |*p, i| p.* = packFloat(last[i * 4 .. i * 4 + 4]);
+    const bg_pixel = packed_px[0];
+    var distinct_pixels: usize = 0;
+    var animated_pixels: usize = 0;
+    for (packed_px, 0..) |px, i| {
+        if (px != bg_pixel) distinct_pixels += 1;
+        const p0 = packFloat(first[i * 4 .. i * 4 + 4]);
+        var diff: i32 = 0;
+        inline for (0..3) |ch| diff += @intCast(@abs(@as(i32, @intCast((px >> (8 * ch)) & 0xFF)) - @as(i32, @intCast((p0 >> (8 * ch)) & 0xFF))));
+        if (diff >= 4) animated_pixels += 1;
+    }
+    try writePNG(packed_px, width, height, out_png);
+
+    const motion_ok = animated_pixels >= 2_000;
+    const pass = wd_ok and !nan_detected and distinct_pixels > 100 and motion_ok and run.gpu_us_avg < METAL_BUDGET_US;
+    const st_desc = if (theme.stateful()) "state texture" else "stateless";
+    var out_buf: [2048]u8 = undefined;
+    const report = try std.fmt.bufPrint(&out_buf,
+        \\========================================================================
+        \\ ARGUS HEADLESS THEME HARNESS (GPU / Metal) // VERIFICATION REPORT
+        \\------------------------------------------------------------------------
+        \\ Theme             : {s} (Metal-only, {s}{s})
+        \\ State             : {d}x{d} {s}, {d} step(s) per frame
+        \\ Resolution        : {d}x{d} (and 320x200 watchdog)
+        \\ Frames Rendered   : {d} (dt = 1/30 s)
+        \\ Avg GPU Frame     : {d:.1} us | Budget: {d:.1} us
+        \\ Worst GPU Frame   : {d:.1} us
+        \\ Watchdog 320x200  : {s}
+        \\ NaN / Inf Check   : {s}
+        \\ Pixel Variance    : {d} / {d} non-bg pixels
+        \\ Temporal Motion   : {d} / {d} visibly animated pixels (min required: 2000)
+        \\ Output PNG        : {s}
+        \\ Verdict           : {s}
+        \\========================================================================
+        \\
+    , .{
+        path,                              st_desc,
+        if (theme.step != null) ", argus_step" else "",
+        theme.dir.state_w,                 theme.dir.state_h,
+        if (theme.dir.state_f32) "float32" else "float16",
+        if (theme.step != null) theme.dir.steps else 0,
+        width,                             height,
+        frames,                            run.gpu_us_avg,
+        METAL_BUDGET_US,                   run.gpu_us_worst,
+        if (wd_ok) "PASS" else "FAIL (failed to compile or run at 320x200)",
+        if (nan_detected) "FAIL (NaN/Inf in the output!)" else "CLEAN",
+        distinct_pixels,                   width * height,
+        animated_pixels,                   width * height,
+        out_png,                           if (pass) "PASS" else "FAIL",
+    });
+    try std.Io.File.stdout().writeStreamingAll(io, report);
+    if (!pass) std.process.exit(1);
+}
 
 const FnInit = *const fn (w: u32, h: u32, scale: f64) callconv(.c) ?*anyopaque;
 const FnDeinit = *const fn (state: ?*anyopaque) callconv(.c) void;
@@ -104,6 +250,8 @@ pub fn main(init: std.process.Init) !void {
         try std.Io.File.stderr().writeStreamingAll(io, emsg);
         std.process.exit(1);
     };
+
+    if (std.mem.endsWith(u8, path, ".metal")) return metalHarness(io, alloc, path, n_frames, width, height, out_png);
 
     var dylib_buf: [256]u8 = undefined;
     var emit_buf: [280]u8 = undefined;
