@@ -537,6 +537,7 @@ static float2 alphaBeta(constant TraceParams& P, float fx, float fy) {
 struct Px {
     float3 bg;        // sky and baked gas
     uint cnt[3];      // animated-eligible disk samples per order
+    float wcnt[3];    // the same, weighted by the transmission of negligible gas in front of them
     Sample first[3];  // the first of each order: its record, if that order stays animated
     float3 behind[3]; // light behind those samples
     float3 stat[3];   // their mean emission plus what shows through: used if they stay static
@@ -548,6 +549,7 @@ static Px pxNew() {
     px.bg = float3(0.0f);
     for (uint o = 0; o < 3; o++) {
         px.cnt[o] = 0;
+        px.wcnt[o] = 0.0f;
         px.first[o] = Sample{0.0f, 0, float3(0.0f), 0, 0};
         px.lmu[o] = 0.0f;
         px.behind[o] = float3(0.0f);
@@ -558,35 +560,46 @@ static Px pxNew() {
 
 static void addSample(thread Px& px, constant TraceParams& P, constant Static& st, device const float* ttab,
                       float alpha, Hit h0, Hit h1, Hit h2, float3 foot) {
-    if (h0.kind == KIND_SKY) {
-        px.bg += sky(P, st, h0.dir, foot.x);
-        return;
-    }
-    if (h0.kind != KIND_DISK) return;
-    const float lmu = lnInvMu(P, alpha, h0);
-    const float tau = tauExt(P, ttab, h0.r) * exp(lmu);
-    const Sample smp = shadeDisk(P, st, ttab, alpha, h0.r, h0.ph, h0.t);
-    if (h0.r > SPOT_RMAX) {
-        // Visible brightening by turbulence at +2.6 sigma (large on the Wien side of cool gas).
-        const float y0 = luma(smp.rgb);
-        const float peak_t = exp(2.6f * st.turb_sigma / 4.0f); // T at +2.6 sigma of the dissipation
-        const float boost = y0 > 0.0f ? max(luma(bbLookup(st, smp.tobs * peak_t)) / y0, 1.0f) : 1.0f;
-        const bool dim = y0 * emitFrac(P, ttab, alpha, h0) * P.exposure * boost < EMIT_FLOOR;
-        if (tau < TAU_MIN || dim) {
-            // Too thin or too cool to show even when stirred: baked at its mean opacity.
-            if (tau < TAU_BEHIND) px.bg += exp(-tau) * behind(P, st, ttab, alpha, h1, h2, foot);
+    // Gas too thin or too cool to show even when stirred emits nothing visible: it only dims what
+    // lies behind. The next crossing behind it is then this sample's real hit (animated, e.g. the
+    // lensed underside of the disk), seen through it at e^(-tau/mu): its weight in the pixel.
+    float front_tr = 1.0f;
+    for (uint layer = 0; layer < 3; layer++) {
+        if (h0.kind == KIND_SKY) {
+            px.bg += front_tr * sky(P, st, h0.dir, foot.x);
             return;
         }
+        if (h0.kind != KIND_DISK) return;
+        const float lmu = lnInvMu(P, alpha, h0);
+        const float tau = tauExt(P, ttab, h0.r) * exp(lmu);
+        const Sample smp = shadeDisk(P, st, ttab, alpha, h0.r, h0.ph, h0.t);
+        if (h0.r > SPOT_RMAX) {
+            // Visible brightening by turbulence at +2.6 sigma (large on the Wien side of cool gas).
+            const float y0 = luma(smp.rgb);
+            const float peak_t = exp(2.6f * st.turb_sigma / 4.0f); // T at +2.6 sigma of the dissipation
+            const float boost = y0 > 0.0f ? max(luma(bbLookup(st, smp.tobs * peak_t)) / y0, 1.0f) : 1.0f;
+            const bool dim = y0 * emitFrac(P, ttab, alpha, h0) * P.exposure * boost < EMIT_FLOOR;
+            if (tau < TAU_MIN || dim) {
+                if (tau >= TAU_BEHIND) return; // dim and opaque: nothing shows here
+                front_tr *= exp(-tau);
+                h0 = h1;
+                h1 = h2;
+                h2 = hitNone();
+                continue;
+            }
+        }
+        const uint o = min(h0.n, 3u) - 1;
+        if (px.cnt[o] == 0) {
+            px.first[o] = smp;
+            px.lmu[o] = lmu;
+        }
+        px.cnt[o] += 1;
+        px.wcnt[o] += front_tr;
+        const float3 bh = behind(P, st, ttab, alpha, h1, h2, foot);
+        px.behind[o] += front_tr * bh;
+        px.stat[o] += front_tr * (smp.rgb * (P.exposure * emitFrac(P, ttab, alpha, h0)) + exp(-tau) * bh);
+        return;
     }
-    const uint o = min(h0.n, 3u) - 1;
-    if (px.cnt[o] == 0) {
-        px.first[o] = smp;
-        px.lmu[o] = lmu;
-    }
-    px.cnt[o] += 1;
-    const float3 bh = behind(P, st, ttab, alpha, h1, h2, foot);
-    px.behind[o] += bh;
-    px.stat[o] += smp.rgb * (P.exposure * emitFrac(P, ttab, alpha, h0)) + exp(-tau) * bh;
 }
 
 kernel void bh_meter(constant TraceParams& P [[buffer(0)]],
@@ -722,7 +735,7 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
     int p = -1;
     uint covq = 0;
     for (int o = 0; o < 3 && p < 0; o++) {
-        const uint q = min((px.cnt[o] * COV_MAX + N / 2) / N, COV_MAX);
+        const uint q = min(uint(px.wcnt[o] * float(COV_MAX) / float(N) + 0.5f), COV_MAX);
         if (q > 0) {
             p = o;
             covq = q;

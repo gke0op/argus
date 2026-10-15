@@ -1640,21 +1640,26 @@ pub const State = struct {
                                     backs = .{ p[1], p[2] };
                                 }
                             }
-                            if (hit.kind == .disk and hit.r > SPOT_RMAX) {
+                            // Gas too thin or too cool to show even when turbulence stirs it emits nothing
+                            // visible: it only dims what lies behind. The next crossing behind it is then this
+                            // sample's real hit (animated, e.g. the lensed underside of the disk), seen through
+                            // it at e^(-tau/mu).
+                            var front_tr: f64 = 1.0;
+                            var hidden = false;
+                            while (hit.kind == .disk and hit.r > SPOT_RMAX) {
                                 const tau = self.slantTau(fx, hit);
                                 const sd = self.shadeDisk(fx, hit.r, hit.ph, hit.t);
                                 const dim = luma(sd.rgb) * self.emitWeight(fx, hit) * self.exposure * self.peakBoost(sd.tobs) < EMIT_FLOOR;
-                                if (tau < TAU_MIN or dim) {
-                                    // Gas too thin or too cool to show even when turbulence stirs it:
-                                    // baked into the background at its mean opacity, not redrawn per frame.
-                                    if (tau < TAU_BEHIND) {
-                                        const bh = self.behind(fx, backs, foot);
-                                        const tr = @exp(-tau);
-                                        for (0..3) |i| bg_rgb[i] += tr * bh[i];
-                                    }
-                                    continue;
+                                if (!(tau < TAU_MIN or dim)) break;
+                                if (tau >= TAU_BEHIND) {
+                                    hidden = true; // dim and opaque: nothing shows here
+                                    break;
                                 }
+                                front_tr *= @exp(-tau);
+                                hit = backs[0];
+                                backs = .{ backs[1], .{} };
                             }
+                            if (hidden) continue;
                             const s = self.shadeHit(fx, hit, foot);
                             if (s.disk) {
                                 if (nd == 0) {
@@ -1662,13 +1667,13 @@ pub const State = struct {
                                     first_lmu = self.lnInvMu(fx, hit);
                                 }
                                 nd += 1;
-                                for (0..3) |i| disk_rgb[i] += s.rgb[i];
+                                for (0..3) |i| disk_rgb[i] += front_tr * s.rgb[i];
                                 if (self.slantTau(fx, hit) < TAU_BEHIND) {
                                     const bh = self.behind(fx, backs, foot);
-                                    for (0..3) |i| disk_behind[i] += bh[i];
+                                    for (0..3) |i| disk_behind[i] += front_tr * bh[i];
                                 }
                             } else {
-                                for (0..3) |i| bg_rgb[i] += s.rgb[i];
+                                for (0..3) |i| bg_rgb[i] += front_tr * s.rgb[i];
                             }
                         }
                         const idx = py * w + px;
