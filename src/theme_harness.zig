@@ -206,7 +206,7 @@ const FnCount = *const fn () callconv(.c) usize;
 const FnHasNaN = *const fn (state: ?*anyopaque) callconv(.c) bool;
 const FnStateless = *const fn (pixels: [*]u32, w: u32, h: u32, phase: f64, step_count: u64) callconv(.c) void;
 
-fn writePNG(pixels: []const u32, width: usize, height: usize, out_path: []const u8) !void {
+pub fn writePNG(pixels: []const u32, width: usize, height: usize, out_path: []const u8) !void {
     const libcg = std.c.dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", .{ .LAZY = true }) orelse return error.CGLoadFailed;
     const libcf = std.c.dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", .{ .LAZY = true }) orelse return error.CFLoadFailed;
     const libiio = std.c.dlopen("/System/Library/Frameworks/ImageIO.framework/ImageIO", .{ .LAZY = true }) orelse return error.ImageIOLoadFailed;

@@ -5,7 +5,7 @@ THEME ?= themes/Echo.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: all app desktop kronos harness claims test run stop clean gpu-bench gpu-probes
+.PHONY: all app desktop kronos harness claims test run stop clean gpu-bench gpu-probes metalfx-demo
 
 all: app kronos
 
@@ -42,6 +42,9 @@ clean:
 
 # GPU prototype: Opus_Black_Hole's draw() as a Metal compute kernel, timed and diffed against the CPU.
 GPU_FRAMES ?= 240
+metalfx-demo:
+	$(ZIG) run $(ZFLAGS) src/metalfx_demo.zig -- $(THEME) --out-dir $(dir $(OUT))
+
 gpu-probes:
 	tools/gpu_probes/run.sh
 
