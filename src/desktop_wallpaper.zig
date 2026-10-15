@@ -5,6 +5,7 @@ pub const obs_mod = @import("desktop/observatory.zig");
 const gpu = @import("gpu/presenter.zig");
 const metal_theme = @import("gpu/metal_theme.zig");
 const status_glyph = @import("desktop/status_glyph.zig");
+const desktop_picture = @import("desktop/desktop_picture.zig");
 
 pub const NATIVE_W = sc.NATIVE_W;
 pub const NATIVE_H = sc.NATIVE_H;
@@ -1133,6 +1134,22 @@ const MacBridge = struct {
 };
 
 var g_bridge: ?*MacBridge = null;
+/// Mission Control Spaces-bar stills (see desktop/desktop_picture.zig).
+var g_pictures: desktop_picture.DesktopPictures = .{};
+/// Set by SIGTERM/SIGINT/SIGHUP (`make stop`); onTick restores the desktop picture, then exits.
+var g_quit_requested = std.atomic.Value(bool).init(false);
+
+extern "c" fn signal(sig: c_int, handler: *const fn (c_int) callconv(.c) void) ?*const anyopaque;
+
+fn onQuitSignal(_: c_int) callconv(.c) void {
+    g_quit_requested.store(true, .release);
+}
+
+/// Every way out of Argus: put the active Space's own desktop picture back first.
+fn quitArgus(b: *MacBridge) noreturn {
+    g_pictures.restoreActiveForQuit(b.CGSGetActiveSpace(b.cgs_conn));
+    std.process.exit(0);
+}
 
 fn onAcceptsFirstMouse(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) bool {
     return true;
@@ -1261,7 +1278,7 @@ fn onPopoverMouseDown(_: ?*anyopaque, _: ?*anyopaque, event: ?*anyopaque) callco
         if (x >= 10.0 and x <= 64.0) {
             b.openThemesFolder();
         } else if (x >= W - 64.0 and x <= W) {
-            std.process.exit(0);
+            quitArgus(b);
         }
     }
     // 2. Horizontal Panorama Viewports (Spaces I..VIII side-by-side):
@@ -1317,8 +1334,8 @@ fn isAnimatedSpaceMode(m: SpaceMode) bool {
 
 fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     const b = g_bridge orelse return;
-    if (b.max_frames != 0 and b.frame_idx >= b.max_frames) {
-        std.process.exit(0);
+    if (g_quit_requested.load(.acquire) or (b.max_frames != 0 and b.frame_idx >= b.max_frames)) {
+        quitArgus(b);
     }
     // Pause completely (0% CPU) when display is asleep or lid is closed
     if (b.frame_idx > 5 and b.CGDisplayIsAsleep(b.display_id) != 0) {
@@ -1420,6 +1437,15 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
 
     if (space_changed or (b.frame_idx % 15) == 0) {
         b.updateStatusGlyph();
+    }
+
+    // Spaces-bar still for the active Space: a few compares per tick, real work once per visit.
+    // Skipped on Spaces Argus does not own (a fullscreen app's Space keeps the last desktop index).
+    if (active_idx < b.obs.n_spaces and b.obs.spaces[active_idx].space_id == cur_space_id) {
+        const sp = &b.obs.spaces[active_idx];
+        // GPU Spaces publish a CPU snapshot only on load or while the menu is open: ask for one.
+        if (g_pictures.wantsFreshFrame(b.frame_idx)) b.snap_tick[active_idx] = 0;
+        g_pictures.tick(cur_space_id, desktop_picture.stillSignature(sp), sp.cg_image, b.frame_idx);
     }
 
     b.frame_idx += 1;
@@ -1907,6 +1933,12 @@ pub fn main(init: std.process.Init) !void {
     // Discover all user Desktop Spaces from SkyLight and bind a dedicated NSWindow to each Space!
     bridge.syncSpacesFromSkyLight(true);
     bridge.updateStatusGlyph();
+    if (!normal_window) {
+        g_pictures.init();
+        _ = signal(15, onQuitSignal); // SIGTERM
+        _ = signal(2, onQuitSignal); // SIGINT
+        _ = signal(1, onQuitSignal); // SIGHUP
+    }
 
     // Schedule 30 FPS NSTimer in NSRunLoopCommonModes
     const NSTimer = objc_getClass("NSTimer") orelse return error.NoNSTimer;
@@ -2118,6 +2150,8 @@ test "Mission Control Space reordering moves themes with space_id and resets mov
 test {
     _ = status_glyph;
     _ = metal_theme;
+    _ = desktop_picture;
+    _ = @import("desktop/settings.zig");
 }
 
 test "Metal-only themes load into a Space and render on the GPU" {
