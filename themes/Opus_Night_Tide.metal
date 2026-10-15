@@ -20,7 +20,7 @@
 //   - To the eye the glow is a soft grey-blue, whiter in the brightest foam;
 //     long-exposure photos make it neon. This aims between the two.
 //
-// How it works: a 1536x512 state texture is a top-down map of the surf zone
+// How it works: a 1024x384 state texture is a top-down map of the surf zone
 // (128 m along the beach, 48 m out to sea). Every frame, argus_step evaluates how hard
 // the water is being stirred at each cell (from an analytic model of shoaling
 // swells, breakers, bores and swash) and updates that cell's light, its charge
@@ -28,7 +28,7 @@
 // sea and the beach from a viewer standing on the sand, looking along the
 // shore, and lights them with that map.
 //
-// @argus state 1536x512
+// @argus state 1024x384
 // @argus steps 1
 // ============================================================================
 
@@ -68,6 +68,16 @@ static Sea sea(float x, float z, float t) {
         const float r = rand1(n);
         const float age = t - n * T_WAVE - 1.5f * r;
         if (age < 0.0f) continue;
+        // Cheap early out before the noise work: a cell this wave can't touch.
+        // Its crest is within 2.3 m of crestZ(age) (the bend); nothing reaches
+        // more than 6 m ahead of the crest or 30 m behind it, except the swash,
+        // which lives within SHORE + 4 m and ends 8 s after the crest lands.
+        {
+            const float zc0 = crestZ(age);
+            const bool in_swash_zone = z < SHORE + 4.0f && age < ageAt(SHORE + 1.5f - 2.3f) + 8.0f;
+            if (!in_swash_zone && (z < zc0 - 8.3f || z > zc0 + 32.3f)) continue;
+            if (age > ageAt(SHORE + 1.5f - 2.3f) + 8.0f && z < SHORE + 4.0f) continue;
+        }
         // Wave size: mostly small to moderate, rising and falling in sets with lulls
         // between, and now and then (about one in twelve, at random) a big one.
         const float sets = sin(n * 0.9f) * sin(n * 0.37f + 1.0f);           // -1..1, slow
@@ -301,7 +311,7 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
         float sa = s_top, sb = s_end;
         bool hit = false;
         if (s_top < s_last) {
-            const int steps = 48;
+            const int steps = 24; // plus 6 refinement steps; finer showed no difference
             float prev_s = s_top;
             for (int i = 1; i <= steps; i++) {
                 const float ss = mix(s_top, s_last, float(i) / float(steps));
@@ -342,17 +352,8 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
         const float hz = height(x, z + e) - height(x, z - e);
         const float3 nrm = normalize(float3(-hx, 2.0f * e, -hz));
 
-        // Close to the eye a map texel covers many pixels: average a few taps so
-        // the glow doesn't show the map's grid.
         float4 g = float4(0.0f);
-        if (inMap(x, z)) {
-            const float r = clamp(0.9f - dist * 0.08f, 0.0f, 0.8f) * 0.12f; // metres
-            g = state.sample(smp, mapUV(x, z));
-            if (r > 0.0f) {
-                g = 0.4f * g + 0.15f * (state.sample(smp, mapUV(x + r, z)) + state.sample(smp, mapUV(x - r, z)) +
-                                        state.sample(smp, mapUV(x, z + 1.5f * r)) + state.sample(smp, mapUV(x, z - 1.5f * r)));
-            }
-        }
+        if (inMap(x, z)) g = state.sample(smp, mapUV(x, z));
         // Fine sparkle: the glow is millions of tiny flashes, finer than the map.
         // Flashes last a fraction of a second, so the grain needn't stay put in the
         // world: it is drawn in 2x2-pixel cells on screen, renewed every 2 frames.
@@ -361,9 +362,13 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
         const float rr = argus_rand(grain_cell, f.seed + f.frame / 2u);
         const float sparkle = 0.3f + 2.8f * rr * rr * rr;
         // Whitewater lights in streaks and patches that ride shoreward with it.
-        const float2 fp = float2(x * 0.55f, (z + 2.2f * t) * 0.9f);
-        const float streaks = argus_fbm(fp + 0.6f * float2(argus_noise(fp * 0.5f + 7.0f), 0.0f), 4);
-        const float foam_tex = 0.25f + 0.95f * smoothstep(-0.35f, 0.45f, streaks);
+        // (Only worth computing where there is light to shape.)
+        float foam_tex = 0.0f;
+        if (g.x + g.z > 1e-4f) {
+            const float2 fp = float2(x * 0.55f, (z + 2.2f * t) * 0.9f);
+            const float streaks = argus_fbm(fp + 0.6f * float2(argus_noise(fp * 0.5f + 7.0f), 0.0f), 4);
+            foam_tex = 0.25f + 0.95f * smoothstep(-0.35f, 0.45f, streaks);
+        }
         // The map ends ~100 m down the beach: let the light fade out before it does.
         const float far_fade = smoothstep(MAP_X0 + MAP_W - 2.0f, MAP_X0 + MAP_W - 40.0f, x) * smoothstep(MAP_X0 + 1.0f, MAP_X0 + 10.0f, x);
         const float glow = (g.x * sparkle + 0.2f * g.z) * foam_tex * far_fade;
