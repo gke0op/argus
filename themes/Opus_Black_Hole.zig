@@ -12,9 +12,18 @@
 //    GPU traces every pixel (2x2 samples, 8x8 at edges and photon rings); the CPU
 //    fallback traces 4x4-block corners and interpolates where the image is smooth.
 //    Spin, frame dragging and the D-shaped shadow come out of the equations.
-//  * Disk: geometrically thin, optically thick, inner edge at the ISCO (exact
-//    Bardeen-Press-Teukolsky formula), emitted flux from the Page-Thorne integral
-//    evaluated numerically from Kerr circular-orbit E(r), L(r), Omega(r).
+//  * Disk: geometrically thin, inner edge at the ISCO (exact Bardeen-Press-Teukolsky
+//    formula). Surface density, dissipation, temperature and optical depth all come from ONE
+//    solution of the general-relativistic thin-disk evolution equation (Balbus 2017; Mummery &
+//    Balbus 2019, MNRAS 489, 132; see diskProfile): a ring of gas that has spread for a while,
+//    zero stress at the ISCO, a stress W ~ r^(1/2) independent of Sigma. Inside the radius
+//    where its mass flux reverses (10 M) it relaxes to the Page-Thorne flux (checked: within
+//    0.4%, mass budget to 0.1%); beyond it the disk spreads outward, and its dissipation,
+//    temperature and opacity fall off together, so it thins out with no edge. Scaled to a
+//    5e9 solar-mass hole at 3% of Eddington (alpha = 0.1): peak 37,000 K, blue-white, as real
+//    thin disks around such holes are. Opacity: electron scattering + Kramers absorption;
+//    where the gas thins, it emits as a grey isothermal slab (energy-conserving source
+//    temperature) and the light behind is dimmed by the extinction depth.
 //  * Color: each point radiates as a blackbody at T(r) ~ F^(1/4). The observed
 //    spectrum is exactly a blackbody at g*T, with g the full Kerr redshift
 //    (gravitational + Doppler), so color AND brightness come from Planck's law
@@ -28,30 +37,28 @@
 //
 // What is chosen (stated honestly):
 //  * Spin a = 0.94 M, inclination 80 deg (steeply tilted).
-//  * Peak disk temperature 6,500 K, a warm look. Physically T_peak ~ (Mdot / M^2)^(1/4),
-//    and a thin disk this cool around a supermassive hole needs an accretion rate of
-//    ~1e-7 Eddington, where real flows are hot and thick instead. Real thin disks
-//    around such holes are ~30,000-100,000 K, blue-white. This is an artistic choice
-//    (as Interstellar's was); the colours are still the honest Planck colours of 6,500 K.
-//  * Outer disk: no wall. The surface density rolls off as Sigma ~ (R_C/r) exp(-r/R_C),
-//    the gamma = 1 (nu ~ r) Lynden-Bell & Pringle (1974) viscous-spreading profile, used
-//    as an outer taper; optical depth follows it, so far out the cool gas turns
-//    translucent and light from behind (sky, the lensed far side) is traced through it.
-//    It is not self-consistent with the steady Page-Thorne T(r) (that solution spreads
-//    outward beyond R_C/2), and R_C, TAU0 and the gamma are choices.
+//  * The disk's parameters: mass 5e9 Msun, Eddington ratio 0.03, alpha 0.1, the initial ring
+//    (8 M, width 1.6 M) and the snapshot (mass flux reversing at 10 M). The Sigma-independent
+//    stress is what gives the soft outer fade: a stress that grows with Sigma (a pure alpha
+//    closure) makes a sharp front instead (Mummery & Balbus 2019). Opacity: grey, no
+//    hydrogen-recombination or dust opacity below ~1e4 K.
 //  * Time-lapse: one ISCO orbit takes ~2.4 s on screen, one at r = 6 M ~10 s (in
-//    reality hours for a 1e8 solar-mass hole).
-//  * Turbulence: procedural value noise styled after the magnetorotational turbulence of
-//    real disks, not simulated MHD: eddies stretched along the orbit (~5% of r radially,
-//    ~0.2 rad in azimuth), trailing ~14 deg at birth (shear winds them tighter, to
-//    5-11 deg at peak visibility), three octaves with amplitude ratio 2^(-1/3), i.e. a
-//    Kolmogorov-like k^(-5/3) energy spectrum, and log-normal emissivity
-//    exp(0.5 m - 0.125 var m) with its mean kept at 1. It modulates the emitting
-//    filling factor at fixed local temperature (so it changes brightness, not colour).
-//    Advected at the true Kerr orbital rate, so it shears; refreshed in two
-//    cross-faded generations of 60 M (eddy lifetimes do not scale with the local
-//    orbital period: done naively that winds the pattern into radial stripes).
-//    The CPU fallback draws the coarse eddies only; the GPU adds the fine octaves.
+//    reality ~7 and ~28 days for this 5e9 solar-mass hole).
+//  * Turbulence: procedural noise carrying the measured statistics of magnetorotational
+//    turbulence, not simulated MHD (Guan et al. 2009; Beckwith, Armitage & Simon 2011;
+//    Hirose et al. 2009). Eddies 0.25 H radially by 1.75 H along the orbit (axis ratio 7;
+//    H/r = 0.01 is our choice, this disk computes 0.006 at the peak), born trailing ~31 deg
+//    and wound tighter by shear; three octaves with amplitude 2^(-5j/6), a k^(-11/3) per-mode
+//    spectrum; octave j lives P(r) 2^(-2j/3) (correlation time ~ half an orbit, shorter for
+//    small eddies), on phase-locked lifetime bands L0 2^n blended across radius so
+//    neighbouring radii never drift apart into stripes. Each band is two staggered
+//    generations cross-faded with variance-preserving weights, every one advected at its
+//    own Kerr Omega(r). Dissipation is log-normal, exp(0.2 m - 0.02 var m) with mean 1
+//    (sigma 0.2: a radiatively efficient thin disk, ~5% temperature ripples), and the gas
+//    temperature follows it as T ~ eps^(1/4), so it changes colour as well as brightness.
+//    Each octave is filtered by the pixel's footprint on the disk: below the eddy size it
+//    averages out. The CPU fallback draws the coarse octave only, as brightness at fixed
+//    colour; the GPU draws all three.
 //  * Hot spots: plasma clumps on exact Kerr orbits (like Sgr A* flares). Each appears
 //    in the direct image and the lowest-order lensed image of each pixel, its orbital
 //    phase lagging by that image's light-travel time (birth and fade do not lag; spots
@@ -79,20 +86,17 @@ const sdk = @import("argus_theme_sdk.zig");
 
 pub const SPIN: f64 = 0.94;
 pub const INCL: f64 = 80.0 * math.pi / 180.0;
-pub const R_OUT: f64 = 48.0; // geometry only: tau(48 M) ~ 2e-3, the gas has already faded out
-pub const R_C: f64 = 5.0; // M: exponential roll-off scale of the outer disk
-pub const TAU0: f64 = 220.0; // tau = 1 near r = 20 M; opaque (tau > 15) inside ~10 M
-const TAU_NOISE: f32 = 1.2; // turbulence modulates the column: tau * exp(TAU_NOISE * n), |n| <= 1
-const TAU_THICK: f64 = 5.0; // fully opaque above this (leaks < 0.7%)
-const TAU_BEHIND: f64 = TAU_THICK * @exp(@as(f64, TAU_NOISE)); // above this even thinned gas is opaque
-const TAU_MIN: f64 = 0.01; // thinner than this (max opacity 3%, emission nil) the gas is left out
+pub const R_OUT: f64 = 85.0; // geometry only: the computed disk's extinction depth is ~1e-4 here
+// Gas denser than this (line of sight) is drawn opaque: e^-40 of what lies behind leaks, under
+// 1e-3 of display white even behind the brightest disk (light is composited before tone mapping).
+const TAU_BEHIND: f64 = 40.0;
+const TAU_MIN: f64 = 0.01; // thinner than this (line of sight) the gas is left out: opacity < 1%
 const EMIT_FLOOR: f64 = 3e-4; // display-linear (~1/255): gas that can't reach this even stirred is baked
 const SPOT_RMAX: f64 = 12.0; // M: hot spots orbit inside this (r_in * 5.35 + width); never baked there
 const EXPO_R: f64 = 24.0; // exposure is metered on the bright inner disk only
 const EMIT_N: usize = 1024; // 1 - exp(-e^x) table over x = ln(tau) in [EMIT_X0, EMIT_X1]
 const EMIT_X0: f32 = -7.0;
 const EMIT_X1: f32 = 4.0;
-pub const T_PEAK: f64 = 6_500.0;
 const OBS_R: f64 = 1000.0;
 // Common light-travel time from the hole to the camera (radial tortoise coordinate,
 // r + 2 ln(r/2 - 1) ~ r + 2 ln(r/2)). Only delays relative to it are observable; left in,
@@ -101,12 +105,23 @@ const OBS_R: f64 = 1000.0;
 const T_REF: f64 = OBS_R + 2.0 * @log(OBS_R / 2.0);
 const HALF_H: f64 = 15.5; // half the screen height, in units of M
 const TIME_LAPSE: f64 = 10.0; // M of coordinate time per unit of Argus dt
-const LIFE_M: f64 = 60.0; // turbulence generation lifetime, in M
-const TURB_SIGMA: f32 = 0.5; // log-normal emissivity: exp(sigma m - sigma^2 / 2), m ~ unit Gaussian
+// Turbulence: statistics of magnetorotational turbulence from shearing-box and global MHD
+// simulations (Guan et al. 2009, ApJ 694, 1010; Beckwith, Armitage & Simon 2011, MNRAS 416, 361).
+const TURB_SIGMA: f32 = 0.2; // rms of ln(dissipation) at the photosphere: thermal thin disk
 const NOISE_STD: f32 = 40.0; // noise table byte levels per standard deviation
+pub const H_OVER_R: f64 = 0.01; // disk scale height (this disk: 0.006 computed at the peak, ~0.014 textbook)
+pub const NR: usize = 2048; // turbulence rows across the radial span (eddies are smaller than a radial bin)
+pub const N_OCT: usize = 3; // octaves, amplitude 2^(-5j/6): a k^(-11/3) per-mode spectrum (Beckwith 2011)
+pub const NBAND: usize = 12; // lifetime bands L0 * 2^n, phase-locked to global time
+pub const BAND_L0: f64 = 4.0; // M: the shortest lifetime band
+const OCT_AMP = [N_OCT]f32{ 1.0, 0.5612310241546865, 0.3149802624737183 };
+const EDDY_MIN_H: f64 = 0.25; // correlation lengths in H: radial 0.25, azimuthal 1.75 (axis ratio 7)
+const EDDY_MAJ_H: f64 = 1.75;
+const TILT_CELLS: f64 = 0.5; // phase cells per noise row at birth: trailing ~31 deg, wound tighter by shear
 const MU_MIN: f64 = 0.0067; // grazing limit for 1/mu (ln 150 = 5.0)
 const LMU_SCALE: f64 = 51.0; // ln(1/mu) per byte level: 0..255 covers mu down to MU_MIN
-const PEAK_BOOST: f64 = 3.0; // exp(2.6 sigma - sigma^2/2): turbulence brightens gas up to ~this much
+const PEAK_BOOST: f64 = 3.0; // how far turbulence can brighten gas in the visible: eps = 1.65 at 2.6 sigma, which is
+// T x 1.13, and on the Wien side of a ~3000 K spectrum that brightens the visible ~3x
 const EXP_N: usize = 1024; // exp table over [-4, 4] for the CPU draw
 const EXPO_TARGET: f64 = 7.0; // 99th-percentile disk luminance maps here before tone mapping
 const STAR_GAIN: f64 = 0.8;
@@ -185,10 +200,270 @@ pub fn pageThorne(a: f64, r_in: f64, r_max: f64, out: *[PT_N]f64) void {
     }
 }
 
-/// Optical depth of the disk at r: proportional to the viscously spread surface density.
-pub fn opticalDepth(r: f64) f64 {
-    return TAU0 * (R_C / r) * @exp(-r / R_C);
+// ============================================================================ the disk, computed
+// One solution sets the disk's surface density, temperature and optical depth: the general-
+// relativistic thin-disk evolution equation (Balbus 2017; Mummery & Balbus 2019, MNRAS 489, 132,
+// eqs 4, 5, 16, 53) with a radius-dependent, Sigma-independent stress W = w (r/r0)^(1/2)
+// (nu ~ r at large r), zero stress at the ISCO, started from a ring and evaluated once.
+// Inside the mass-flux reversal radius it relaxes to the Page-Thorne flux; beyond it the disk is
+// spreading outward and its surface density, dissipation and opacity fall off together.
+
+pub const BH_MASS_SUN: f64 = 5.0e9; // a quasar-class supermassive hole
+pub const EDD_RATIO: f64 = 0.03; // L / L_Edd: comfortably a thin disk (>~ 0.01)
+pub const ALPHA_VISC: f64 = 0.1; // Shakura-Sunyaev alpha
+pub const RING_R0: f64 = 8.0; // M: where the gas was deposited
+const RING_D: f64 = 1.6; // M: initial ring width
+pub const SNAP_RREV: f64 = 10.0; // M: snapshot when the mass flux reverses here
+const DM_N: usize = 1200; // radial nodes of the evolution grid
+const DM_RMAX: f64 = 3000.0;
+// cgs
+const G_CGS: f64 = 6.674e-8;
+const C_CGS: f64 = 2.998e10;
+const MSUN_G: f64 = 1.989e33;
+const SIGMA_SB: f64 = 5.6704e-5;
+const K_BOLTZ: f64 = 1.380649e-16;
+const M_PROTON: f64 = 1.6726e-24;
+const A_RAD: f64 = 7.5657e-15;
+const L_EDD_PER_MSUN: f64 = 1.26e38;
+const KAPPA_ES: f64 = 0.34; // electron scattering, cm^2/g
+const KAPPA_KRAMERS: f64 = 6.4e22; // free-free absorption: kappa = K rho T^-3.5
+const T_MAX_SOURCE: f64 = 70_000.0;
+
+fn uT(a: f64, r: f64) f64 { // U^0 of a prograde circular orbit (Mummery 2023 eq 3)
+    return (1.0 + a * math.pow(f64, r, -1.5)) / @sqrt(1.0 - 3.0 / r + 2.0 * a * math.pow(f64, r, -1.5));
 }
+fn uPhi(a: f64, r: f64) f64 { // U_phi (Bardeen, Press & Teukolsky 1972 eq 2.13)
+    const sr = @sqrt(r);
+    return (r * r - 2.0 * a * sr + a * a) / (math.pow(f64, r, 0.75) * @sqrt(r * sr - 3.0 * sr + 2.0 * a));
+}
+fn uPhiPrime(a: f64, r: f64) f64 {
+    const e = 1e-6;
+    return (uPhi(a, r * (1.0 + e)) - uPhi(a, r * (1.0 - e))) / (2.0 * r * e);
+}
+fn omegaK(a: f64, r: f64) f64 {
+    return 1.0 / (r * @sqrt(r) + a);
+}
+fn omegaPrime(a: f64, r: f64) f64 {
+    const q = r * @sqrt(r) + a;
+    return -1.5 * @sqrt(r) / (q * q);
+}
+
+/// Exponential integral E1 (Abramowitz & Stegun 5.1.53 / 5.1.56) and E3 from it.
+fn expE1(x: f64) f64 {
+    if (x <= 1.0) {
+        return -@log(x) - 0.57721566 + x * (0.99999193 + x * (-0.24991055 + x * (0.05519968 + x * (-0.00976004 + x * 0.00107857))));
+    }
+    return (x * x + 2.334733 * x + 0.250621) / (x * x + 3.330657 * x + 1.681534) * @exp(-x) / x;
+}
+fn expE3(x: f64) f64 {
+    if (x <= 1e-12) return 0.5;
+    if (x > 60.0) return 0.0;
+    return 0.5 * (@exp(-x) * (1.0 - x) + x * x * expE1(x));
+}
+
+/// The computed disk on the theme's log-r table grid r_k = r_in (r_tab/r_in)^(k/(PT_N-1)):
+/// source temperature, ln of the vertical extinction depth (electron scattering + Kramers) and
+/// ln of the thermalisation depth tau_* = sqrt(tau_a (tau_a + tau_es)).
+pub const DiskProfile = struct {
+    T: [PT_N]f32,
+    lt_ext: [PT_N]f32,
+    lt_em: [PT_N]f32,
+    t_peak: f64, // K, hottest source temperature
+    r_peak: f64,
+    tau_es_peak: f64,
+    sigma_peak: f64, // g/cm^2
+    h_over_r_peak: f64,
+    mass_budget: f64, // mass lost / integrated ISCO inflow (1 = exact)
+    pt_ratio_spread: f64, // max/min of F / F_PageThorne well inside the reversal radius
+};
+
+/// Solves the disk. `pt` is the Page-Thorne flux on the same grid (shape only), used to set the
+/// absolute scale: the snapshot's ISCO inflow is the accretion rate for EDD_RATIO.
+pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *DiskProfile) void {
+    const N = DM_N;
+    var r: [N]f64 = undefined;
+    r[0] = r_in;
+    for (1..N) |i| r[i] = r_in + 1e-4 * math.pow(f64, (DM_RMAX - r_in) / 1e-4, @as(f64, @floatFromInt(i - 1)) / @as(f64, @floatFromInt(N - 2)));
+    var cond: [N - 1]f64 = undefined; // face conductance U0 / U'_phi / dr
+    for (0..N - 1) |i| {
+        const rf = 0.5 * (r[i] + r[i + 1]);
+        cond[i] = uT(a, rf) / uPhiPrime(a, rf) / (r[i + 1] - r[i]);
+    }
+    var coef: [N]f64 = @splat(0.0); // W / U0^2 / cell width
+    var z: [N]f64 = @splat(0.0); // zeta = r Sigma W / U0
+    for (1..N - 1) |i| {
+        const wv = @sqrt(r[i] / RING_R0);
+        const ut0 = uT(a, r[i]);
+        coef[i] = wv / (ut0 * ut0) / (0.5 * (r[i + 1] - r[i - 1]));
+        const sg = @exp(-((r[i] - RING_R0) / RING_D) * ((r[i] - RING_R0) / RING_D));
+        z[i] = r[i] * sg * wv / ut0;
+    }
+    const massOf = struct {
+        fn f(rr: *const [N]f64, zz: *const [N]f64, aa: f64) f64 {
+            var m: f64 = 0.0;
+            for (0..N - 1) |i| {
+                const f0 = zz[i] * uT(aa, rr[i]) * uT(aa, rr[i]) / @sqrt(rr[i] / RING_R0);
+                const f1 = zz[i + 1] * uT(aa, rr[i + 1]) * uT(aa, rr[i + 1]) / @sqrt(rr[i + 1] / RING_R0);
+                m += 0.5 * (f0 + f1) * (rr[i + 1] - rr[i]);
+            }
+            return m;
+        }
+    }.f;
+    const m0 = massOf(&r, &z, a);
+    // Backward Euler (Thomas algorithm), Dirichlet zeta = 0 at the ISCO and at DM_RMAX.
+    var lo: [N]f64 = undefined;
+    var di: [N]f64 = undefined;
+    var up: [N]f64 = undefined;
+    var dt: f64 = 1e-4;
+    var inflow: f64 = 0.0;
+    var steps: usize = 0;
+    while (steps < 400_000) : (steps += 1) {
+        var imax: usize = 0;
+        for (0..N) |i| {
+            if (z[i] > z[imax]) imax = i;
+        }
+        if (r[imax] >= SNAP_RREV) break;
+        const f_before = cond[0] * (z[1] - z[0]);
+        for (0..N) |i| {
+            if (i == 0 or i == N - 1) {
+                lo[i] = 0;
+                di[i] = 1;
+                up[i] = 0;
+                continue;
+            }
+            const c = coef[i] * dt;
+            lo[i] = -c * cond[i - 1];
+            up[i] = -c * cond[i];
+            di[i] = 1.0 + c * (cond[i - 1] + cond[i]);
+        }
+        z[0] = 0;
+        z[N - 1] = 0;
+        // forward sweep
+        for (1..N) |i| {
+            const m = lo[i] / di[i - 1];
+            di[i] -= m * up[i - 1];
+            z[i] -= m * z[i - 1];
+        }
+        z[N - 1] /= di[N - 1];
+        var i: usize = N - 1;
+        while (i > 0) {
+            i -= 1;
+            z[i] = (z[i] - up[i] * z[i + 1]) / di[i];
+        }
+        inflow += 0.5 * (f_before + cond[0] * (z[1] - z[0])) * dt;
+        dt = @min(dt * 1.003, 0.2);
+    }
+    out.mass_budget = (m0 - massOf(&r, &z, a)) / @max(inflow, 1e-300);
+
+    // Dissipation per face (MB19a eq 53): F = -(U0)^2 zeta Omega' / (2r), geometric units.
+    var fg: [N]f64 = undefined;
+    for (0..N) |i| fg[i] = if (i == 0) 0.0 else -uT(a, r[i]) * uT(a, r[i]) * z[i] * omegaPrime(a, r[i]) / (2.0 * r[i]);
+    const dl = @log(r_tab / r_in) / @as(f64, @floatFromInt(PT_N - 1));
+    const fgAt = struct {
+        fn f(rr: *const [N]f64, ff: *const [N]f64, x: f64) f64 {
+            if (x <= rr[0]) return 0.0;
+            var lo_i: usize = 0;
+            var hi_i: usize = N - 1;
+            while (hi_i - lo_i > 1) {
+                const mid = (lo_i + hi_i) / 2;
+                if (rr[mid] <= x) lo_i = mid else hi_i = mid;
+            }
+            const t = (x - rr[lo_i]) / (rr[hi_i] - rr[lo_i]);
+            return ff[lo_i] + (ff[hi_i] - ff[lo_i]) * t;
+        }
+    }.f;
+    // Scale: near the ISCO the solution is in steady inflow, F = F_PT * inflow; match it there.
+    var ratio_sum: f64 = 0.0;
+    var ratio_n: f64 = 0.0;
+    var rmin: f64 = 1e300;
+    var rmax: f64 = 0.0;
+    for (0..PT_N) |k| {
+        const rk = r_in * @exp(dl * @as(f64, @floatFromInt(k)));
+        if (rk < 1.05 * r_in or pt[k] <= 0.0) continue;
+        const q = fgAt(&r, &fg, rk) / pt[k];
+        if (rk < 1.4 * r_in) {
+            ratio_sum += q;
+            ratio_n += 1.0;
+        }
+        if (rk < SNAP_RREV / 4.0) {
+            rmin = @min(rmin, q);
+            rmax = @max(rmax, q);
+        }
+    }
+    const norm = ratio_sum / @max(ratio_n, 1.0);
+    out.pt_ratio_spread = rmax / @max(rmin, 1e-300);
+
+    // Physical units.
+    const m_g = BH_MASS_SUN * MSUN_G;
+    const rg = G_CGS * m_g / (C_CGS * C_CGS);
+    const tg = rg / C_CGS;
+    const eff = 1.0 - orbit(a, r_in).E;
+    const mdot = EDD_RATIO * L_EDD_PER_MSUN * BH_MASS_SUN / (eff * C_CGS * C_CGS);
+    const fscale = mdot * math.pow(f64, C_CGS, 6) / (G_CGS * G_CGS * m_g * m_g) / (4.0 * math.pi) / norm;
+    // Peak of the flux, then the stress there from the alpha closure (gas + radiation pressure).
+    var ipk: usize = 1;
+    for (1..N) |i| {
+        if (fg[i] > fg[ipk]) ipk = i;
+    }
+    const Local = struct { sigma: f64, tes: f64, ta: f64, tc: f64, cs2: f64, rho: f64 };
+    const local = struct {
+        fn f(aa: f64, rr: f64, fphys: f64, wphys: f64, rgc: f64, tgc: f64) Local {
+            const teff4 = fphys / SIGMA_SB;
+            const om = omegaK(aa, rr) / tgc;
+            const domp = @abs(omegaPrime(aa, rr)) / tgc / rgc;
+            const sg = 2.0 * fphys / (uT(aa, rr) * wphys * domp);
+            const cs2 = wphys / (1.5 * ALPHA_VISC * rr * rgc);
+            const hh = @sqrt(cs2) / om;
+            const rho = sg / (2.0 * hh);
+            var tc = @sqrt(@sqrt(teff4));
+            var tes: f64 = 0.0;
+            var ta: f64 = 0.0;
+            for (0..60) |_| {
+                tes = KAPPA_ES * sg / 2.0;
+                ta = KAPPA_KRAMERS * rho * math.pow(f64, @max(tc, 1.0), -3.5) * sg / 2.0;
+                const tn = @sqrt(@sqrt(0.375 * (tes + ta) * teff4 + teff4));
+                if (@abs(tn - tc) < 1e-7 * tc) break;
+                tc = tn;
+            }
+            return .{ .sigma = sg, .tes = tes, .ta = ta, .tc = tc, .cs2 = cs2, .rho = rho };
+        }
+    }.f;
+    const fpk = fg[ipk] * fscale;
+    var wpk: f64 = 1e14 * r[ipk] * rg;
+    var lp: Local = undefined;
+    for (0..300) |_| {
+        lp = local(a, r[ipk], fpk, wpk, rg, tg);
+        const p_rho = K_BOLTZ * lp.tc / (0.6 * M_PROTON) + A_RAD * math.pow(f64, lp.tc, 4) / (3.0 * lp.rho);
+        const wn = 1.5 * ALPHA_VISC * p_rho * r[ipk] * rg;
+        if (@abs(wn / wpk - 1.0) < 1e-9) break;
+        wpk = @sqrt(wpk * wn);
+    }
+    const wref = wpk / @sqrt(r[ipk] / RING_R0);
+    out.r_peak = r[ipk];
+    out.sigma_peak = lp.sigma;
+    out.tau_es_peak = lp.tes;
+    out.h_over_r_peak = @sqrt(lp.cs2) / (omegaK(a, r[ipk]) / tg) / (r[ipk] * rg);
+    out.t_peak = 0.0;
+    for (0..PT_N) |k| {
+        const rk = r_in * @exp(dl * @as(f64, @floatFromInt(k)));
+        const fphys = fgAt(&r, &fg, rk) * fscale;
+        if (!(fphys > 1e-30 * fpk) or rk <= r_in) {
+            out.T[k] = 0;
+            out.lt_ext[k] = -60;
+            out.lt_em[k] = -60;
+            continue;
+        }
+        const lk = local(a, rk, fphys, wref * @sqrt(rk / RING_R0), rg, tg);
+        const tst = @sqrt(lk.ta * (lk.ta + lk.tes));
+        const emiss = 1.0 - 2.0 * expE3(tst); // grey isothermal slab: flux out = sigma T_s^4 (1 - 2 E3)
+        const ts = @min(@sqrt(@sqrt(fphys / (SIGMA_SB * @max(emiss, 1e-300)))), T_MAX_SOURCE);
+        out.T[k] = @floatCast(ts);
+        out.lt_ext[k] = @floatCast(@max(@log(lk.tes + lk.ta), -60.0));
+        out.lt_em[k] = @floatCast(@max(@log(tst), -60.0));
+        if (rk < 30.0) out.t_peak = @max(out.t_peak, ts);
+    }
+}
+
 
 // ---------------------------------------------------------------- geodesics
 
@@ -495,12 +770,15 @@ const R_FRAC: u16 = 128; // rbin is stored in 1/128ths of a bin: magnified regio
 const NP: usize = 1024;
 const BLOCK: usize = 4;
 
+const FR_Q = R_FRAC / 4; // footprint unit: a quarter radial bin (eddies are below a bin)
+const FR_SAT: u8 = 76; // 19 bins: where the GPU's 5-bit footprint saturates
+
 const Rec = extern struct {
     rgb: [3]f16, // linear HDR disk radiance (pre-exposure)
     rbin: u16, // radial bin * R_FRAC (fixed point)
     phi: u16, // emission azimuth + Omega * travel time, Q16 of 2 pi
     cov: u8, // disk coverage 0..255
-    fr: u8 = 0, // pixel footprint on the disk: radial extent in r-bins (saturating)
+    fr: u8 = 0, // pixel footprint on the disk: radial extent in quarter r-bins (saturating)
     tobs: f16 = 0, // observed blackbody temperature g*T, for re-coloring hotter gas
     fp: u8 = 0, // pixel footprint: azimuthal extent in units of 64/65536 turn (saturating)
     bf: u8 = 0, // share of bg (luminance, /255) that lies behind this pixel's translucent gas
@@ -538,8 +816,6 @@ pub const State = struct {
     t_m: f64,
     rays_traced: u64,
 
-    gw: [2]f32,
-    gnorm: f32,
     gal_n: [3]f64, // galactic plane normal
     gal_c: [3]f64, // galactic center direction
     spot_rb: [NSPOT]f32,
@@ -550,18 +826,31 @@ pub const State = struct {
     spot_age: [NSPOT]f32, // M since the spot was born (its shear)
     spot_om: [NSPOT]f32, // Omega at the spot's birth radius
     spot_mask: [R_BINS]u8,
-    gshift: [2][R_BINS]u16,
-    grow: [2][R_BINS]u16,
+    band_u: [NBAND]f32, // phase of each lifetime band in its generation cycle, 0..1
+    band_ka: [NBAND]u32, // generation counters of the band's two staggered generations
+    band_kb: [NBAND]u32,
+    gen: [N_OCT][NBAND][2]TurbGen, // per-frame generation constants (octave, band, A/B)
+    band_n0: [R_BINS]u8, // CPU path: octave-0 band below each bin and its two blend weights
+    band_w: [R_BINS][2]f32,
+    sband: [N_OCT][R_BINS]f32, // log2(lifetime / BAND_L0) per octave and radial bin
+    om_row: [NR]f32, // Omega at each turbulence row
+    cell_r0: f32, // octave-0 cell size: radial bins
+    cell_p0: f32, // octave-0 cell size: azimuth, Q16
+    inv_cr2: f32, // 1 / cell_r0^2, 1 / cell_p0^2
+    inv_cp2: f32,
     om_tab: [R_BINS]f64,
     shear_tab: [R_BINS]f32, // |dOmega/d rbin| in Q16 per M: how fast a sheared spot's azimuth runs with radius
-    tau_tab: [R_BINS]f32,
-    lntau_tab: [R_BINS]f32,
+    lntau_tab: [R_BINS]f32, // ln vertical extinction depth per radial bin
+    lnem_tab: [R_BINS]f32, // ln vertical thermalisation depth per radial bin
+    t_peak: f64, // hottest source temperature of the computed disk (K)
     emit_tab: [EMIT_N + 1]f32,
     lin8: [256]f32, // sRGB byte -> linear
-    ttab: [PT_N]f32,
+    // The computed disk on the log-r grid: [0] source temperature (K), [1] ln vertical extinction
+    // depth, [2] ln vertical thermalisation depth. One block, so the GPU uploads it as is.
+    dtab: [3][PT_N]f32,
     bb: [BB_N][3]f32,
     srgb: [4096]u8,
-    noise: [2][R_BINS][NP]u8, // turbulence planes: [0] coarse eddies (octave 0), [1] fine detail (octaves 1-2)
+    noise: [N_OCT][NR][NP]u8, // turbulence, one plane per octave (each lives on its own clock)
     exp_tab: [EXP_N + 1]f32,
 
     pub fn init(alloc: std.mem.Allocator, w: usize, h: usize, scale: f64) !*State {
@@ -595,8 +884,6 @@ pub const State = struct {
         self.t_m = 0.0;
         self.rays_traced = 0;
         self.exposure = 1.0;
-        self.gw = .{ 0.5, 0.5 };
-        self.gnorm = 1.0;
         self.buildTables();
         {
             // Place the Milky Way behind the hole, tilted on screen, bulge just off-center.
@@ -630,14 +917,15 @@ pub const State = struct {
     }
 
     fn buildTables(self: *State) void {
-        // Temperature profile from Page-Thorne flux.
+        // The disk: temperature and optical depths from one relativistic solution (diskProfile).
         var flux: [PT_N]f64 = undefined;
         pageThorne(self.geo.a, self.geo.r_in, R_OUT * 1.05, &flux);
-        var fmax: f64 = 0.0;
-        for (flux) |f| fmax = @max(fmax, f);
-        for (0..PT_N) |k| self.ttab[k] = @floatCast(T_PEAK * @sqrt(@sqrt(@max(flux[k], 0.0) / fmax)));
-        // Blackbody colors, normalised so a T_PEAK blackbody has luminance 1.
-        const y0 = luma(blackbodyRGB(T_PEAK));
+        var disk: DiskProfile = undefined;
+        diskProfile(self.geo.a, self.geo.r_in, R_OUT * 1.05, &flux, &disk);
+        self.dtab = .{ disk.T, disk.lt_ext, disk.lt_em };
+        self.t_peak = disk.t_peak;
+        // Blackbody colors, normalised so the hottest disk blackbody has luminance 1.
+        const y0 = luma(blackbodyRGB(self.t_peak));
         for (0..BB_N) |k| {
             const T = BB_TMIN * @exp(@log(BB_TMAX / BB_TMIN) * @as(f64, @floatFromInt(k)) / @as(f64, @floatFromInt(BB_N - 1)));
             const c = blackbodyRGB(T);
@@ -649,8 +937,8 @@ pub const State = struct {
             self.om_tab[b] = orbit(self.geo.a, r).om;
             const r15 = r * @sqrt(r) + self.geo.a;
             self.shear_tab[b] = @floatCast(1.5 * @sqrt(r) / (r15 * r15) * r * (self.lnr_span / @as(f64, @floatFromInt(R_BINS))) * 65536.0 / (2.0 * math.pi));
-            self.tau_tab[b] = @floatCast(opticalDepth(r));
-            self.lntau_tab[b] = @floatCast(@log(opticalDepth(r)));
+            self.lntau_tab[b] = @floatCast(@log(self.tauExt(r)));
+            self.lnem_tab[b] = @floatCast(@log(self.tauEm(r)));
         }
         for (0..EMIT_N + 1) |k| {
             const x = EMIT_X0 + (EMIT_X1 - EMIT_X0) * @as(f32, @floatFromInt(k)) / @as(f32, @floatFromInt(EMIT_N));
@@ -660,63 +948,96 @@ pub const State = struct {
             const v = @as(f64, @floatFromInt(k)) / 255.0;
             self.lin8[k] = @floatCast(if (v <= 0.04045) v / 12.92 else math.pow(f64, (v + 0.055) / 1.055, 2.4));
         }
-        // MRI-like turbulence, periodic in r-bin and phi: eddies ~6 bins (5% of r) by 1/32 turn,
-        // tilted into trailing spirals by 16/3 phi-cells per bin (~14 deg; 384 x 16/3 = 2048 wraps
-        // exactly), three octaves with amplitude ratio 2^(-1/3). Coarse eddies and fine detail are
-        // kept apart so each is filtered against its own scale. Two passes: moments, then bytes.
-        for (0..2) |ch| {
-            const lo: usize = if (ch == 0) 0 else 1;
-            const hi: usize = if (ch == 0) 1 else 3;
+        // Turbulence planes, periodic in row and phase: octave j has cells of 2 x (0.25, 1.75) H
+        // / 2^j (value-noise cells are ~2 e-folding lengths), tilted by TILT_CELLS phase cells per
+        // row (exact wrap: NR * 0.5 = NP). Normalised per plane: two passes, moments then bytes.
+        const dl_row = self.lnr_span / @as(f64, @floatFromInt(NR));
+        const dphi_cell = 2.0 * math.pi / @as(f64, @floatFromInt(NP));
+        const cell_rows = 2.0 * EDDY_MIN_H * H_OVER_R / dl_row;
+        const cell_ph = 2.0 * EDDY_MAJ_H * H_OVER_R / dphi_cell;
+        self.cell_r0 = @floatCast(2.0 * EDDY_MIN_H * H_OVER_R / (self.lnr_span / @as(f64, @floatFromInt(R_BINS))));
+        self.cell_p0 = @floatCast(2.0 * EDDY_MAJ_H * H_OVER_R / (2.0 * math.pi) * 65536.0);
+        self.inv_cr2 = 1.0 / (self.cell_r0 * self.cell_r0);
+        self.inv_cp2 = 1.0 / (self.cell_p0 * self.cell_p0);
+        for (0..N_OCT) |oct| {
+            const sc = math.pow(f64, 2.0, @floatFromInt(oct));
+            const gr: usize = @max(1, @as(usize, @intFromFloat(@round(@as(f64, NR) / (cell_rows / sc)))));
+            const gp: usize = @max(1, @as(usize, @intFromFloat(@round(@as(f64, NP) / (cell_ph / sc)))));
             var sum: f64 = 0.0;
             var sum2: f64 = 0.0;
             for (0..2) |pass| {
-                const mean = sum / @as(f64, R_BINS * NP);
-                const sd = @sqrt(@max(sum2 / @as(f64, R_BINS * NP) - mean * mean, 1e-12));
-                for (0..R_BINS) |ri| {
+                const mean = sum / @as(f64, NR * NP);
+                const sd = @sqrt(@max(sum2 / @as(f64, NR * NP) - mean * mean, 1e-12));
+                for (0..NR) |ri| {
                     for (0..NP) |pi| {
-                        const v = turbulence(ri, pi, lo, hi);
+                        const v = turbulence(ri, pi, oct, gr, gp);
                         if (pass == 0) {
                             sum += v;
                             sum2 += v * v;
                         } else {
-                            self.noise[ch][ri][pi] = @intFromFloat(@round(math.clamp(128.0 + @as(f64, NOISE_STD) * (v - mean) / sd, 0.0, 255.0)));
+                            self.noise[oct][ri][pi] = @intFromFloat(@round(math.clamp(128.0 + @as(f64, NOISE_STD) * (v - mean) / sd, 0.0, 255.0)));
                         }
                     }
                 }
             }
         }
+        for (0..NR) |ri| {
+            const r = @exp(self.lnr_in + self.lnr_span * (@as(f64, @floatFromInt(ri)) + 0.5) / @as(f64, @floatFromInt(NR)));
+            self.om_row[ri] = @floatCast(orbit(self.geo.a, r).om);
+        }
+        // Each octave's eddies live ~ P(r) 2^(-2j/3) (correlation time ~0.5 P, Beckwith 2011),
+        // quantised onto phase-locked bands so neighbouring radii never drift apart (no stripes).
+        for (0..R_BINS) |b| {
+            const r = @exp(self.lnr_in + self.lnr_span * (@as(f64, @floatFromInt(b)) + 0.5) / @as(f64, @floatFromInt(R_BINS)));
+            const period = 2.0 * math.pi * (r * @sqrt(r) + self.geo.a);
+            for (0..N_OCT) |oct| {
+                const life = period * math.pow(f64, 2.0, -2.0 * @as(f64, @floatFromInt(oct)) / 3.0);
+                self.sband[oct][b] = @floatCast(math.clamp(std.math.log2(life / BAND_L0), 0.0, @as(f64, NBAND - 2) - 1e-3));
+            }
+            const sb = self.sband[0][b];
+            const n0 = @floor(sb);
+            self.band_n0[b] = @intFromFloat(n0);
+            self.band_w[b] = .{ @cos(0.5 * math.pi * (sb - n0)), @sin(0.5 * math.pi * (sb - n0)) };
+        }
         for (0..EXP_N + 1) |k| self.exp_tab[k] = @floatCast(@exp(-4.0 + 8.0 * @as(f64, @floatFromInt(k)) / @as(f64, @floatFromInt(EXP_N))));
     }
 
-    /// Octaves [lo, hi) of the anisotropic, tilted turbulence field (unnormalised).
-    fn turbulence(ri: usize, pi: usize, lo: usize, hi: usize) f64 {
-        const tilt: f64 = 16.0 / 3.0; // phi-table cells per radial bin (trailing)
-        var v: f64 = 0.0;
-        var amp: f64 = 1.0;
-        var gr: usize = 64;
-        var gp: usize = 32;
-        for (0..hi) |oct| {
-            const fr = @as(f64, @floatFromInt(ri)) * @as(f64, @floatFromInt(gr)) / @as(f64, @floatFromInt(R_BINS));
-            const fp = (@as(f64, @floatFromInt(pi)) + tilt * @as(f64, @floatFromInt(ri))) * @as(f64, @floatFromInt(gp)) / @as(f64, @floatFromInt(NP));
-            const ir: usize = @intFromFloat(@floor(fr));
-            const ip: usize = @intFromFloat(@floor(fp));
-            var ur = fr - @floor(fr);
-            var up = fp - @floor(fp);
-            ur = ur * ur * (3.0 - 2.0 * ur);
-            up = up * up * (3.0 - 2.0 * up);
-            const seed: u64 = 0xB1AC_401E + oct * 0x1000_0000;
-            const v00 = unitf(mix64(seed ^ (ir % gr) * 0x10001 ^ (ip % gp) << 20));
-            const v10 = unitf(mix64(seed ^ ((ir + 1) % gr) * 0x10001 ^ (ip % gp) << 20));
-            const v01 = unitf(mix64(seed ^ (ir % gr) * 0x10001 ^ ((ip + 1) % gp) << 20));
-            const v11 = unitf(mix64(seed ^ ((ir + 1) % gr) * 0x10001 ^ ((ip + 1) % gp) << 20));
-            const top = v00 + (v01 - v00) * up;
-            const bot = v10 + (v11 - v10) * up;
-            if (oct >= lo) v += amp * (2.0 * (top + (bot - top) * ur) - 1.0);
-            amp *= 0.7937005259840998; // 2^(-1/3)
-            gr *= 2;
-            gp *= 2;
-        }
-        return v;
+    /// One octave of the tilted, anisotropic turbulence field at table row ri, phase cell pi.
+    fn turbulence(ri: usize, pi: usize, oct: usize, gr: usize, gp: usize) f64 {
+        const fr = @as(f64, @floatFromInt(ri)) * @as(f64, @floatFromInt(gr)) / @as(f64, @floatFromInt(NR));
+        const fp = (@as(f64, @floatFromInt(pi)) + TILT_CELLS * @as(f64, @floatFromInt(ri))) * @as(f64, @floatFromInt(gp)) / @as(f64, @floatFromInt(NP));
+        const ir: usize = @intFromFloat(@floor(fr));
+        const ip: usize = @intFromFloat(@floor(fp));
+        var ur = fr - @floor(fr);
+        var up = fp - @floor(fp);
+        ur = ur * ur * (3.0 - 2.0 * ur);
+        up = up * up * (3.0 - 2.0 * up);
+        const seed: u64 = 0xB1AC_401E + oct * 0x1000_0000;
+        const v00 = unitf(mix64(seed ^ (ir % gr) * 0x10001 ^ (ip % gp) << 24));
+        const v10 = unitf(mix64(seed ^ ((ir + 1) % gr) * 0x10001 ^ (ip % gp) << 24));
+        const v01 = unitf(mix64(seed ^ (ir % gr) * 0x10001 ^ ((ip + 1) % gp) << 24));
+        const v11 = unitf(mix64(seed ^ ((ir + 1) % gr) * 0x10001 ^ ((ip + 1) % gp) << 24));
+        const top = v00 + (v01 - v00) * up;
+        const bot = v10 + (v11 - v10) * up;
+        return 2.0 * (top + (bot - top) * ur) - 1.0;
+    }
+
+    /// ln of a table on the temperature grid at radius r (linear in ln r).
+    fn lnTable(self: *const State, tab: *const [PT_N]f32, r: f64) f64 {
+        const x = math.clamp(@log(r / self.geo.r_in) / @log(R_OUT * 1.05 / self.geo.r_in) * @as(f64, @floatFromInt(PT_N - 1)), 0.0, @as(f64, @floatFromInt(PT_N - 1)) - 1e-9);
+        const xi: usize = @intFromFloat(@floor(x));
+        const f = x - @as(f64, @floatFromInt(xi));
+        return @as(f64, tab[xi]) * (1.0 - f) + @as(f64, tab[xi + 1]) * f;
+    }
+
+    /// Vertical extinction depth (electron scattering + Kramers) of the computed disk at r.
+    fn tauExt(self: *const State, r: f64) f64 {
+        return @exp(self.lnTable(&self.dtab[1], r));
+    }
+
+    /// Vertical thermalisation depth tau_* of the computed disk at r: sets how much it emits.
+    fn tauEm(self: *const State, r: f64) f64 {
+        return @exp(self.lnTable(&self.dtab[2], r));
     }
 
     fn temperature(self: *const State, r: f64) f64 {
@@ -724,7 +1045,7 @@ pub const State = struct {
         if (!(x > 0.0)) return 0.0;
         const xi: usize = @intFromFloat(@min(@floor(x), @as(f64, @floatFromInt(PT_N - 2))));
         const f = x - @as(f64, @floatFromInt(xi));
-        return @as(f64, self.ttab[xi]) * (1.0 - f) + @as(f64, self.ttab[xi + 1]) * f;
+        return @as(f64, self.dtab[0][xi]) * (1.0 - f) + @as(f64, self.dtab[0][xi + 1]) * f;
     }
 
     fn bbLookup(self: *const State, T: f64) [3]f64 {
@@ -776,9 +1097,14 @@ pub const State = struct {
         return -@log(mu);
     }
 
-    /// Optical depth along the line of sight through the gas at a disk crossing.
+    /// Extinction depth along the line of sight through the gas at a disk crossing.
     fn slantTau(self: *const State, x: f64, hit: Hit) f64 {
-        return opticalDepth(hit.r) * @exp(self.lnInvMu(x, hit));
+        return self.tauExt(hit.r) * @exp(self.lnInvMu(x, hit));
+    }
+
+    /// Fraction of a blackbody the gas emits along the line of sight: 1 - e^(-tau_* / mu).
+    fn emitFrac(self: *const State, x: f64, hit: Hit) f64 {
+        return -std.math.expm1(-self.tauEm(hit.r) * @exp(self.lnInvMu(x, hit)));
     }
 
     /// Display-linear light reaching the camera from behind translucent gas, in sky units
@@ -798,7 +1124,7 @@ pub const State = struct {
                 .disk => {
                     const tau = self.slantTau(x, b);
                     const s = self.shadeDisk(x, b.r, b.ph, b.t);
-                    const k = @as(f64, self.exposure) * -std.math.expm1(-tau);
+                    const k = @as(f64, self.exposure) * self.emitFrac(x, b);
                     const c = [3]f64{ s.rgb[0] * k, s.rgb[1] * k, s.rgb[2] * k };
                     const tm = 1.0 / (1.0 + luma(c));
                     for (0..3) |i| acc[i] += tr * @min(c[i] * tm, 1.0) / STAR_GAIN;
@@ -1164,8 +1490,8 @@ pub const State = struct {
                             }
                             if (hit.kind == .disk and hit.r > SPOT_RMAX) {
                                 const tau = self.slantTau(fx, hit);
-                                const dim = luma(self.shadeDisk(fx, hit.r, hit.ph, hit.t).rgb) * self.exposure * PEAK_BOOST < EMIT_FLOOR;
-                                if (tau * @exp(@as(f64, TAU_NOISE)) < TAU_MIN or dim) {
+                                const dim = luma(self.shadeDisk(fx, hit.r, hit.ph, hit.t).rgb) * self.emitFrac(fx, hit) * self.exposure * PEAK_BOOST < EMIT_FLOOR;
+                                if (tau < TAU_MIN or dim) {
                                     // Gas too thin or too cool to show even when turbulence stirs it:
                                     // baked into the background at its mean opacity, not redrawn per frame.
                                     if (tau < TAU_BEHIND) {
@@ -1196,25 +1522,36 @@ pub const State = struct {
                         const fs: f64 = @floatFromInt(nsamp);
                         // draw() composites translucent pixels as cov*c + (1 - bf*emit)*bg: only the light
                         // behind the gas (share bf) is dimmed by it, not the sky beside it.
+                        // Static per pixel, so baked here: bf already carries the absorbed share,
+                        // bf (1 - e^(-tau_ext/mu)), and rgb the emitted fraction 1 - e^(-tau_*/mu).
+                        const lmu_q: u8 = @intFromFloat(@round(math.clamp(first_lmu * LMU_SCALE, 0.0, 255.0)));
+                        const lmu_f = @as(f32, @floatFromInt(lmu_q)) / @as(f32, LMU_SCALE);
                         var bf: u8 = 0;
-                        if (nd > 0 and self.tau_tab[first.rbin / R_FRAC] * @exp(first_lmu) < TAU_BEHIND) {
-                            const lb = luma(disk_behind);
-                            for (0..3) |i| bg_rgb[i] += disk_behind[i];
-                            const lt = luma(bg_rgb);
-                            if (lt > 1e-12) bf = @intFromFloat(@round(math.clamp(lb / lt, 0.0, 1.0) * 255.0));
+                        var emit: f64 = 1.0;
+                        if (nd > 0) {
+                            const rb = first.rbin / R_FRAC;
+                            emit = self.oneMinusExpExp(self.lnem_tab[rb] + lmu_f);
+                            const lt_los = self.lntau_tab[rb] + lmu_f;
+                            if (lt_los < @as(f32, @floatCast(@log(TAU_BEHIND)))) {
+                                const lb = luma(disk_behind);
+                                for (0..3) |i| bg_rgb[i] += disk_behind[i];
+                                const lt = luma(bg_rgb);
+                                const absorbed = self.oneMinusExpExp(lt_los);
+                                if (lt > 1e-12) bf = @intFromFloat(@round(math.clamp(lb / lt * absorbed, 0.0, 1.0) * 255.0));
+                            }
                         }
                         self.bg[idx] = self.packBg(.{ bg_rgb[0] / fs, bg_rgb[1] / fs, bg_rgb[2] / fs });
                         if (nd > 0) {
                             const fd: f64 = @floatFromInt(nd);
                             self.recs[idx] = .{
-                                .rgb = .{ @floatCast(disk_rgb[0] / fd), @floatCast(disk_rgb[1] / fd), @floatCast(disk_rgb[2] / fd) },
+                                .rgb = .{ @floatCast(disk_rgb[0] / fd * emit), @floatCast(disk_rgb[1] / fd * emit), @floatCast(disk_rgb[2] / fd * emit) },
                                 .rbin = first.rbin,
                                 .phi = first.phi,
                                 .cov = @intCast(nd * 255 / nsamp),
                                 .tobs = @floatCast(@min(first.tobs, 60000.0)),
                                 .tq = first.tq,
                                 .bf = bf,
-                                .lmu = @intFromFloat(@round(math.clamp(first_lmu * LMU_SCALE, 0.0, 255.0))),
+                                .lmu = lmu_q,
                             };
                             self.row_x0[py] = @min(self.row_x0[py], @as(u16, @intCast(px)));
                             self.row_x1[py] = @max(self.row_x1[py], @as(u16, @intCast(px + 1)));
@@ -1249,7 +1586,7 @@ pub const State = struct {
                     if (nx < 0 or ny < 0 or nx >= @as(i64, @intCast(w)) or ny >= @as(i64, @intCast(h))) continue;
                     const j = @as(usize, @intCast(ny)) * w + @as(usize, @intCast(nx));
                     if (self.recs[j].cov == 0) continue;
-                    const dr = @divTrunc(@abs(@as(i32, self.recs[j].rbin) - @as(i32, self.recs[i].rbin)) + R_FRAC - 1, R_FRAC);
+                    const dr = @divTrunc(@abs(@as(i32, self.recs[j].rbin) - @as(i32, self.recs[i].rbin)) + FR_Q - 1, FR_Q);
                     // Emission phase = geometric azimuth (safe to compare modulo a turn) minus the
                     // light-travel phase (compared unwrapped: delays can wind it by several turns).
                     const ri = self.recs[i];
@@ -1273,24 +1610,29 @@ pub const State = struct {
     pub fn step(self: *State, dt: f64) void {
         if (!(dt > 0.0 and dt < 1.0)) return;
         self.t_m += dt * TIME_LAPSE;
-        var wsq: f32 = 0.0;
-        for (0..2) |gi| {
-            const shifted = self.t_m + @as(f64, @floatFromInt(gi)) * 0.5 * LIFE_M;
-            const gen = @floor(shifted / LIFE_M);
-            const age = shifted - gen * LIFE_M;
-            const wgt: f32 = @floatCast(1.0 - @abs(2.0 * age / LIFE_M - 1.0));
-            self.gw[gi] = wgt;
-            wsq += wgt * wgt;
-            const hs = mix64(@as(u64, @intFromFloat(@max(gen, 0.0))) *% 2 + gi);
-            const row_off: usize = @intCast(hs % R_BINS);
-            const phase_off: u32 = @truncate(hs >> 32);
-            for (0..R_BINS) |b| {
-                const rot = @mod(self.om_tab[b] * age, 2.0 * math.pi) / (2.0 * math.pi) * 65536.0;
-                self.gshift[gi][b] = @truncate(@as(u32, @intFromFloat(rot)) +% phase_off);
-                self.grow[gi][b] = @intCast((b + row_off) % R_BINS);
+        // Turbulence clocks: band n has generations of life L0 2^n born every L0 2^n, two of them
+        // staggered by half a life. Computed in f64 from absolute time, so it never drifts.
+        for (0..NBAND) |n| {
+            const life = BAND_L0 * math.pow(f64, 2.0, @floatFromInt(n));
+            const q = self.t_m / life;
+            self.band_u[n] = @floatCast(q - @floor(q));
+            self.band_ka[n] = @truncate(@as(u64, @intFromFloat(@floor(q))));
+            self.band_kb[n] = @truncate(@as(u64, @intFromFloat(@floor(q + 0.5))));
+            const u: f64 = self.band_u[n];
+            for (0..2) |gi| {
+                const k = if (gi == 0) self.band_ka[n] else self.band_kb[n];
+                const age = (if (gi == 0) u else u + 0.5 - @floor(u + 0.5)) * life;
+                for (0..N_OCT) |oct| {
+                    const seed = turbSeed(@intCast(oct), @intCast(n), k);
+                    self.gen[oct][n][gi] = .{
+                        .w = @floatCast(if (gi == 0) @sin(math.pi * u) else @abs(@cos(math.pi * u))),
+                        .age_q = @floatCast(age * (65536.0 / (2.0 * math.pi))),
+                        .rowoff = seed % @as(u32, NR),
+                        .phoff = seed >> 16,
+                    };
+                }
             }
         }
-        self.gnorm = 1.0 / @sqrt(@max(wsq, 1e-6));
 
         // Hot spots: born, orbit at their exact Kerr angular velocity, fade.
         @memset(&self.spot_mask, 0);
@@ -1326,13 +1668,33 @@ pub const State = struct {
         return !math.isFinite(self.t_m) or !math.isFinite(self.exposure);
     }
 
-    /// Turbulence (coarse, fine) for generation g at pixel phase phi (Q16) and radial bin rbf,
-    /// nearest cell, centred at 0 (the GPU path interpolates between cells).
-    inline fn noiseAt(self: *const State, g: usize, phi: u16, rbf: f32) [2]f32 {
+    /// Octave-0 turbulence at a pixel (unit variance, nearest cell): two lifetime bands blended
+    /// across radius, each two staggered generations, every generation advected at Omega(r)
+    /// since its birth. Variance-preserving (sin/cos) weights keep the statistics stationary.
+    fn turbCoarse(self: *const State, phi: u16, rbf: f32) f32 {
+        const row: usize = @min(@as(usize, @intFromFloat(rbf * (@as(f32, NR) / @as(f32, R_BINS)))), NR - 1);
         const b: usize = @min(@as(usize, @intFromFloat(rbf)), R_BINS - 1);
-        const q = phi -% self.gshift[g][b];
-        const row = self.grow[g][b];
-        return .{ @as(f32, @floatFromInt(self.noise[0][row][q >> 6])) - 128.0, @as(f32, @floatFromInt(self.noise[1][row][q >> 6])) - 128.0 };
+        const n0: usize = self.band_n0[b];
+        const om = self.om_row[row];
+        var g: f32 = 0.0;
+        inline for (0..2) |kk| {
+            const gens = &self.gen[0][n0 + kk];
+            inline for (0..2) |gi| {
+                const gn = gens[gi];
+                const shift: u16 = @truncate(@as(u32, @intFromFloat(om * gn.age_q)));
+                const q: u16 = phi -% @as(u16, @truncate(gn.phoff)) -% shift;
+                const v: f32 = @floatFromInt(self.noise[0][(row + gn.rowoff) % NR][q >> 6]);
+                g += self.band_w[b][kk] * gn.w * (v - 128.0);
+            }
+        }
+        return g / NOISE_STD;
+    }
+
+    /// 1 - exp(-e^x) from the table: emitted (or blocked) fraction for a log optical depth x.
+    inline fn oneMinusExpExp(self: *const State, x: f32) f32 {
+        const xi = math.clamp((x - EMIT_X0) * (@as(f32, EMIT_N) / (EMIT_X1 - EMIT_X0)), 0.0, @as(f32, EMIT_N) - 0.001);
+        const ii: usize = @intFromFloat(xi);
+        return self.emit_tab[ii] + (self.emit_tab[ii + 1] - self.emit_tab[ii]) * (xi - @as(f32, @floatFromInt(ii)));
     }
 
     pub fn draw(self: *const State, buf: []u32, stride: usize) void {
@@ -1342,7 +1704,6 @@ pub const State = struct {
         if (w == 0 or self.h == 0 or stride < w) return;
         const h: usize = @min(self.h, buf.len / stride);
         const expo = self.exposure;
-        const mscale = self.gnorm / NOISE_STD; // byte noise -> unit-variance m
 
         const last_buf_idx = (h - 1) * stride + (w - 1);
         const last_bg_idx = (h - 1) * w + (w - 1);
@@ -1365,36 +1726,41 @@ pub const State = struct {
             const row = buf[y * stride .. y * stride + w];
             const bg_row = self.bg[y * w .. y * w + w];
             const rec_row = self.recs[y * w .. y * w + w];
+            // Last turbulence lookup on this row: a neighbour inside the same eddy cell (2 rows, half a
+            // cell in azimuth) reuses it, i.e. nearest sampling at the eddy scale.
+            var last_row: i32 = -100;
+            var last_phi: u16 = 0;
+            var last_g: f32 = 0.0;
+            const half_cell: i32 = @intFromFloat(0.5 * self.cell_p0);
             for (x0..x1) |x| {
                 const rc = rec_row[x];
                 if (rc.cov == 0) continue;
                 const rb = rc.rbin / R_FRAC;
                 const rbf = @as(f32, @floatFromInt(rc.rbin)) / @as(f32, @floatFromInt(R_FRAC));
-                // CPU fallback: the coarse eddies only (nearest cell), log-normal like the GPU path;
-                // the GPU adds the fine octaves and interpolates between cells.
-                const ca = self.noiseAt(0, rc.phi, rbf)[0];
-                const cb = self.noiseAt(1, rc.phi, rbf)[0];
-                const frf: f32 = @floatFromInt(rc.fr);
+                // CPU fallback: the coarse octave only, nearest cell, and as brightness at fixed colour;
+                // the GPU path adds the finer octaves, interpolates, and changes the temperature.
+                const frf: f32 = @as(f32, @floatFromInt(rc.fr)) * 0.25; // bins
                 const fpf: f32 = @as(f32, @floatFromInt(rc.fp)) * 64.0;
-                const tex_c = 1.0 / (1.0 + (frf * frf) / 36.0 + (fpf * fpf) / 4_000_000.0);
-                const m = (self.gw[0] * ca + self.gw[1] * cb) * mscale * tex_c;
+                const tex_c = 1.0 / (1.0 + frf * frf * self.inv_cr2 + fpf * fpf * self.inv_cp2);
+                // Skip the lookups where the ripple cannot change an 8-bit level: eddies averaged out
+                // below 1% rms by the footprint, or gas too dim (linear < 0.02: a 5% change is < 1 level).
+                const dim_gas = (0.2126 * @as(f32, rc.rgb[0]) + 0.7152 * @as(f32, rc.rgb[1]) + 0.0722 * @as(f32, rc.rgb[2])) * expo < 0.02;
+                var m: f32 = 0.0;
+                if (!(tex_c * TURB_SIGMA < 0.01 or (dim_gas and self.spot_mask[rb] == 0))) {
+                    const trow: i32 = @intFromFloat(rbf * (@as(f32, NR) / @as(f32, R_BINS)));
+                    const dphi: i32 = @as(i16, @bitCast(rc.phi -% last_phi));
+                    if (@abs(trow - last_row) > 2 or @abs(dphi) > half_cell) {
+                        last_g = self.turbCoarse(rc.phi, rbf);
+                        last_row = trow;
+                        last_phi = rc.phi;
+                    }
+                    m = last_g * tex_c;
+                }
                 const ex = math.clamp((TURB_SIGMA * m - 0.5 * TURB_SIGMA * TURB_SIGMA * tex_c * tex_c + 4.0) * (@as(f32, EXP_N) / 8.0), 0.0, @as(f32, EXP_N) - 0.001);
                 const ei: usize = @intFromFloat(ex);
                 var k = (self.exp_tab[ei] + (self.exp_tab[ei + 1] - self.exp_tab[ei]) * (ex - @as(f32, @floatFromInt(ei)))) * expo;
-                // Translucent outer gas: emitted fraction 1 - e^-tau, column density stirred by
-                // the same turbulence (unresolved texture averages out, as above).
-                // Line-of-sight optical depth: vertical tau times 1/mu, kept as a log.
-                const lt_los = self.lntau_tab[rb] + @as(f32, @floatFromInt(rc.lmu)) / @as(f32, LMU_SCALE);
-                const thin = lt_los < @as(f32, @floatCast(@log(TAU_BEHIND)));
-                var emit: f32 = 1.0;
-                if (thin) {
-                    const nt = math.clamp(0.33 * m, -1.0, 1.0); // column density: tau * e^(1.2 nt)
-                    const xi = math.clamp((lt_los + TAU_NOISE * nt - EMIT_X0) * (@as(f32, EMIT_N) / (EMIT_X1 - EMIT_X0)), 0.0, @as(f32, EMIT_N) - 0.001);
-                    const ii: usize = @intFromFloat(xi);
-                    const fr_e = xi - @as(f32, @floatFromInt(ii));
-                    emit = self.emit_tab[ii] + (self.emit_tab[ii + 1] - self.emit_tab[ii]) * fr_e;
-                    k *= emit;
-                }
+                // The gas emits 1 - e^(-tau_*/mu) of a blackbody at its source temperature (baked into
+                // rgb) and lets e^(-tau_ext/mu) of what lies behind through (baked into bf).
                 var spot_rgb: [3]f32 = undefined;
                 var spot_scale: f32 = 0.0;
                 const sm = self.spot_mask[rb];
@@ -1425,7 +1791,7 @@ pub const State = struct {
                             const dp0: f32 = @as(f32, @floatFromInt(@as(i16, @bitCast(rc.phi -% self.spot_q[j])))) - shear;
                             const dp = dp0 - 65536.0 * @round(dp0 / 65536.0);
                             // Saturated footprints as on the GPU (7-bit azimuth, 5-bit radius).
-                            if (rc.fp >= 127 or rc.fr >= 31 or fpf > 2.0 * self.spot_wp[j] or frf > 2.0 * self.spot_wr[j]) {
+                            if (rc.fp >= 127 or rc.fr >= FR_SAT or fpf > 2.0 * self.spot_wp[j] or frf > 2.0 * self.spot_wr[j]) {
                                 // Unresolved here (pixel footprint wider than the spot): widening the
                                 // kernel would smear it into long false arcs, so it is left out.
                                 // Emission phase winds > 1/4 turn across this pixel (lensing time delays):
@@ -1454,12 +1820,12 @@ pub const State = struct {
                 const yl = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
                 const tm = 1.0 / (1.0 + yl); // Reinhard on luminance, hue preserved
                 const bgp = bg_row[x];
-                if (thin) {
-                    // I = cov * B(1 - e^-tau) + bg * (1 - bf (1 - e^-tau)): bg holds the light beside the gas
-                    // and, a share bf of it, the light behind it, which only that share sees dimmed.
+                if (rc.bf != 0) {
+                    // I = cov * B(T_s)(1 - e^-tau_*) + bg * (1 - bf (1 - e^-tau_ext)): bg holds the light
+                    // beside the gas and, a share bf of it, the light behind it, which only that share sees dimmed.
                     var out: [3]u8 = undefined;
                     const cov: f32 = @as(f32, @floatFromInt(rc.cov)) / 255.0;
-                    const tr = 1.0 - @as(f32, @floatFromInt(rc.bf)) / 255.0 * emit;
+                    const tr = 1.0 - @as(f32, @floatFromInt(rc.bf)) / 255.0;
                     for (0..3) |i| {
                         const bl = self.lin8[(bgp >> @intCast(8 * i)) & 0xFF];
                         const v = @min(cov * c[i] * tm + tr * bl, 1.0);
@@ -1487,6 +1853,21 @@ pub const State = struct {
         }
     }
 };
+
+/// One generation of eddies: its weight now, its age (Q16 phase per unit Omega), and the offsets
+/// that make it an independent draw from the octave's noise plane. Laid out for the GPU.
+pub const TurbGen = extern struct { w: f32, age_q: f32, rowoff: u32, phoff: u32 };
+
+/// Generation seed shared with the GPU shader (lowbias32 of the octave, band and generation).
+pub fn turbSeed(j: u32, n: u32, k: u32) u32 {
+    var x = j *% 0x9E3779B1 ^ n *% 0x85EBCA77 ^ k *% 0xC2B2AE3D;
+    x ^= x >> 16;
+    x *%= 0x7feb352d;
+    x ^= x >> 15;
+    x *%= 0x846ca68b;
+    x ^= x >> 16;
+    return x;
+}
 
 fn wrapPi(x: f64) f64 {
     return x - 2.0 * math.pi * @round(x / (2.0 * math.pi));
@@ -1612,14 +1993,6 @@ test "Page-Thorne flux: zero at the ISCO, positive outside, Newtonian at large r
     try testing.expectApproxEqAbs(1.0, ratio, 0.02);
 }
 
-test "outer disk: opaque inside, translucent edge, gone before the geometry ends" {
-    try testing.expect(opticalDepth(isco(SPIN)) > 50.0);
-    try testing.expect(opticalDepth(10.0) > TAU_THICK);
-    try testing.expect(opticalDepth(19.0) > 0.5 and opticalDepth(22.0) < 1.0);
-    try testing.expect(opticalDepth(R_OUT) * @exp(@as(f64, TAU_NOISE)) < 0.01);
-    var r: f64 = 3.0;
-    while (r < R_OUT) : (r += 0.25) try testing.expect(opticalDepth(r + 0.25) < opticalDepth(r));
-}
 
 test "blackbody colours: 6500 K is near white, 3000 K is warm, 20000 K is blue" {
     const w = blackbodyRGB(6500.0);
@@ -1640,4 +2013,29 @@ test "redshift: approaching side is the prograde-photon side, and the shadow is 
     try testing.expect(g_left > 1.0 and g_right < 1.0);
     const flat = bardeen(a, INCL, photonOrbit(a, true) + 0.05);
     if (flat) |ab| try testing.expect(ab[0] < 0.0);
+}
+
+test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, translucent tail" {
+    var pt: [PT_N]f64 = undefined;
+    const r_in = isco(SPIN);
+    pageThorne(SPIN, r_in, 85.0, &pt);
+    var d: DiskProfile = undefined;
+    diskProfile(SPIN, r_in, 85.0, &pt, &d);
+    const dl = @log(85.0 / r_in) / @as(f64, PT_N - 1);
+    const at = struct {
+        fn f(dd: *const DiskProfile, ri: f64, dll: f64, rr: f64) [3]f64 {
+            const k: usize = @intFromFloat(@round(@log(rr / ri) / dll));
+            return .{ dd.T[k], @exp(@as(f64, dd.lt_ext[k])), @exp(@as(f64, dd.lt_em[k])) };
+        }
+    }.f;
+    std.debug.print("\n  disk: T_peak {d:.0} K at r={d:.2}, tau_es {d:.0}, Sigma {e:.2}, H/r {d:.4}, mass budget {d:.4}, F/F_PT spread {d:.3}\n", .{ d.t_peak, d.r_peak, d.tau_es_peak, d.sigma_peak, d.h_over_r_peak, d.mass_budget, d.pt_ratio_spread });
+    for ([_]f64{ 3, 10, 20, 30, 40, 50, 60, 80 }) |rr| {
+        const v = at(&d, r_in, dl, rr);
+        std.debug.print("  r {d:>4}: T_s {d:>7.0} K  tau_ext {e:.3}  tau_* {e:.3}\n", .{ rr, v[0], v[1], v[2] });
+    }
+    try testing.expectApproxEqAbs(1.0, d.mass_budget, 0.01);
+    try testing.expect(d.pt_ratio_spread < 1.15);
+    try testing.expect(d.t_peak > 30_000.0 and d.t_peak < 45_000.0);
+    try testing.expect(at(&d, r_in, dl, 20.0)[1] > 10.0); // opaque at 20 M
+    try testing.expect(at(&d, r_in, dl, 80.0)[1] < 1e-2); // gone by 80 M
 }
