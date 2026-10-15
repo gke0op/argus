@@ -44,7 +44,7 @@
 // How the GPU version works
 //   - argus_init bakes the 64 m reef tile (2048 x 2048 texels, 3 cm each) into
 //     the state texture: rgb = albedo, a = height. Sand, ripples, the fringing
-//     reef, seagrass blades, bommies (lumpy massive-coral heads), sponges and
+//     reef, the seagrass mat, bommies (lumpy massive-coral heads), sponges and
 //     rubble. Bommies, sponges and rubble sit on jittered grids so each texel
 //     only looks at its neighbour cells (the Zig placed them by rejection).
 //   - argus_step runs on the first three frames only: frame 0 lights the tile
@@ -222,14 +222,12 @@ static void groundTexel(uint tu, uint tv, thread float& h, thread float3& c) {
         // it, so the thousands of pixel-sized blades don't shimmer as the diver
         // drifts (bright sand between dark spikes did).
         const float mat = max(sstep(0.0f, 0.25f, cover), 0.6f * meadow);   // reaches the meadow's edges too
-        const float3 floor_c = mix(mix(c, float3(176, 170, 140), 0.35f * meadow), float3(92, 116, 70), 0.75f * mat);
-        // At the very edge of a meadow, where the mat is thinnest, blades thin out first.
-        if (hash01(tu, tv, 16) < cover * sstep(0.15f, 0.5f, meadow)) {
-            // One texel (3 cm) blade: Thalassia straps and shorter Halodule.
-            h += 0.10f + 0.22f * hash01(tu, tv, 17);
-            c = mix(float3(84, 132, 68), float3(116, 124, 72), hash01(tu, tv, 18));
-        } else if (meadow > 0.0f) {
-            c = floor_c;
+        // The blades themselves are drawn by the draw kernel (see seagrass()), as
+        // fixed straps that sway; the bake only lays the mat, whose green also tells
+        // the draw how dense the blades are.
+        if (meadow > 0.0f) {
+            c = mix(mix(c, float3(176, 170, 140), 0.35f * meadow), float3(92, 116, 70), 0.75f * mat);
+            h += 0.02f * mat;
         }
     }
 }
@@ -1342,6 +1340,84 @@ static inline float snapSlice(float z) {
     return Z_LIN * exp2(ceil(log2(z / Z_LIN) / lg) * lg);
 }
 
+// ---------------------------------------------------------------- seagrass --
+// Thalassia / Halodule blades as real straps on a fixed 6 cm world grid: each
+// has its own place, height (10-32 cm) and phase, leans with the surge running
+// shoreward and wobbles a little. A pixel tests the blades that stand between the
+// eye and the ground it sees; their edges are anti-aliased, so a blade too thin
+// for a pixel fades rather than pops, and beyond ~9 m they fade into the mat.
+constant float GRASS_CELL = 0.06f;
+constant float GRASS_Z = 9.0f;
+constant float GRASS_HMAX = 0.40f;   // tallest blade plus its lean
+
+/// How dense the blades are at a lagoon point, read from the mat's green (0 off the meadows).
+static inline float grassDensity(float4 sm) {
+    if (sm.a > 0.6f) return 0.0f;   // lagoon floor only: no blades on the bommies
+    return saturate((sm.g - max(sm.r, sm.b * 1.2f)) * 14.0f);
+}
+
+/// The nearest blade in front of the ground hit at depth zhit, if any: its depth,
+/// colour and coverage of this pixel.
+static bool seagrass(texture2d<float> st, Scene S, float rk, float ry, float zhit,
+                     thread float& zg, thread float3& cg, thread float& cov) {
+    if (ry >= -1e-4f || zhit > GRASS_Z) return false;
+    const float gb = S.camy + ry * zhit - 0.01f;   // ground under the blades ~ the hit
+    if (gb > 0.6f) return false;                   // blades grow on the lagoon floor only
+    const float z0 = max(Z_NEAR, zhit - GRASS_HMAX / -ry);
+    // Most pixels see bare sand: skip them unless the ray's ground track meets a meadow.
+    const float zm = 0.5f * (z0 + zhit);
+    if (grassDensity(reefAt(st, S.camx + rk * zhit, S.scroll + zhit)) <= 0.0f &&
+        grassDensity(reefAt(st, S.camx + rk * zm, S.scroll + zm)) <= 0.0f &&
+        grassDensity(reefAt(st, S.camx + rk * z0, S.scroll + z0)) <= 0.0f) return false;
+    const float px = 1.0f / S.focal;   // metres per pixel per metre of depth
+    const float t = S.t;
+    const int r0 = int(floor((S.scroll + z0) / GRASS_CELL));
+    const int r1 = int(floor((S.scroll + zhit) / GRASS_CELL));
+    bool found = false;
+    for (int iz = r0; iz <= r1 && iz < r0 + 40; iz++) {
+        const float zr = (float(iz) + 0.5f) * GRASS_CELL - S.scroll;   // this row's depth
+        const float xr = S.camx + rk * zr;
+        const float dens = grassDensity(reefAt(st, xr, S.scroll + zr));
+        if (dens <= 0.0f) continue;
+        const int ix0 = int(floor(xr / GRASS_CELL));
+        for (int ix = ix0 - 1; ix <= ix0 + 1; ix++) {
+            const uint h = argus_hash(uint(ix + 1000000) * 0x9E3779B1u ^ argus_hash(uint(iz + 1000000)));
+            const float q0 = float(h & 0xFFu) / 255.0f, q1 = float((h >> 8) & 0xFFu) / 255.0f;
+            const float q2 = float((h >> 16) & 0xFFu) / 255.0f, q3 = float(h >> 24) / 255.0f;
+            if (q0 > 0.8f * dens) continue;   // no blade in this cell
+            const float bx = (float(ix) + 0.15f + 0.7f * q1) * GRASS_CELL;   // world x
+            const float bzw = (float(iz) + 0.15f + 0.7f * q2) * GRASS_CELL;  // world z
+            const float bz = bzw - S.scroll;
+            if (bz < Z_NEAR || bz > zhit + 0.05f) continue;
+            const float H = 0.10f + 0.22f * q3;
+            // The surge leans it shoreward and back; a faster wobble on top.
+            const float lean_z = 0.06f * sin(1.25f * t - 0.9f * bzw + 6.0f * q1) + 0.015f * sin(3.3f * t + 9.0f * q2);
+            const float lean_x = 0.035f * sin(0.9f * t + 0.7f * bx + 6.0f * q3);
+            // Where the ray meets this blade: solve for the height up it (two passes).
+            float z = bz, u = 0.0f;
+            for (int k = 0; k < 2; k++) {
+                u = (S.camy + ry * z - gb) / H;
+                const float uc = saturate(u);
+                z = bz + lean_z * uc * uc;
+            }
+            u = (S.camy + ry * z - gb) / H;
+            if (u < 0.0f || u > 1.0f || z >= zhit || (found && z >= zg)) continue;
+            const float dx = (S.camx + rk * z) - (bx + lean_x * u * u);
+            const float halfw = 0.0055f * (1.0f - 0.6f * u * u);
+            const float c = saturate((halfw - fabs(dx)) / (z * px) + 0.5f) * (1.0f - sstep(GRASS_Z - 2.0f, GRASS_Z, z));
+            if (c <= 0.02f) continue;
+            found = true;
+            zg = z;
+            cov = c;
+            const float3 base_c = float3(64, 104, 56) / 255.0f, tip_c = mix(float3(112, 150, 82), float3(126, 128, 76), q2) / 255.0f;
+            cg = mix(base_c, tip_c, u) * (0.85f + 0.3f * q0);
+            cg = mix(cg, WATER_HOR, 1.0f - exp(-FOG_K * z));
+        }
+        if (found) break;   // rows run front to back: the first blade found is the nearest
+    }
+    return found;
+}
+
 /// Marches the pixel's ray over the baked heightfield at the Zig's slice spacing.
 static bool marchReef(texture2d<float> st, Scene S, float rk, float ry, thread float& zhit, thread float3& col) {
     float zend = Z_FAR;
@@ -1482,6 +1558,14 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
     float bestZ = 1e9f;
     float3 col = float3(0.0f);
     bool drawn = marchReef(st, S, rk, ry, bestZ, col);
+    if (drawn) {
+        float zg, cv;
+        float3 cgr;
+        if (seagrass(st, S, rk, ry, bestZ, zg, cgr, cv)) {
+            col = mix(col, cgr, cv);
+            if (cv > 0.5f) bestZ = zg;
+        }
+    }
 
     const uint nc = min(atomic_load_explicit(&nC, memory_order_relaxed), CCAP);
     for (uint j = 0; j < nc; j++) {
