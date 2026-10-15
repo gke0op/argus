@@ -185,6 +185,18 @@ pub const Theme = struct {
         self.frame.time += dt;
     }
 
+    /// Encodes only argus_draw for the current state, without advancing time or the state
+    /// (used for menu previews).
+    pub fn encodeDrawOnly(self: *Theme, cb: mtl.Id, out: mtl.Id) void {
+        const enc = mtl.msg(mtl.Id, cb, "computeCommandEncoder", .{});
+        const fb: *const anyopaque = &self.frame;
+        mtl.msg(void, enc, "setBytes:length:atIndex:", .{ fb, @as(usize, @sizeOf(Frame)), @as(usize, 0) });
+        if (self.stateful()) mtl.msg(void, enc, "setTexture:atIndex:", .{ self.tex[self.cur], @as(usize, 1) });
+        mtl.msg(void, enc, "setTexture:atIndex:", .{ out, @as(usize, 0) });
+        self.draw.dispatch(enc, self.frame.width, self.frame.height);
+        mtl.msg(void, enc, "endEncoding", .{});
+    }
+
     pub fn deinit(self: *Theme) void {
         for ([_]?Pipe{ self.draw, self.init, self.step, self.clear }) |p| if (p) |q| mtl.release(q.pso);
         for (self.tex) |t| mtl.release(t);
