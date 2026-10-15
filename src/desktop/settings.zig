@@ -5,8 +5,14 @@
 // line, `#` starts a comment. `set` rewrites only its own line and keeps every other line as is,
 // so features can add keys without knowing about each other.
 //
-// Keys:
+// Keys (all set from the menu bar popover's Settings view):
 //   mission_control_stills=0|1   Spaces-bar stills (desktop/desktop_picture.zig). Default 0.
+//   animate=0|1                  Themes animate; 0 pauses every Space. Default 1.
+//   speed=0.25..2                Theme speed multiplier. Default 1.
+//   smooth_swipes=0|1            Keep the nearest off-screen theme Spaces warm at 10 FPS. Default 1.
+//   reload_on_edit=0|1           Hot-reload a theme when its file is saved. Default 1.
+//   launch_at_login=0|1          Start Argus at login (desktop/login_item.zig). Default 0.
+//   gpu=0|1                      GPU hybrid themes (Opus_Black_Hole); `--cpu` overrides. Default 1.
 // ============================================================================
 
 const std = @import("std");
@@ -60,10 +66,29 @@ pub fn getBool(key: []const u8, default: bool) bool {
 }
 
 pub fn setBool(key: []const u8, on: bool) void {
+    set(key, if (on) "1" else "0");
+}
+
+/// `key` as a number clamped to [lo, hi], or `default` when missing or unreadable.
+pub fn getFloat(key: []const u8, default: f64, lo: f64, hi: f64) f64 {
+    var buf: [MAX_BYTES]u8 = undefined;
+    const text = std.Io.Dir.cwd().readFile(sc.g_io, PATH, &buf) catch return default;
+    const v = lookup(text, key) orelse return default;
+    const f = std.fmt.parseFloat(f64, v) catch return default;
+    if (!std.math.isFinite(f)) return default;
+    return std.math.clamp(f, lo, hi);
+}
+
+pub fn setFloat(key: []const u8, value: f64) void {
+    var vbuf: [32]u8 = undefined;
+    set(key, std.fmt.bufPrint(&vbuf, "{d:.2}", .{value}) catch return);
+}
+
+pub fn set(key: []const u8, value: []const u8) void {
     var buf: [MAX_BYTES]u8 = undefined;
     const text = std.Io.Dir.cwd().readFile(sc.g_io, PATH, &buf) catch "";
     var out: [MAX_BYTES + 128]u8 = undefined;
-    const data = update(text, key, if (on) "1" else "0", &out) orelse return;
+    const data = update(text, key, value, &out) orelse return;
     std.Io.Dir.cwd().writeFile(sc.g_io, .{ .sub_path = PATH, .data = data }) catch {};
 }
 

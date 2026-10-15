@@ -18,6 +18,7 @@ const EYE_MIN: f64 = 4.2; // iris diameter clamp (many Spaces)
 const EYE_MAX: f64 = 7.2; // iris diameter clamp (few Spaces)
 const PUPIL_FRAC: f64 = 0.42; // pupil radius as a fraction of iris radius
 const EYE_CLEAR: f64 = 0.6; // breathing room between iris and neighbouring arcs
+const LID_W: f64 = STROKE * 1.3; // closed-eye lid thickness
 /// Furthest any ink reaches from the centre; scaled to fill the image edge to edge.
 const EXTENT: f64 = RING_R + EYE_MAX * 0.5;
 
@@ -41,7 +42,7 @@ fn wrap(d: f64) f64 {
 }
 
 /// Signed distance (unit-box units) from point (x, y) to the glyph ink; negative is inside.
-fn glyphDistance(x: f64, y: f64, n_raw: usize, cur_raw: usize) f64 {
+fn glyphDistance(x: f64, y: f64, n_raw: usize, cur_raw: usize, closed: bool) f64 {
     const n = @max(n_raw, 1);
     const cur = @min(cur_raw, n - 1);
     const c = BOX * 0.5;
@@ -56,8 +57,8 @@ fn glyphDistance(x: f64, y: f64, n_raw: usize, cur_raw: usize) f64 {
     const ecx = RING_R * @cos(ex);
     const ecy = RING_R * @sin(ex);
     const de = @sqrt((px - ecx) * (px - ecx) + (py - ecy) * (py - ecy));
-    // Iris disc with a pupil hole.
-    var d = @max(de - ir, ir * PUPIL_FRAC - de);
+    // Iris disc with a pupil hole; closed (paused), a level lid across the same spot instead.
+    var d = if (closed) lidDistance(px - ecx, py - ecy, ir) else @max(de - ir, ir * PUPIL_FRAC - de);
 
     // The iris carves an angular window out of the ring.
     const clear = (ir + EYE_CLEAR + STROKE * 0.5) / RING_R;
@@ -95,6 +96,13 @@ fn glyphDistance(x: f64, y: f64, n_raw: usize, cur_raw: usize) f64 {
     return d;
 }
 
+/// Distance to the closed-eye lid: a round-capped horizontal bar as wide as the iris.
+fn lidDistance(dx: f64, dy: f64, ir: f64) f64 {
+    const half = ir - LID_W * 0.5;
+    const cx = math.clamp(dx, -half, half);
+    return @sqrt((dx - cx) * (dx - cx) + dy * dy) - LID_W * 0.5;
+}
+
 /// Distance to a round-capped arc of radius RING_R spanning relative angles [lo, hi].
 fn arcDistance(r: f64, rel: f64, lo: f64, hi: f64) f64 {
     if (hi - lo < 0.02) return math.inf(f64);
@@ -111,7 +119,8 @@ fn arcDistance(r: f64, rel: f64, lo: f64, hi: f64) f64 {
 }
 
 /// Rasterises the glyph into `alpha` (px * px, row 0 at the top) with 1-pixel anti-aliasing.
-pub fn render(alpha: []u8, px: usize, n_spaces: usize, current: usize) void {
+/// `closed` draws the eye shut (Argus is paused).
+pub fn render(alpha: []u8, px: usize, n_spaces: usize, current: usize, closed: bool) void {
     std.debug.assert(px > 0 and px <= MAX_PX and alpha.len >= px * px);
     const px_f: f64 = @floatFromInt(px);
     // Fill the image: EXTENT maps to half the image minus a pixel of AA margin.
@@ -121,7 +130,7 @@ pub fn render(alpha: []u8, px: usize, n_spaces: usize, current: usize) void {
         for (0..px) |col| {
             const ux = c + (@as(f64, @floatFromInt(col)) + 0.5 - px_f * 0.5) * units_per_px;
             const uy = c + (@as(f64, @floatFromInt(row)) + 0.5 - px_f * 0.5) * units_per_px;
-            const d_px = glyphDistance(ux, uy, n_spaces, current) / units_per_px;
+            const d_px = glyphDistance(ux, uy, n_spaces, current, closed) / units_per_px;
             const cov = math.clamp(0.5 - d_px, 0.0, 1.0);
             alpha[row * px + col] = @intFromFloat(@round(cov * 255.0));
         }
@@ -146,7 +155,7 @@ test "status glyph: iris sits on the current Space with a clear pupil" {
     var buf: [px * px]u8 = undefined;
     for ([_]usize{ 1, 2, 3, 5, 8, 12, 16 }) |n| {
         for (0..n) |cur| {
-            render(&buf, px, n, cur);
+            render(&buf, px, n, cur, false);
             const a = spaceAngle(cur, n);
             const cx = BOX * 0.5 + RING_R * @cos(a);
             const cy = BOX * 0.5 + RING_R * @sin(a);
@@ -162,7 +171,7 @@ test "status glyph: one arc per Space, separated by gaps" {
     const px = 96;
     var buf: [px * px]u8 = undefined;
     const n = 8;
-    render(&buf, px, n, 0);
+    render(&buf, px, n, 0, false);
     // Opposite the eye, every arc midpoint is ink and every boundary between arcs is a gap.
     for (2..7) |k| {
         const mid = spaceAngle(k, n);
@@ -179,18 +188,32 @@ test "status glyph: iris scales with its arc and stays clamped" {
     try std.testing.expect(irisRadius(8) > irisRadius(12));
     // 0 Spaces / out-of-range index never crash.
     var buf: [24 * 24]u8 = undefined;
-    render(&buf, 24, 0, 7);
-    render(&buf, 24, 4, 99);
+    render(&buf, 24, 0, 7, false);
+    render(&buf, 24, 4, 99, true);
 }
 
 test "status glyph: ink stays inside the image edge" {
     const px = 36;
     var buf: [px * px]u8 = undefined;
     for (1..17) |n| {
-        render(&buf, px, n, 0);
+        render(&buf, px, n, 0, false);
         for (0..px) |i| {
             try std.testing.expect(buf[i] < 128); // top row
             try std.testing.expect(buf[(px - 1) * px + i] < 128); // bottom row
         }
+    }
+}
+
+test "status glyph: a paused eye is shut: lid through the pupil, nothing above it" {
+    const px = 64;
+    var buf: [px * px]u8 = undefined;
+    for ([_]usize{ 1, 4, 8, 16 }) |n| {
+        render(&buf, px, n, 0, true);
+        const a = spaceAngle(0, n);
+        const cx = BOX * 0.5 + RING_R * @cos(a);
+        const cy = BOX * 0.5 + RING_R * @sin(a);
+        const ir = irisRadius(n);
+        try std.testing.expect(at(&buf, px, cx, cy) > 200);
+        try std.testing.expect(at(&buf, px, cx, cy - ir * 0.8) < 60);
     }
 }
