@@ -6,8 +6,10 @@
 // disk, seen up close, rendered from the physics rather than tuned by eye. No telescope can
 // resolve a real quasar disk (we know them from their light: spectra, variability,
 // microlensing); this is what that physics predicts. The Event Horizon Telescope's images
-// (M87*, Sgr A*) are a different, starving kind of black hole: hot, faint, see-through flows. Audited independently (Gemini 4 Argon; Claude
-// Opus with its own code): every item under "computed" was re-derived and checked.
+// (M87*, Sgr A*) are a different, starving kind of black hole: hot, faint, see-through flows.
+// Audited independently (Gemini 4 Argon; Claude Opus with its own code): every item under
+// "computed" was re-derived and checked. Opus_Gargantua.zig is the same engine at a chosen,
+// cooler temperature.
 //
 // What is computed, not chosen:
 //  * Light paths: exact Kerr null geodesics (Hamiltonian form, RK4, with p_r re-solved
@@ -169,7 +171,7 @@ const SPOT_AMP: f32 = 6.0; // peak emissivity boost (hotter gas: T rises as (1 +
 const HALF_PI: f64 = math.pi / 2.0;
 /// Built by Argus's GPU path (src/gpu/bh_export.zig): the GPU traces the image itself at the
 /// window's native size, so init() skips the CPU trace and draw() runs it only if it's ever called.
-const gpu_traced = @hasDecl(@import("root"), "argus_gpu_traces_opus_quasar");
+const gpu_traced = @hasDecl(@import("root"), "argus_gpu_traces_kerr_disk");
 const K_NEAR: f64 = 0.08; // tuned against the Bardeen test: ~1e-5 M shadow-edge error
 const MAX_STEPS: u32 = 40_000;
 
@@ -893,6 +895,11 @@ pub const State = struct {
     om_row: [NR]f32, // Omega at each turbulence row
     cell_r0: f32, // octave-0 cell size: radial bins
     cell_p0: f32, // octave-0 cell size: azimuth, Q16
+    turb_sigma: f32, // TURB_SIGMA, for the GPU path
+    rho_row: [N_OCT]f32, // measured neighbour correlation of each noise plane: rows, phase cells
+    rho_ph: [N_OCT]f32,
+    foot_cr: [N_OCT]f32, // GPU footprint filter: cell constants of the box-averaged rendered field
+    foot_cp: [N_OCT]f32,
     om_tab: [R_BINS]f64,
     shear_tab: [R_BINS]f32, // |dOmega/d rbin| in Q16 per M: how fast a sheared spot's azimuth runs with radius
     lntau_tab: [R_BINS]f32, // ln vertical extinction depth per radial bin
@@ -1024,6 +1031,7 @@ pub const State = struct {
         const cell_ph = 2.0 * EDDY_MAJ_H * H_OVER_R / dphi_cell * cos_tilt;
         self.cell_r0 = @floatCast(2.0 * EDDY_MIN_H * H_OVER_R / (self.lnr_span / @as(f64, @floatFromInt(R_BINS))));
         self.cell_p0 = @floatCast(2.0 * EDDY_MAJ_H * H_OVER_R / (2.0 * math.pi) * 65536.0);
+        self.turb_sigma = TURB_SIGMA;
         for (0..N_OCT) |oct| {
             const sc = math.pow(f64, 2.0, @floatFromInt(oct));
             const gr: usize = @max(1, @as(usize, @intFromFloat(@round(@as(f64, NR) / (cell_rows / sc)))));
@@ -1050,6 +1058,15 @@ pub const State = struct {
             const r = @exp(self.lnr_in + self.lnr_span * (@as(f64, @floatFromInt(ri)) + 0.5) / @as(f64, @floatFromInt(NR)));
             self.om_row[ri] = @floatCast(orbit(self.geo.a, r).om);
         }
+        // Effective neighbour correlations for the GPU's variance-preserving interpolation, fitted
+        // on the rendered (sheared, time-averaged) field: the row one is far below the static
+        // plane's 0.89 / 0.63 because shear decorrelates neighbouring rows as eddies age (notes:
+        // opus-audit2-turbulence-fit.md; re-fit if the eddy shape or lifetimes change).
+        self.rho_row = .{ 0.40, 0.26 };
+        self.rho_ph = .{ 0.31, 0.0 };
+        // Footprint filter, (1 + (f / c)^2)^(-1/4) per axis in cell units, fitted the same way.
+        self.foot_cr = .{ 0.865, 1.284 };
+        self.foot_cp = .{ 1.513, 2.039 };
         // Each octave's eddies live ~ P(r) 2^(-2j/3) (correlation time ~0.5 P, Beckwith 2011),
         // quantised onto phase-locked bands so neighbouring radii never drift apart (no stripes).
         for (0..R_BINS) |b| {

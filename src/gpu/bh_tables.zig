@@ -55,6 +55,11 @@ pub const Static = extern struct {
     om_row: [NR]f32, // Omega at each turbulence row
     cell_r0: f32, // octave-0 eddy cell: radial bins
     cell_p0: f32, // octave-0 eddy cell: azimuth, Q16
+    turb_sigma: f32, // rms of ln(dissipation): the theme's TURB_SIGMA
+    rho_row: [N_OCT]f32, // neighbour correlation of each noise plane: rows, phase cells
+    rho_ph: [N_OCT]f32,
+    foot_cr: [N_OCT]f32, // footprint filter cell constants (box average of the rendered field)
+    foot_cp: [N_OCT]f32,
     srgb: [4096]u8,
 };
 
@@ -111,6 +116,11 @@ pub fn fillStatic(st: anytype, out: *Static) void {
     out.om_row = st.om_row;
     out.cell_r0 = st.cell_r0;
     out.cell_p0 = st.cell_p0;
+    out.turb_sigma = st.turb_sigma;
+    out.rho_row = st.rho_row;
+    out.rho_ph = st.rho_ph;
+    out.foot_cr = st.foot_cr;
+    out.foot_cp = st.foot_cp;
     out.srgb = st.srgb;
 }
 
