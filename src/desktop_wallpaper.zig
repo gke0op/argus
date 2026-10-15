@@ -2,6 +2,7 @@ const std = @import("std");
 const math = std.math;
 pub const sc = @import("desktop/space_config.zig");
 pub const obs_mod = @import("desktop/observatory.zig");
+const status_glyph = @import("desktop/status_glyph.zig");
 
 pub const CANVAS_W = sc.CANVAS_W;
 pub const CANVAS_H = sc.CANVAS_H;
@@ -70,6 +71,8 @@ const MsgSendRetRect = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) CGRect;
 const MsgSendRetInt = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) isize;
 const MsgSendRetCStr = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?[*:0]const u8;
 const MsgSendInitRect = *const fn (?*anyopaque, ?*anyopaque, CGRect) callconv(.c) ?*anyopaque;
+const MsgSendInitImage = *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, CGSize) callconv(.c) ?*anyopaque;
+const MsgSendRetF64 = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) f64;
 
 const MacBridge = struct {
     obs: *Observatory,
@@ -92,6 +95,7 @@ const MacBridge = struct {
     msgRetRect: MsgSendRetRect,
     msgRetInt: MsgSendRetInt,
     msgRetCStr: MsgSendRetCStr,
+    msgInitImage: MsgSendInitImage,
 
     // CoreGraphics
     CGBitmapContextCreate: *const fn (?*anyopaque, usize, usize, usize, usize, ?*anyopaque, u32) callconv(.c) ?*anyopaque,
@@ -168,6 +172,14 @@ const MacBridge = struct {
     popover_layer: ?*anyopaque,
     popover_bitmap_ctx: ?*anyopaque,
     status_button: ?*anyopaque,
+    NSImage: ?*anyopaque,
+    // Menu bar glyph: image size in points/pixels, and the (Spaces, current) it last showed.
+    glyph_pt: f64,
+    glyph_px: usize,
+    glyph_n: usize = 0,
+    glyph_cur: usize = std.math.maxInt(usize),
+    glyph_alpha: [status_glyph.MAX_PX * status_glyph.MAX_PX]u8 = undefined,
+    glyph_rgba: [status_glyph.MAX_PX * status_glyph.MAX_PX * 4]u8 = undefined,
     color_space: ?*anyopaque,
     display_id: u32,
     CGDisplayIsAsleep: *const fn (u32) callconv(.c) u32,
@@ -451,6 +463,45 @@ const MacBridge = struct {
             self.strokeRoundRect(ctx, h_total, x, top_y, w, h, 6.0, 1.0, 0.32, 0.32, 0.38, 0.9);
             self.drawCTText(ctx, h_total, x + 8.0, top_y + 3.0, label, self.dict_small, 0.88, 0.89, 0.93, 1.0);
         }
+    }
+
+    /// Redraws the menu bar glyph (ring of Spaces + iris on the current one) when the
+    /// Space count or the current Space changes. Set as a template image so macOS tints it.
+    pub fn updateStatusGlyph(self: *MacBridge) void {
+        const n = @max(@as(usize, 1), @min(self.obs.n_spaces, MAX_SPACES));
+        const cur = @min(self.obs.active_space_idx, n - 1);
+        if (n == self.glyph_n and cur == self.glyph_cur) return;
+        const button = self.status_button orelse return;
+        const px = self.glyph_px;
+
+        status_glyph.render(self.glyph_alpha[0 .. px * px], px, n, cur);
+        // Premultiplied black: only alpha matters for a template image.
+        for (0..px * px) |i| {
+            self.glyph_rgba[i * 4 + 0] = 0;
+            self.glyph_rgba[i * 4 + 1] = 0;
+            self.glyph_rgba[i * 4 + 2] = 0;
+            self.glyph_rgba[i * 4 + 3] = self.glyph_alpha[i];
+        }
+        // kCGImageAlphaPremultipliedLast = 1
+        const ctx = self.CGBitmapContextCreate(@ptrCast(&self.glyph_rgba), px, px, 8, px * 4, self.color_space, 1) orelse return;
+        defer self.CGContextRelease(ctx);
+        const cg_img = self.CGBitmapContextCreateImage(ctx) orelse return;
+        defer self.CGImageRelease(cg_img);
+
+        const alloc_img = self.msg0(self.NSImage, self.sel_registerName("alloc"));
+        const ns_img = self.msgInitImage(alloc_img, self.sel_registerName("initWithCGImage:size:"), cg_img, .{ .width = self.glyph_pt, .height = self.glyph_pt }) orelse return;
+        self.msgBool(ns_img, self.sel_registerName("setTemplate:"), true);
+        self.msgId(button, self.sel_registerName("setImage:"), ns_img);
+        self.msgVoid(ns_img, self.sel_registerName("release"));
+
+        var tbuf: [64]u8 = undefined;
+        const tip = std.fmt.bufPrintSentinel(&tbuf, "Argus \xc2\xb7 Space {d} of {d}", .{ cur + 1, n }, 0) catch "Argus";
+        if (self.msgUTF8(self.NSString, self.sel_str_utf8, tip.ptr)) |tip_ns| {
+            self.msgId(button, self.sel_registerName("setToolTip:"), tip_ns);
+        }
+
+        self.glyph_n = n;
+        self.glyph_cur = cur;
     }
 
     // ========================================================================
@@ -1247,15 +1298,8 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
         b.msgVoid(b.CATransaction, b.sel_flush);
     }
 
-    if ((space_changed or (b.frame_idx % 30) == 0) and b.status_button != null) {
-        var tbuf: [64]u8 = undefined;
-        const s = std.fmt.bufPrintSentinel(&tbuf, "✦ Argus {d}/{d}", .{
-            b.obs.active_space_idx + 1,
-            b.obs.n_spaces,
-        }, 0) catch "✦ Argus";
-        if (b.msgUTF8(b.NSString, b.sel_str_utf8, s.ptr)) |ns_str| {
-            b.msgId(b.status_button, b.sel_set_title, ns_str);
-        }
+    if (space_changed or (b.frame_idx % 15) == 0) {
+        b.updateStatusGlyph();
     }
 
     b.frame_idx += 1;
@@ -1447,6 +1491,9 @@ pub fn main(init: std.process.Init) !void {
     const msgRetInt: MsgSendRetInt = @ptrCast(msgSend_raw);
     const msgRetCStr: MsgSendRetCStr = @ptrCast(msgSend_raw);
     const msgInitRect: MsgSendInitRect = @ptrCast(msgSend_raw);
+    const msgInitImage: MsgSendInitImage = @ptrCast(msgSend_raw);
+    const msgRetF64: MsgSendRetF64 = @ptrCast(msgSend_raw);
+    const msgSetImagePosition: MsgSendVoidUInt = @ptrCast(msgSend_raw);
 
     // Prepare CoreText Font Attribute Dictionaries (Helvetica Neue / SF & Menlo)
     const cf_font_ui = CFStringCreateWithCString(null, "HelveticaNeue-Medium", 0x08000100);
@@ -1565,9 +1612,12 @@ pub fn main(init: std.process.Init) !void {
     const status_item = msgStatusItem(sys_bar, sel_registerName("statusItemWithLength:"), -1.0);
     _ = msg0(status_item, sel_registerName("retain"));
     const status_button = msg0(status_item, sel_registerName("button"));
-    if (msgUTF8(NSString, sel_registerName("stringWithUTF8String:"), "✦ Argus")) |title_ns| {
-        msgId(status_button, sel_registerName("setTitle:"), title_ns);
-    }
+    // The glyph image is the whole status item: no title text.
+    msgSetImagePosition(status_button, sel_registerName("setImagePosition:"), 1); // NSImageOnly
+    // Fill the bar: glyph = menu bar thickness minus a little air, at 2x pixels.
+    const bar_thickness = msgRetF64(sys_bar, sel_registerName("thickness"));
+    const glyph_pt: f64 = math.clamp(@round(bar_thickness - 4.0), 12.0, @as(f64, @floatFromInt(status_glyph.MAX_PX / 2)));
+    const glyph_px: usize = @intFromFloat(glyph_pt * 2.0);
     msgId(status_button, sel_registerName("setTarget:"), ctrl_instance);
     msgId(status_button, sel_registerName("setAction:"), sel_registerName("onStatusItemClick:"));
 
@@ -1656,6 +1706,7 @@ pub fn main(init: std.process.Init) !void {
         .msgRetRect = msgRetRect,
         .msgRetInt = msgRetInt,
         .msgRetCStr = msgRetCStr,
+        .msgInitImage = msgInitImage,
         .CGBitmapContextCreate = CGBitmapContextCreate,
         .CGBitmapContextCreateImage = CGBitmapContextCreateImage,
         .CGDataProviderCreateWithData = CGDataProviderCreateWithData,
@@ -1723,6 +1774,9 @@ pub fn main(init: std.process.Init) !void {
         .popover_layer = popover_layer,
         .popover_bitmap_ctx = popover_bitmap_ctx,
         .status_button = status_button,
+        .NSImage = objc_getClass("NSImage"),
+        .glyph_pt = glyph_pt,
+        .glyph_px = glyph_px,
         .color_space = color_space,
         .display_id = display_id,
         .CGDisplayIsAsleep = CGDisplayIsAsleep,
@@ -1761,6 +1815,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Discover all user Desktop Spaces from SkyLight and bind a dedicated NSWindow to each Space!
     bridge.syncSpacesFromSkyLight(true);
+    bridge.updateStatusGlyph();
 
     // Schedule 30 FPS NSTimer in NSRunLoopCommonModes
     const NSTimer = objc_getClass("NSTimer") orelse return error.NoNSTimer;
@@ -1987,3 +2042,7 @@ test "Mission Control Space reordering moves themes with space_id and resets mov
     try std.testing.expectEqual(@as(usize, 1), obs.active_space_idx);
 }
 
+
+test {
+    _ = status_glyph;
+}
