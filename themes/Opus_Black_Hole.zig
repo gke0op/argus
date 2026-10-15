@@ -16,10 +16,13 @@
 //    formula). Surface density, dissipation, temperature and optical depth all come from ONE
 //    solution of the general-relativistic thin-disk evolution equation (Balbus 2017; Mummery &
 //    Balbus 2019, MNRAS 489, 132; see diskProfile): a ring of gas that has spread for a while,
-//    zero stress at the ISCO, a stress W ~ r^(1/2) independent of Sigma. Inside the radius
-//    where its mass flux reverses (10 M) it relaxes to the Page-Thorne flux (checked: within
-//    0.4%, mass budget to 0.1%); beyond it the disk spreads outward, and its dissipation,
-//    temperature and opacity fall off together, so it thins out with no edge. Scaled to a
+//    zero stress at the ISCO, a stress W ~ r^(1/2) independent of Sigma. Near the ISCO it is
+//    in steady inflow and has the Page-Thorne flux shape (within 2% inside 3 M; mass budget
+//    closes to 0.1%); further out the inflow falls to zero at the radius where its mass flux
+//    reverses (10 M), so the flux drops below Page-Thorne (0.86 at 5 M, 0.50 at 10 M). Beyond
+//    it the disk spreads outward, and its dissipation, temperature and opacity fall off
+//    together, so it thins out with no edge. The stress follows the closure, not the local
+//    pressure: alpha P = W holds exactly only at the flux peak, where it is set. Scaled to a
 //    5e9 solar-mass hole at 3% of Eddington (alpha = 0.1): peak 37,000 K, blue-white, as real
 //    thin disks around such holes are. Opacity: electron scattering + Kramers absorption;
 //    where the gas thins, it emits as a grey isothermal slab (energy-conserving source
@@ -48,7 +51,7 @@
 //    turbulence, not simulated MHD (Guan et al. 2009; Beckwith, Armitage & Simon 2011;
 //    Hirose et al. 2009). Eddies 0.25 H radially by 1.75 H along the orbit (axis ratio 7;
 //    H/r = 0.01 is our choice, this disk computes 0.006 at the peak), born trailing ~31 deg
-//    and wound tighter by shear; three octaves with amplitude 2^(-5j/6), a k^(-11/3) per-mode
+//    and wound tighter by shear; two octaves with amplitude 2^(-5j/6), a k^(-11/3) per-mode
 //    spectrum; octave j lives P(r) 2^(-2j/3) (correlation time ~ half an orbit, shorter for
 //    small eddies), on phase-locked lifetime bands L0 2^n blended across radius so
 //    neighbouring radii never drift apart into stripes. Each band is two staggered
@@ -58,7 +61,7 @@
 //    temperature follows it as T ~ eps^(1/4), so it changes colour as well as brightness.
 //    Each octave is filtered by the pixel's footprint on the disk: below the eddy size it
 //    averages out. The CPU fallback draws the coarse octave only, as brightness at fixed
-//    colour; the GPU draws all three.
+//    colour; the GPU draws both.
 //  * Hot spots: plasma clumps on exact Kerr orbits (like Sgr A* flares). Each appears
 //    in the direct image and the lowest-order lensed image of each pixel, its orbital
 //    phase lagging by that image's light-travel time (birth and fade do not lag; spots
@@ -111,13 +114,15 @@ const TURB_SIGMA: f32 = 0.2; // rms of ln(dissipation) at the photosphere: therm
 const NOISE_STD: f32 = 40.0; // noise table byte levels per standard deviation
 pub const H_OVER_R: f64 = 0.01; // disk scale height (this disk: 0.006 computed at the peak, ~0.014 textbook)
 pub const NR: usize = 2048; // turbulence rows across the radial span (eddies are smaller than a radial bin)
-pub const N_OCT: usize = 3; // octaves, amplitude 2^(-5j/6): a k^(-11/3) per-mode spectrum (Beckwith 2011)
+pub const N_OCT: usize = 2; // octaves, amplitude 2^(-5j/6): a k^(-11/3) per-mode spectrum (Beckwith 2011). A third
+// (0.03 H radially) would be finer than a table row, and than a Retina pixel's footprint on the disk.
 pub const NBAND: usize = 12; // lifetime bands L0 * 2^n, phase-locked to global time
 pub const BAND_L0: f64 = 4.0; // M: the shortest lifetime band
-const OCT_AMP = [N_OCT]f32{ 1.0, 0.5612310241546865, 0.3149802624737183 };
+const OCT_AMP = [N_OCT]f32{ 1.0, 0.5612310241546865 };
 const EDDY_MIN_H: f64 = 0.25; // correlation lengths in H: radial 0.25, azimuthal 1.75 (axis ratio 7)
 const EDDY_MAJ_H: f64 = 1.75;
-const TILT_CELLS: f64 = 0.5; // phase cells per noise row at birth: trailing ~31 deg, wound tighter by shear
+const TILT_ROWS: f64 = 2.0; // noise rows per phase cell along an eddy's long axis: trailing ~31 deg at birth,
+// wound tighter by shear (exact wrap: NP * 2 = 2 NR, a whole number of cells per octave)
 const MU_MIN: f64 = 0.0067; // grazing limit for 1/mu (ln 150 = 5.0)
 const LMU_SCALE: f64 = 51.0; // ln(1/mu) per byte level: 0..255 covers mu down to MU_MIN
 const PEAK_BOOST: f64 = 3.0; // how far turbulence can brighten gas in the visible: eps = 1.65 at 2.6 sigma, which is
@@ -264,6 +269,8 @@ fn expE3(x: f64) f64 {
 /// The computed disk on the theme's log-r table grid r_k = r_in (r_tab/r_in)^(k/(PT_N-1)):
 /// source temperature, ln of the vertical extinction depth (electron scattering + Kramers) and
 /// ln of the thermalisation depth tau_* = sqrt(tau_a (tau_a + tau_es)).
+pub const PT_CHECK_R = [5]f64{ 3.0, 5.0, 8.0, 10.0, 15.0 };
+
 pub const DiskProfile = struct {
     T: [PT_N]f32,
     lt_ext: [PT_N]f32,
@@ -274,7 +281,8 @@ pub const DiskProfile = struct {
     sigma_peak: f64, // g/cm^2
     h_over_r_peak: f64,
     mass_budget: f64, // mass lost / integrated ISCO inflow (1 = exact)
-    pt_ratio_spread: f64, // max/min of F / F_PageThorne well inside the reversal radius
+    pt_ratio_spread: f64, // max/min of F / F_PageThorne inside SNAP_RREV / 4
+    pt_ratio_at: [5]f64, // F / F_PageThorne (normalised at the ISCO) at PT_CHECK_R
 };
 
 /// Solves the disk. `pt` is the Page-Thorne flux on the same grid (shape only), used to set the
@@ -392,6 +400,10 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
     }
     const norm = ratio_sum / @max(ratio_n, 1.0);
     out.pt_ratio_spread = rmax / @max(rmin, 1e-300);
+    for (PT_CHECK_R, 0..) |rc, ci| {
+        const k: usize = @intFromFloat(@round(@log(rc / r_in) / dl));
+        out.pt_ratio_at[ci] = fgAt(&r, &fg, rc) / pt[k] / norm;
+    }
 
     // Physical units.
     const m_g = BH_MASS_SUN * MSUN_G;
@@ -454,11 +466,15 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
             continue;
         }
         const lk = local(a, rk, fphys, wref * @sqrt(rk / RING_R0), rg, tg);
-        const tst = @sqrt(lk.ta * (lk.ta + lk.tes));
+        // Through the whole slab (both halves): a crossing ray and the slab's emission see 2x
+        // the midplane-to-surface depths that set the midplane temperature above.
+        const tes_f = 2.0 * lk.tes;
+        const ta_f = 2.0 * lk.ta;
+        const tst = @sqrt(ta_f * (ta_f + tes_f));
         const emiss = 1.0 - 2.0 * expE3(tst); // grey isothermal slab: flux out = sigma T_s^4 (1 - 2 E3)
         const ts = @min(@sqrt(@sqrt(fphys / (SIGMA_SB * @max(emiss, 1e-300)))), T_MAX_SOURCE);
         out.T[k] = @floatCast(ts);
-        out.lt_ext[k] = @floatCast(@max(@log(lk.tes + lk.ta), -60.0));
+        out.lt_ext[k] = @floatCast(@max(@log(tes_f + ta_f), -60.0));
         out.lt_em[k] = @floatCast(@max(@log(tst), -60.0));
         if (rk < 30.0) out.t_peak = @max(out.t_peak, ts);
     }
@@ -949,12 +965,15 @@ pub const State = struct {
             self.lin8[k] = @floatCast(if (v <= 0.04045) v / 12.92 else math.pow(f64, (v + 0.055) / 1.055, 2.4));
         }
         // Turbulence planes, periodic in row and phase: octave j has cells of 2 x (0.25, 1.75) H
-        // / 2^j (value-noise cells are ~2 e-folding lengths), tilted by TILT_CELLS phase cells per
-        // row (exact wrap: NR * 0.5 = NP). Normalised per plane: two passes, moments then bytes.
+        // / 2^j (value-noise cells are ~2 e-folding lengths). The long axis is tilted by shearing
+        // the radial coordinate along the azimuth (TILT_ROWS rows per phase cell); the cell sizes
+        // are corrected by cos(tilt) so the eddy keeps its width across and length along its axis.
+        // Normalised per plane: two passes, moments then bytes.
         const dl_row = self.lnr_span / @as(f64, @floatFromInt(NR));
         const dphi_cell = 2.0 * math.pi / @as(f64, @floatFromInt(NP));
-        const cell_rows = 2.0 * EDDY_MIN_H * H_OVER_R / dl_row;
-        const cell_ph = 2.0 * EDDY_MAJ_H * H_OVER_R / dphi_cell;
+        const cos_tilt = @cos(math.atan(TILT_ROWS * dl_row / dphi_cell));
+        const cell_rows = 2.0 * EDDY_MIN_H * H_OVER_R / dl_row / cos_tilt;
+        const cell_ph = 2.0 * EDDY_MAJ_H * H_OVER_R / dphi_cell * cos_tilt;
         self.cell_r0 = @floatCast(2.0 * EDDY_MIN_H * H_OVER_R / (self.lnr_span / @as(f64, @floatFromInt(R_BINS))));
         self.cell_p0 = @floatCast(2.0 * EDDY_MAJ_H * H_OVER_R / (2.0 * math.pi) * 65536.0);
         self.inv_cr2 = 1.0 / (self.cell_r0 * self.cell_r0);
@@ -1004,8 +1023,9 @@ pub const State = struct {
 
     /// One octave of the tilted, anisotropic turbulence field at table row ri, phase cell pi.
     fn turbulence(ri: usize, pi: usize, oct: usize, gr: usize, gp: usize) f64 {
-        const fr = @as(f64, @floatFromInt(ri)) * @as(f64, @floatFromInt(gr)) / @as(f64, @floatFromInt(NR));
-        const fp = (@as(f64, @floatFromInt(pi)) + TILT_CELLS * @as(f64, @floatFromInt(ri))) * @as(f64, @floatFromInt(gp)) / @as(f64, @floatFromInt(NP));
+        // Constant along ri + TILT_ROWS pi: outer gas lies at smaller phase, a trailing tilt.
+        const fr = (@as(f64, @floatFromInt(ri)) + TILT_ROWS * @as(f64, @floatFromInt(pi))) * @as(f64, @floatFromInt(gr)) / @as(f64, @floatFromInt(NR));
+        const fp = @as(f64, @floatFromInt(pi)) * @as(f64, @floatFromInt(gp)) / @as(f64, @floatFromInt(NP));
         const ir: usize = @intFromFloat(@floor(fr));
         const ip: usize = @intFromFloat(@floor(fp));
         var ur = fr - @floor(fr);
@@ -1623,7 +1643,8 @@ pub const State = struct {
                 const k = if (gi == 0) self.band_ka[n] else self.band_kb[n];
                 const age = (if (gi == 0) u else u + 0.5 - @floor(u + 0.5)) * life;
                 for (0..N_OCT) |oct| {
-                    const seed = turbSeed(@intCast(oct), @intCast(n), k);
+                    // A and B are distinct generations (their counters coincide half the time).
+                    const seed = turbSeed(@intCast(oct), @intCast(n), 2 *% k +% @as(u32, @intCast(gi)));
                     self.gen[oct][n][gi] = .{
                         .w = @floatCast(if (gi == 0) @sin(math.pi * u) else @abs(@cos(math.pi * u))),
                         .age_q = @floatCast(age * (65536.0 / (2.0 * math.pi))),
@@ -2029,6 +2050,7 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
         }
     }.f;
     std.debug.print("\n  disk: T_peak {d:.0} K at r={d:.2}, tau_es {d:.0}, Sigma {e:.2}, H/r {d:.4}, mass budget {d:.4}, F/F_PT spread {d:.3}\n", .{ d.t_peak, d.r_peak, d.tau_es_peak, d.sigma_peak, d.h_over_r_peak, d.mass_budget, d.pt_ratio_spread });
+    for (PT_CHECK_R, d.pt_ratio_at) |rr, q| std.debug.print("  F/F_PT at r {d}: {d:.3}\n", .{ rr, q });
     for ([_]f64{ 3, 10, 20, 30, 40, 50, 60, 80 }) |rr| {
         const v = at(&d, r_in, dl, rr);
         std.debug.print("  r {d:>4}: T_s {d:>7.0} K  tau_ext {e:.3}  tau_* {e:.3}\n", .{ rr, v[0], v[1], v[2] });

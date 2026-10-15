@@ -31,10 +31,10 @@ constant float TURB_SIGMA = 0.2f; // rms of ln(dissipation): thermal thin disk, 
 constant float NOISE_STD = 40.0f;  // noise table byte levels per standard deviation
 constant float PEAK_BOOST = 3.0f;  // how far turbulence can brighten gas in the visible, as the theme
 constant uint NR = 2048;           // turbulence rows
-constant uint N_OCT = 3;           // turbulence octaves, amplitude 2^(-5j/6)
+constant uint N_OCT = 2;           // turbulence octaves, amplitude 2^(-5j/6)
 constant uint NBAND = 12;          // turbulence lifetime bands
-constant float OCT_AMP[N_OCT] = {1.0f, 0.5612310f, 0.3149803f};
-constant float OCT_NORM = 1.1892071f; // sqrt(sum of OCT_AMP^2)
+constant float OCT_AMP[N_OCT] = {1.0f, 0.5612310f};
+constant float OCT_NORM = 1.1467259f; // sqrt(sum of OCT_AMP^2)
 constant uint BB_N = 1024;
 constant float BB_TMIN = 300.0f;
 constant float BB_TMAX = 80000.0f;
@@ -565,7 +565,7 @@ static void addSample(thread Px& px, constant TraceParams& P, constant Static& s
     px.cnt[o] += 1;
     const float3 bh = behind(P, st, ttab, alpha, h1, h2, foot);
     px.behind[o] += bh;
-    px.stat[o] += smp.rgb * (P.exposure * (1.0f - exp(-tau))) + exp(-tau) * bh;
+    px.stat[o] += smp.rgb * (P.exposure * emitFrac(P, ttab, alpha, h0)) + exp(-tau) * bh;
 }
 
 kernel void bh_meter(constant TraceParams& P [[buffer(0)]],
@@ -826,7 +826,7 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     const float L = -((float(x) + 0.5f - 0.5f * float(P.width)) * P.mpp) * P.sin_i;
     const Orbit o = orbitAt(P.a, r);
     const float tobs = temperature(P, ttab, r) / (o.ut * (1.0f - o.om * L));
-    // MRI turbulence (k^(-11/3), 3 octaves), each octave filtered by the pixel's footprint on the
+    // MRI turbulence (k^(-11/3), 2 octaves), each octave filtered by the pixel's footprint on the
     // disk; octaves the footprint averages below 0.2% are skipped.
     const float frf = frBins(fr_q);
     const float fpf = float(fp_q) * 64.0f;
