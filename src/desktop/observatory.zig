@@ -20,8 +20,6 @@ pub const Observatory = struct {
     paused: bool = false,
     spin_mult: f64 = 1.0,
     phase_accum: f64 = 0.0,
-    /// Theme steps per drawn frame: 2 when the app halves its frame rate on battery, so motion keeps its speed.
-    steps_per_frame: u8 = 1,
     last_compute_us: f64 = 0.0,
 
     // Dynamically discovered macOS Desktop Spaces (never hardcoded!)
@@ -42,7 +40,6 @@ pub const Observatory = struct {
         self.paused = false;
         self.spin_mult = 1.0;
         self.phase_accum = 0.0;
-        self.steps_per_frame = 1;
         self.last_compute_us = 0.0;
         self.n_spaces = 1;
         self.active_space_idx = 0;
@@ -220,7 +217,7 @@ pub const Observatory = struct {
         const dst_buf = &self.space_native_pixels[space_idx];
         if (sp.theme_state != null and sp.theme_step_fn != null and sp.theme_draw_fn != null) {
             if (!self.paused) {
-                for (0..self.steps_per_frame) |_| sp.theme_step_fn.?(sp.theme_state, 0.008 * self.spin_mult);
+                sp.theme_step_fn.?(sp.theme_state, 0.008 * self.spin_mult);
             }
             sp.theme_draw_fn.?(sp.theme_state, dst_buf, NATIVE_PIXELS, NATIVE_W);
             return true;

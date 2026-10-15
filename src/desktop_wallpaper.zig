@@ -70,7 +70,6 @@ const MsgSendRetCStr = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?[*:0]c
 const MsgSendInitRect = *const fn (?*anyopaque, ?*anyopaque, CGRect) callconv(.c) ?*anyopaque;
 const MsgSendInitImage = *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, CGSize) callconv(.c) ?*anyopaque;
 const MsgSendRetF64 = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) f64;
-const MsgSendRetBool = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) bool;
 
 const MacBridge = struct {
     obs: *Observatory,
@@ -182,15 +181,6 @@ const MacBridge = struct {
     cf_true: ?*const anyopaque,
     screen_locked: bool = false,
     sel_occlusion_state: ?*anyopaque,
-    // Battery / Low Power Mode: half frame rate, two theme steps per frame (polled once a second).
-    IOPSCopyPowerSourcesInfo: *const fn () callconv(.c) ?*anyopaque,
-    IOPSGetProvidingPowerSourceType: *const fn (?*anyopaque) callconv(.c) ?*anyopaque,
-    CFEqual: *const fn (?*const anyopaque, ?*const anyopaque) callconv(.c) bool,
-    cf_battery_power: ?*anyopaque,
-    msgRetBool: MsgSendRetBool,
-    proc_info: ?*anyopaque,
-    sel_low_power: ?*anyopaque,
-    low_power: bool = false,
     /// frame_idx + 1 of each Space's last rendered frame (0 = never), for warm-rate neighbors.
     last_render_tick: [MAX_SPACES]usize = @splat(0),
     perf_log: bool = false,
@@ -596,17 +586,6 @@ const MacBridge = struct {
         defer self.CFRelease(dict);
         const v = self.CFDictionaryGetValue(dict, self.cf_key_screen_locked) orelse return false;
         return @intFromPtr(v) == @intFromPtr(self.cf_true);
-    }
-
-    /// True on battery power or in Low Power Mode.
-    pub fn isPowerConstrained(self: *MacBridge) bool {
-        if (self.proc_info) |pi| {
-            if (self.msgRetBool(pi, self.sel_low_power)) return true;
-        }
-        const info = self.IOPSCopyPowerSourcesInfo() orelse return false;
-        defer self.CFRelease(info);
-        const src = self.IOPSGetProvidingPowerSourceType(info) orelse return false;
-        return self.CFEqual(src, self.cf_battery_power);
     }
 
     /// True when any part of the Space's window is on screen (NSWindowOcclusionStateVisible).
@@ -1270,15 +1249,10 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
         if (b.popover_visible) b.flushPopoverLayer();
     }
 
-    // Once per second: is the lock screen up (display sleep is handled above), and are we on battery or
-    // in Low Power Mode? Power-constrained, every other tick is skipped (15 FPS) and themes take two
-    // steps per drawn frame, so motion keeps its speed.
+    // Once per second: is the lock screen up? (Display sleep is handled above.)
     if ((b.frame_idx % 30) == 0) {
         b.screen_locked = b.isScreenLocked();
-        b.low_power = b.isPowerConstrained();
-        b.obs.steps_per_frame = if (b.low_power) 2 else 1;
     }
-    const skip_tick = b.low_power and (b.frame_idx % 2) == 1;
 
     // Render only what can be seen. The active Space renders at 30 FPS while its window is on screen.
     // Its nearest animated left/right neighbors (scanning past passthrough / picture Spaces) stay warm
@@ -1289,10 +1263,8 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     const active_is_ours = active_idx < b.obs.n_spaces and
         b.obs.spaces[active_idx].space_id == b.obs.active_space_id;
     var rendered_any = false;
-    if (skip_tick) {
-        // Battery: this tick's frame is folded into the next one's second step.
-    } else if (!b.obs.paused and active_is_ours and !b.screen_locked) {
-        b.obs.phase_accum += (1.0 / 150.0) * b.obs.spin_mult * @as(f64, @floatFromInt(b.obs.steps_per_frame));
+    if (!b.obs.paused and active_is_ours and !b.screen_locked) {
+        b.obs.phase_accum += (1.0 / 150.0) * b.obs.spin_mult;
 
         if (isAnimatedSpaceMode(b.obs.spaces[active_idx].mode)) {
             const t0 = std.Io.Clock.awake.now(g_io);
@@ -1329,8 +1301,8 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     }
 
     if (b.perf_log and (b.frame_idx % 30) == 29) {
-        std.debug.print("[perf] t={d} active={d} ours={} locked={} low_power={} visible=0x{x:0>2} renders/s:", .{
-            b.frame_idx / 30, active_idx, active_is_ours, b.screen_locked, b.low_power, b.perf_visible,
+        std.debug.print("[perf] t={d} active={d} ours={} locked={} visible=0x{x:0>2} renders/s:", .{
+            b.frame_idx / 30, active_idx, active_is_ours, b.screen_locked, b.perf_visible,
         });
         for (0..b.obs.n_spaces) |idx| std.debug.print(" {d}", .{b.perf_renders[idx]});
         std.debug.print(" active_us={d:.0}\n", .{b.obs.last_compute_us});
@@ -1448,9 +1420,6 @@ pub fn main(init: std.process.Init) !void {
     const libcf = std.c.dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", .{ .LAZY = true }) orelse return error.CFLoadFailed;
     const libct = std.c.dlopen("/System/Library/Frameworks/CoreText.framework/CoreText", .{ .LAZY = true }) orelse return error.CTLoadFailed;
     const libimageio = std.c.dlopen("/System/Library/Frameworks/ImageIO.framework/ImageIO", .{ .LAZY = true }) orelse return error.ImageIOLoadFailed;
-    const libiokit = std.c.dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", .{ .LAZY = true }) orelse return error.IOKitLoadFailed;
-    const IOPSCopyPowerSourcesInfo: *const fn () callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libiokit, "IOPSCopyPowerSourcesInfo") orelse return error.SymbolMissing));
-    const IOPSGetProvidingPowerSourceType: *const fn (?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libiokit, "IOPSGetProvidingPowerSourceType") orelse return error.SymbolMissing));
     const libskylight = std.c.dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", .{ .LAZY = true }) orelse return error.SkyLightLoadFailed;
     _ = std.c.dlopen("/System/Library/Frameworks/AppKit.framework/AppKit", .{ .LAZY = true }) orelse return error.AppKitLoadFailed;
     _ = std.c.dlopen("/System/Library/Frameworks/QuartzCore.framework/QuartzCore", .{ .LAZY = true }) orelse return error.QuartzLoadFailed;
@@ -1515,7 +1484,6 @@ pub fn main(init: std.process.Init) !void {
     const kCTFontAttributeName_ptr: *const ?*const anyopaque = @ptrCast(@alignCast(std.c.dlsym(libct, "kCTFontAttributeName") orelse return error.SymbolMissing));
     const kCTForegroundColorFromContext_ptr: *const ?*const anyopaque = @ptrCast(@alignCast(std.c.dlsym(libct, "kCTForegroundColorFromContextAttributeName") orelse return error.SymbolMissing));
     const kCFBooleanTrue_ptr: *const ?*const anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcf, "kCFBooleanTrue") orelse return error.SymbolMissing));
-    const CFEqual: *const fn (?*const anyopaque, ?*const anyopaque) callconv(.c) bool = @ptrCast(@alignCast(std.c.dlsym(libcf, "CFEqual") orelse return error.SymbolMissing));
 
     const CGImageSourceCreateWithURL: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libimageio, "CGImageSourceCreateWithURL") orelse return error.SymbolMissing));
     const CGImageSourceCreateWithData: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libimageio, "CGImageSourceCreateWithData") orelse return error.SymbolMissing));
@@ -1795,13 +1763,6 @@ pub fn main(init: std.process.Init) !void {
         .cf_key_screen_locked = CFStringCreateWithCString(null, "CGSSessionScreenIsLocked", 0x08000100),
         .cf_true = kCFBooleanTrue_ptr.*,
         .sel_occlusion_state = sel_registerName("occlusionState"),
-        .IOPSCopyPowerSourcesInfo = IOPSCopyPowerSourcesInfo,
-        .IOPSGetProvidingPowerSourceType = IOPSGetProvidingPowerSourceType,
-        .CFEqual = CFEqual,
-        .cf_battery_power = CFStringCreateWithCString(null, "Battery Power", 0x08000100),
-        .msgRetBool = @ptrCast(msgSend_raw),
-        .proc_info = if (objc_getClass("NSProcessInfo")) |cls| msg0(cls, sel_registerName("processInfo")) else null,
-        .sel_low_power = sel_registerName("isLowPowerModeEnabled"),
         .perf_log = perf_log,
         .screen_rect = screen_rect,
         .pboard_filenames_type = pboard_filenames_type,
@@ -1995,23 +1956,6 @@ test "Reloading a shader into a dirty Space repaints instead of inheriting stale
 
     try std.testing.expect(obs.space_native_pixels[1][garbage_idx] != 0xFF00FF00);
     try std.testing.expectEqualSlices(u32, &obs.space_native_pixels[2], &obs.space_native_pixels[1]);
-}
-
-test "Two steps per frame advance an SDK theme exactly like two single-step frames" {
-    g_io = std.testing.io;
-    sc.g_io = std.testing.io;
-    const alloc = std.testing.allocator;
-    const obs = try Observatory.init(alloc);
-    defer obs.deinit(alloc);
-    obs.n_spaces = 2;
-    try std.testing.expect(obs.loadShaderIntoSpace(0, "themes/Echo.zig"));
-    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Echo.zig"));
-
-    // Space 0: two 30 FPS frames. Space 1: one battery frame with two steps.
-    for (0..2) |_| try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(0, 0.0));
-    obs.steps_per_frame = 2;
-    try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(1, 0.0));
-    try std.testing.expectEqualSlices(u32, &obs.space_native_pixels[0], &obs.space_native_pixels[1]);
 }
 
 test "Mission Control Space reordering moves themes with space_id and resets moved shader buffers" {
