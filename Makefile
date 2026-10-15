@@ -40,7 +40,7 @@ stop:
 clean:
 	rm -rf argus-desktop kronos-tui Argus.app/Contents/MacOS .zig-cache zig-out *.o
 
-# GPU prototype: Opus_Black_Hole's draw() as a Metal compute kernel, timed and diffed against the CPU.
+# GPU prototype: Opus_Quasar's draw() as a Metal compute kernel, timed and diffed against the CPU.
 GPU_FRAMES ?= 240
 metalfx-demo:
 	$(ZIG) run $(ZFLAGS) src/metalfx_demo.zig -- $(THEME) --out-dir $(dir $(OUT))
@@ -53,4 +53,4 @@ gpu-probes:
 	tools/gpu_probes/run.sh
 
 gpu-bench:
-	$(ZIG) run -O ReleaseFast -target aarch64-macos -lc --dep theme -Mroot=src/gpu_bench.zig -O ReleaseFast -Mtheme=themes/Opus_Black_Hole.zig -- --frames $(GPU_FRAMES)
+	$(ZIG) run -O ReleaseFast -target aarch64-macos -lc --dep theme -Mroot=src/gpu_bench.zig -O ReleaseFast -Mtheme=themes/Opus_Quasar.zig -- --frames $(GPU_FRAMES)

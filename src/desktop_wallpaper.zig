@@ -926,7 +926,7 @@ const MacBridge = struct {
 
     // ---- Settings face --------------------------------------------------------------------
 
-    /// "Opus_Black_Hole.zig" -> "Opus Black Hole", shortened with an ellipsis to fit `max` bytes.
+    /// "Opus_Coral_Reef.zig" -> "Opus Coral Reef", shortened with an ellipsis to fit `max` bytes.
     fn displayName(file: []const u8, out: []u8) []const u8 {
         const ext = std.Io.Dir.path.extension(file);
         const stem = file[0 .. file.len - ext.len];
@@ -1267,7 +1267,9 @@ const MacBridge = struct {
                     }
                 },
                 .custom_shader => {
-                    if (path_str.len > 0 and self.loadCodeFileIntoSpaceInternal(idx, path_str, false)) {
+                    var renamed_buf: [512]u8 = undefined;
+                    const theme_path = sc.renamedThemePath(path_str, &renamed_buf);
+                    if (theme_path.len > 0 and self.loadCodeFileIntoSpaceInternal(idx, theme_path, false)) {
                         loaded_any = true;
                     } else {
                         sp.mode = .passthrough;

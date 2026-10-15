@@ -166,8 +166,35 @@ pub var gpu_ports = true;
 /// Set by the app: compiles a `.metal` theme source and reports whether it is loadable, so a
 /// broken edit never replaces a working theme. Null (tests, harness) accepts any source.
 pub var metal_validate: ?*const fn (src: []const u8, label: []const u8) bool = null;
-const GPU_PORT_THEME = "Opus_Black_Hole.zig";
+const GPU_PORT_THEME = "Opus_Quasar.zig";
 const GPU_PORT_ROOT = "-Mroot=src/gpu/bh_export.zig";
+
+/// Themes that were renamed: a saved Space that names the old file loads the new one from the
+/// same folder (and is saved under the new name).
+const RENAMED_THEMES = [_][2][]const u8{
+    .{ "Opus_Black_Hole.zig", "Opus_Quasar.zig" }, // it is a quasar: a luminous thin disk
+};
+
+/// `path` with a renamed theme's old file name replaced by its new one; otherwise `path`.
+pub fn renamedThemePath(path: []const u8, buf: []u8) []const u8 {
+    const base = std.Io.Dir.path.basename(path);
+    for (RENAMED_THEMES) |r| {
+        if (!std.mem.eql(u8, base, r[0])) continue;
+        const dir = path[0 .. path.len - base.len];
+        if (dir.len + r[1].len > buf.len) return path;
+        @memcpy(buf[0..dir.len], dir);
+        @memcpy(buf[dir.len..][0..r[1].len], r[1]);
+        return buf[0 .. dir.len + r[1].len];
+    }
+    return path;
+}
+
+test "renamed themes: a saved Opus_Black_Hole Space loads Opus_Quasar from the same folder" {
+    var buf: [512]u8 = undefined;
+    try std.testing.expectEqualStrings("/a/b/themes/Opus_Quasar.zig", renamedThemePath("/a/b/themes/Opus_Black_Hole.zig", &buf));
+    try std.testing.expectEqualStrings("themes/Opus_Quasar.zig", renamedThemePath("themes/Opus_Black_Hole.zig", &buf));
+    try std.testing.expectEqualStrings("themes/Echo.zig", renamedThemePath("themes/Echo.zig", &buf));
+}
 
 pub const SpaceConfig = struct {
     space_id: u64 = 0,
