@@ -32,11 +32,17 @@
 //    slab (energy-conserving source temperature; emission depth sqrt(tau_a tau_ext) where
 //    scattering is thick, tau_a (1 + tau_es) where thin) and dims the light behind by the
 //    extinction depth.
-//  * Color: each point radiates as a blackbody at T(r) ~ F^(1/4). The observed
-//    spectrum is exactly a blackbody at g*T, with g the full Kerr redshift
-//    (gravitational + Doppler), so color AND brightness come from Planck's law
-//    integrated against CIE 1931 color matching functions. Beaming is not
-//    switched off: the approaching side is much brighter, as it would be.
+//  * Color: each point radiates the spectrum of a disk atmosphere: a colour-corrected
+//    blackbody f^-4 B(f T_s), whose electron scattering hardens it to a bluer colour at the
+//    same flux (Done, Davis, Jin, Blaes & Ward 2012: f = 1 below 3e4 K, 1.19 at the 37,000 K
+//    peak). The observed spectrum is that at g f T_s, with g the full Kerr redshift
+//    (gravitational + Doppler), so color AND brightness come from Planck's law integrated
+//    against CIE 1931 color matching functions. Beaming is not switched off: the approaching
+//    side is much brighter, as it would be.
+//  * Limb darkening: the optically thick disk is an electron-scattering atmosphere, darker
+//    seen edge-on, I(mu) ~ 1 + 2.06 mu (Chandrasekhar's H-function, linear fit, as Laor 1991;
+//    full disk-atmosphere calculations find a slope nearer 2.6 and up to ~15% deviations),
+//    flux-conserving, with mu in the gas's own frame; it fades out where the gas thins.
 //  * Light travel time: each pixel's pattern phase includes the photon's
 //    coordinate travel time, so lensed images lag the direct one.
 //  * Grazing light: where gas is translucent, light crosses tau / mu of it, with mu =
@@ -52,8 +58,8 @@
 //    extrapolation beyond ~35 M: there the gas is below ~5000 K and neutral, so electron
 //    scattering and Kramers (which need free electrons) do not apply, and the true opacity
 //    (H-, molecules, dust) is not modelled. Sigma falls an e-fold per ~5 M out there, so the
-//    fade is robust but its exact radius and its colour are not computed physics. Colour
-//    correction of the scattering-dominated inner disk is not modelled either.
+//    fade is robust but its exact radius and its colour are not computed physics. The colour
+//    correction and limb darkening are fits to disk-atmosphere models, not computed here.
 //  * Time-lapse: one ISCO orbit takes ~2.4 s on screen, one at r = 6 M ~10 s (in
 //    reality ~7 and ~28 days for this 5e9 solar-mass hole).
 //  * Turbulence: procedural noise carrying the measured statistics of magnetorotational
@@ -145,6 +151,7 @@ const TILT_ROWS: f64 = -2.0; // noise rows per phase cell along a birth eddy's l
 const MU_MIN: f64 = 0.0067; // grazing limit for 1/mu (ln 150 = 5.0)
 const LMU_SCALE: f64 = 51.0; // ln(1/mu) per byte level: 0..255 covers mu down to MU_MIN
 const RESP_SCALE: f32 = 32.0; // Rec.resp units per unit d ln Y / d ln eps
+const LIMB_B: f64 = 2.06; // electron-scattering limb darkening I(mu) ~ 1 + LIMB_B mu
 const EXP_N: usize = 1024; // exp table over [-4, 4] for the CPU draw
 const EXPO_TARGET: f64 = 7.0; // 99th-percentile disk luminance maps here before tone mapping
 const STAR_GAIN: f64 = 0.8;
@@ -892,7 +899,7 @@ pub const State = struct {
     lin8: [256]f32, // sRGB byte -> linear
     // The computed disk on the log-r grid: [0] source temperature (K), [1] ln vertical extinction
     // depth, [2] ln vertical thermalisation depth. One block, so the GPU uploads it as is.
-    dtab: [3][PT_N]f32,
+    dtab: [4][PT_N]f32, // colour temperature f T_s, ln tau_ext, ln tau_em, ln f^-4 (spectral dilution)
     bb: [BB_N][3]f32,
     srgb: [4096]u8,
     noise: [N_OCT][NR][NP]u8, // turbulence, one plane per octave (each lives on its own clock)
@@ -967,7 +974,16 @@ pub const State = struct {
         pageThorne(self.geo.a, self.geo.r_in, R_OUT * 1.05, &flux);
         var disk: DiskProfile = undefined;
         diskProfile(self.geo.a, self.geo.r_in, R_OUT * 1.05, &flux, &disk);
-        self.dtab = .{ disk.T, disk.lt_ext, disk.lt_em };
+        // Colour correction (Done et al. 2012): the scattering atmosphere hardens the spectrum to
+        // f^-4 B(f T_s), the same bolometric flux at a bluer colour.
+        var tcol: [PT_N]f32 = undefined;
+        var ldil: [PT_N]f32 = undefined;
+        for (0..PT_N) |k| {
+            const fc = colourFactor(disk.T[k]);
+            tcol[k] = @floatCast(fc * disk.T[k]);
+            ldil[k] = @floatCast(-4.0 * @log(fc));
+        }
+        self.dtab = .{ tcol, disk.lt_ext, disk.lt_em, ldil };
         self.t_peak = disk.t_peak;
         // Blackbody colors, normalised so the hottest disk blackbody has luminance 1.
         const y0 = luma(blackbodyRGB(self.t_peak));
@@ -1174,6 +1190,13 @@ pub const State = struct {
         return -std.math.expm1(-self.tauEm(hit.r) * @exp(self.lnInvMu(x, hit)));
     }
 
+    /// What the gas sends along the line of sight per unit of the colour blackbody B(f T_s):
+    /// emitted fraction x limb darkening x spectral dilution f^-4.
+    fn emitWeight(self: *const State, x: f64, hit: Hit) f64 {
+        const lmu = self.lnInvMu(x, hit);
+        return self.emitFrac(x, hit) * limbFactor(lmu, self.tauExt(hit.r)) * @exp(self.lnTable(&self.dtab[3], hit.r));
+    }
+
     /// Display-linear light reaching the camera from behind translucent gas, in sky units
     /// (packBg multiplies by STAR_GAIN), composited front to back over the layers behind.
     /// Gas seen there is drawn static, at its own opacity.
@@ -1191,7 +1214,7 @@ pub const State = struct {
                 .disk => {
                     const tau = self.slantTau(x, b);
                     const s = self.shadeDisk(x, b.r, b.ph, b.t);
-                    const k = @as(f64, self.exposure) * self.emitFrac(x, b);
+                    const k = @as(f64, self.exposure) * self.emitWeight(x, b);
                     const c = [3]f64{ s.rgb[0] * k, s.rgb[1] * k, s.rgb[2] * k };
                     const tm = 1.0 / (1.0 + luma(c));
                     for (0..3) |i| acc[i] += tr * @min(c[i] * tm, 1.0) / STAR_GAIN;
@@ -1222,7 +1245,8 @@ pub const State = struct {
                 const y = (@as(f64, @floatFromInt(iy)) + 0.5) * @as(f64, @floatFromInt(self.h)) / @as(f64, @floatFromInt(gy));
                 const hit = self.trace(x, y);
                 if (hit.kind != .disk or hit.r > EXPO_R) continue;
-                const yl = luma(self.shadeDisk(x, hit.r, hit.ph, hit.t).rgb);
+                // Metered as seen: with limb darkening and the colour correction's dilution.
+                const yl = luma(self.shadeDisk(x, hit.r, hit.ph, hit.t).rgb) * self.emitWeight(x, hit);
                 if (!(yl > 0.0)) continue;
                 const bin: usize = @intFromFloat(math.clamp((@log2(yl) + 32.0) * 8.0, 0.0, 511.0));
                 hist[bin] += 1;
@@ -1558,7 +1582,7 @@ pub const State = struct {
                             if (hit.kind == .disk and hit.r > SPOT_RMAX) {
                                 const tau = self.slantTau(fx, hit);
                                 const sd = self.shadeDisk(fx, hit.r, hit.ph, hit.t);
-                                const dim = luma(sd.rgb) * self.emitFrac(fx, hit) * self.exposure * self.peakBoost(sd.tobs) < EMIT_FLOOR;
+                                const dim = luma(sd.rgb) * self.emitWeight(fx, hit) * self.exposure * self.peakBoost(sd.tobs) < EMIT_FLOOR;
                                 if (tau < TAU_MIN or dim) {
                                     // Gas too thin or too cool to show even when turbulence stirs it:
                                     // baked into the background at its mean opacity, not redrawn per frame.
@@ -1598,7 +1622,9 @@ pub const State = struct {
                         var emit: f64 = 1.0;
                         if (nd > 0) {
                             const rb = first.rbin / R_FRAC;
-                            emit = self.oneMinusExpExp(self.lnem_tab[rb] + lmu_f);
+                            const r_first = @exp(self.lnr_in + self.lnr_span * (@as(f64, @floatFromInt(first.rbin)) / R_FRAC) / R_BINS);
+                            emit = self.oneMinusExpExp(self.lnem_tab[rb] + lmu_f) *
+                                limbFactor(lmu_f, @exp(@as(f64, self.lntau_tab[rb]))) * @exp(self.lnTable(&self.dtab[3], r_first));
                             const lt_los = self.lntau_tab[rb] + lmu_f;
                             if (lt_los < @as(f32, @floatCast(@log(TAU_BEHIND)))) {
                                 const lb = luma(disk_behind);
@@ -2064,6 +2090,25 @@ pub fn turbSeed(j: u32, n: u32, k: u32) u32 {
     return x;
 }
 
+/// Colour-correction factor of an accretion-disk atmosphere at effective temperature T (Done,
+/// Davis, Jin, Blaes & Ward 2012, MNRAS 420, 1848): 1 below 3e4 K (hydrogen neutral, absorption
+/// thermalises), (T / 3e4 K)^0.83 to 1e5 K, (72 keV / kT)^(1/9) above (electron scattering).
+pub fn colourFactor(T: f64) f64 {
+    if (!(T > 3.0e4)) return 1.0;
+    if (T < 1.0e5) return math.pow(f64, T / 3.0e4, 0.83);
+    return math.pow(f64, 72.0 / (T * 8.617333e-8), 1.0 / 9.0);
+}
+
+/// Limb darkening of the gas at ln(1/mu) = lmu, weighted by how thick (scattering-dominated) the
+/// atmosphere is: a semi-infinite electron-scattering atmosphere gives I(mu) ~ 1 + 2.06 mu
+/// (Chandrasekhar's H-function, linear fit; Laor 1991), normalised to the same flux as an
+/// isotropic emitter; translucent gas emits as a thin slab instead (its 1/mu limb brightening
+/// is in 1 - e^(-tau_*/mu)).
+pub fn limbFactor(lmu: f64, tau_ext: f64) f64 {
+    const ld = (1.0 + LIMB_B * @exp(-lmu)) / (2.0 * (0.5 + LIMB_B / 3.0));
+    return 1.0 + (ld - 1.0) * -std.math.expm1(-tau_ext);
+}
+
 fn wrapPi(x: f64) f64 {
     return x - 2.0 * math.pi * @round(x / (2.0 * math.pi));
 }
@@ -2234,4 +2279,23 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
     try testing.expect(d.t_peak > 30_000.0 and d.t_peak < 45_000.0);
     try testing.expect(at(&d, r_in, dl, 20.0)[1] > 10.0); // opaque at 20 M
     try testing.expect(at(&d, r_in, dl, 80.0)[1] < 1e-2); // gone by 80 M
+}
+
+test "colour correction and limb darkening: continuity, flux conservation, thin limit" {
+    // Done et al. 2012: f = 1 below 3e4 K and continuous at 1e5 K (the 0.83 exponent joins the
+    // Compton branch to 0.3%).
+    try testing.expectEqual(@as(f64, 1.0), colourFactor(2.9e4));
+    try testing.expectApproxEqRel(colourFactor(0.9999e5), colourFactor(1.0001e5), 5e-3);
+    try testing.expect(colourFactor(3.7e4) > 1.15 and colourFactor(3.7e4) < 1.2);
+    // Limb darkening on a thick atmosphere conserves the flux of an isotropic emitter:
+    // 2 int_0^1 I(mu) mu dmu = 1; and it switches off where the gas is thin.
+    var flux: f64 = 0.0;
+    const n = 20000;
+    for (0..n) |i| {
+        const mu = (@as(f64, @floatFromInt(i)) + 0.5) / n;
+        flux += 2.0 * limbFactor(-@log(mu), 1e6) * mu / n;
+    }
+    try testing.expectApproxEqAbs(1.0, flux, 1e-6);
+    try testing.expectApproxEqAbs(1.0, limbFactor(-@log(0.1), 1e-6), 1e-5);
+    try testing.expect(limbFactor(-@log(0.2), 1e6) < 0.6); // grazing view of the thick disk: dimmer
 }
