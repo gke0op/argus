@@ -41,6 +41,8 @@ pub const Frame = extern struct {
     tau_behind: f32,
     width: u32,
     height: u32,
+    spot_age: [NSPOT]f32,
+    spot_om: [NSPOT]f32,
 };
 
 pub const Static = extern struct {
@@ -119,6 +121,8 @@ pub fn fillFrame(st: anytype, out: *Frame) void {
     out.tau_behind = TAU_BEHIND;
     out.width = @intCast(st.w);
     out.height = @intCast(st.h);
+    out.spot_age = st.spot_age;
+    out.spot_om = st.spot_om;
 }
 
 /// Geometry for a `w` x `h` trace. Exposure and the tile row are filled in by the caller.

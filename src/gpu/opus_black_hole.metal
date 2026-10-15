@@ -62,7 +62,7 @@ constant uint KIND_HOLE = 2;
 // One traced pixel in 6 bytes (the theme's Rec, minus what bh_shade can recompute):
 //   rbin  radial bin in 1/R_FRAC bins (the radius, so the temperature and redshift follow)
 //   phi   emission azimuth + Omega * travel time, Q16 of 2 pi
-//   meta  disk samples (0-4) | radial footprint (r-bins, 6 bits) << 3 | azimuthal (64/65536 turn, 7 bits) << 9
+//   meta  coverage (0-15, /15) | radial footprint (r-bins, 5 bits) << 4 | azimuthal (64/65536 turn, 7 bits) << 9
 // The light-travel phase (the theme's tq) is only needed for the footprint pass; it lives
 // in a temporary buffer freed once the trace is done.
 struct Rec {
@@ -71,8 +71,10 @@ struct Rec {
     ushort meta;
 };
 static_assert(sizeof(Rec) == 6, "Rec must stay 6 bytes");
-constant uint FR_MAX = 63;  // footprints this wide already filter texture to nothing
+constant uint COV_MAX = 15;
+constant uint FR_MAX = 31;  // saturated: texture is filtered to ~6% and hot spots are unresolved
 constant uint FP_MAX = 127; // saturated: the pixel spans too much azimuth to resolve a hot spot
+constant uint REFINE = 8;   // photon-ring pixels: REFINE x REFINE samples instead of 2 x 2
 
 // Per-frame tables written by the theme's step().
 struct Frame {
@@ -90,6 +92,8 @@ struct Frame {
     float tau_behind;
     uint width;
     uint height;
+    float spot_age[NSPOT]; // M since birth: the shear
+    float spot_om[NSPOT];  // Omega at the birth radius
 };
 
 // Static tables built once by the theme's init().
@@ -471,6 +475,52 @@ static float2 alphaBeta(constant TraceParams& P, float fx, float fy) {
     return float2(alpha, (0.5f * float(P.height) - fy) * P.mpp);
 }
 
+// One pixel's light, sorted by image order (disk crossings of the front hit: 1, 2, 3+).
+struct Px {
+    float3 bg;        // sky and baked gas
+    uint cnt[3];      // animated-eligible disk samples per order
+    Sample first[3];  // the first of each order: its record, if that order stays animated
+    float3 behind[3]; // light behind those samples
+    float3 stat[3];   // their mean emission plus what shows through: used if they stay static
+};
+
+static Px pxNew() {
+    Px px;
+    px.bg = float3(0.0f);
+    for (uint o = 0; o < 3; o++) {
+        px.cnt[o] = 0;
+        px.first[o] = Sample{0.0f, 0, float3(0.0f), 0, 0};
+        px.behind[o] = float3(0.0f);
+        px.stat[o] = float3(0.0f);
+    }
+    return px;
+}
+
+static void addSample(thread Px& px, constant TraceParams& P, constant Static& st, device const float* ttab,
+                      float alpha, Hit h0, Hit h1, Hit h2, float3 foot) {
+    if (h0.kind == KIND_SKY) {
+        px.bg += sky(P, st, h0.dir, foot.x);
+        return;
+    }
+    if (h0.kind != KIND_DISK) return;
+    const float tau = opticalDepth(h0.r);
+    const Sample smp = shadeDisk(P, st, ttab, alpha, h0.r, h0.ph, h0.t);
+    if (h0.r > SPOT_RMAX) {
+        const bool dim = luma(smp.rgb) * P.exposure * 2.0f < EMIT_FLOOR;
+        if (tau * exp(TAU_NOISE) < TAU_MIN || dim) {
+            // Too thin or too cool to show even when stirred: baked at its mean opacity.
+            if (tau < TAU_BEHIND) px.bg += exp(-tau) * behind(P, st, ttab, alpha, h1, h2, foot);
+            return;
+        }
+    }
+    const uint o = min(h0.n, 3u) - 1;
+    if (px.cnt[o] == 0) px.first[o] = smp;
+    px.cnt[o] += 1;
+    const float3 bh = behind(P, st, ttab, alpha, h1, h2, foot);
+    px.behind[o] += bh;
+    px.stat[o] += smp.rgb * (P.exposure * (1.0f - exp(-tau))) + exp(-tau) * bh;
+}
+
 kernel void bh_meter(constant TraceParams& P [[buffer(0)]],
                      constant Static& st [[buffer(1)]],
                      device const float* ttab [[buffer(2)]],
@@ -537,39 +587,54 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
         if (got) foot[l] = max(m * 2.0f, 0.25f * P.pix_ang);
     }
 
-    float3 bg_rgb = float3(0.0f);
-    float3 disk_behind = float3(0.0f); // light behind the disk samples, used only if translucent
-    uint nd = 0;
-    Sample first = Sample{0.0f, 0, float3(0.0f), 0, 0};
+    // A pixel whose samples disagree (an edge) or see light that crossed the disk plane more
+    // than once (the photon rings) is traced again with REFINE x REFINE samples: the n = 2
+    // ring is a fraction of a pixel wide, and 4 samples would alias it.
+    bool refine = false;
+    for (uint s = 1; s < 4; s++) {
+        if (hits[s][0].kind != hits[0][0].kind || hits[s][0].n != hits[0][0].n) refine = true;
+    }
     for (uint s = 0; s < 4; s++) {
-        const Hit hit = hits[s][0];
-        const float alpha = alphas[s];
-        if (hit.kind == KIND_DISK) {
-            const float tau = opticalDepth(hit.r);
-            const Sample smp = shadeDisk(P, st, ttab, alpha, hit.r, hit.ph, hit.t);
-            if (hit.r > SPOT_RMAX) {
-                const bool dim = luma(smp.rgb) * P.exposure * 2.0f < EMIT_FLOOR;
-                if (tau * exp(TAU_NOISE) < TAU_MIN || dim) {
-                    // Too thin or too cool to show even when stirred: baked at its mean opacity.
-                    if (tau < TAU_BEHIND) bg_rgb += exp(-tau) * behind(P, st, ttab, alpha, hits[s][1], hits[s][2], foot);
-                    continue;
-                }
+        if (hits[s][0].kind == KIND_DISK && hits[s][0].n >= 2) refine = true;
+    }
+
+    Px px = pxNew();
+    uint N = 4;
+    if (!refine) {
+        for (uint s = 0; s < 4; s++) addSample(px, P, st, ttab, alphas[s], hits[s][0], hits[s][1], hits[s][2], foot);
+    } else {
+        N = REFINE * REFINE;
+        for (uint i = 0; i < N; i++) {
+            const float fx = float(x) + (float(i % REFINE) + 0.5f) / float(REFINE);
+            const float fy = float(y) + (float(i / REFINE) + 0.5f) / float(REFINE);
+            const float2 ab = alphaBeta(P, fx, fy);
+            Ray ray = startRay(P, ab.x, ab.y);
+            Hit h[3] = {traceNext(P, ray, true), hitNone(), hitNone()};
+            for (uint l = 1; l < 3; l++) {
+                if (h[l - 1].kind != KIND_DISK || opticalDepth(h[l - 1].r) >= 2.0f * TAU_BEHIND) break;
+                h[l] = traceNext(P, ray, true);
             }
-            if (nd == 0) first = smp;
-            nd += 1;
-            disk_behind += behind(P, st, ttab, alpha, hits[s][1], hits[s][2], foot);
-        } else if (hit.kind == KIND_SKY) {
-            bg_rgb += sky(P, st, hit.dir, foot.x);
+            addSample(px, P, st, ttab, ab.x, h[0], h[1], h[2], foot);
         }
     }
 
+    // The lowest-order disk image stays animated; higher orders go into bg as static light.
+    int p = -1;
+    for (int o = 2; o >= 0; o--) if (px.cnt[o] > 0) p = o;
+    float3 bg_rgb = px.bg;
+    uint covq = 0;
+    if (p >= 0) {
+        covq = min((px.cnt[p] * COV_MAX + N / 2) / N, COV_MAX);
+        if (covq == 0) p = -1; // under 1/30 of the pixel: static like the rest
+    }
+    for (int o = 0; o < 3; o++) if (o != p) bg_rgb += px.stat[o];
     // bh_shade composites translucent pixels as cov*c + (1 - cov*emit)*bg and opaque ones as
-    // cov*c + bg: the light behind the disk samples belongs in bg only in the first case.
-    if (nd > 0 && st.tau_tab[first.rbin / R_FRAC] < TAU_BEHIND) bg_rgb += disk_behind;
+    // cov*c + bg: the light behind the animated samples belongs in bg only in the first case.
+    if (p >= 0 && st.tau_tab[px.first[p].rbin / R_FRAC] < TAU_BEHIND) bg_rgb += px.behind[p];
     const uint idx = y * P.width + x;
-    bg[idx] = packRGB9E5(bg_rgb * 0.25f);
-    recs[idx] = nd > 0 ? Rec{ushort(first.rbin), ushort(first.phi), ushort(nd)} : Rec{0, 0, 0};
-    tq[idx] = nd > 0 ? ushort(first.tq) : ushort(0);
+    bg[idx] = packRGB9E5(bg_rgb / float(N));
+    recs[idx] = p >= 0 ? Rec{ushort(px.first[p].rbin), ushort(px.first[p].phi), ushort(covq)} : Rec{0, 0, 0};
+    tq[idx] = p >= 0 ? ushort(px.first[p].tq) : ushort(0);
 }
 
 // Each disk pixel's footprint on the disk, from its neighbours (the theme's second pass).
@@ -582,7 +647,7 @@ kernel void bh_footprint(constant TraceParams& P [[buffer(0)]],
     if (gid.x >= P.width || gid.y >= P.height) return;
     const uint i = gid.y * P.width + gid.x;
     const Rec ri = recs[i];
-    const uint cov = ri.meta & 7u;
+    const uint cov = ri.meta & COV_MAX;
     if (cov == 0) return;
     const ushort tq_i = tq[i];
     uint fr = 0;
@@ -593,7 +658,7 @@ kernel void bh_footprint(constant TraceParams& P [[buffer(0)]],
         if (q.x < 0 || q.y < 0 || q.x >= int(P.width) || q.y >= int(P.height)) continue;
         const uint j = uint(q.y) * P.width + uint(q.x);
         const Rec rj = recs[j];
-        if ((rj.meta & 7u) == 0) continue;
+        if ((rj.meta & COV_MAX) == 0) continue;
         const ushort tq_j = tq[j];
         const uint dr = (uint(abs(int(rj.rbin) - int(ri.rbin))) + R_FRAC - 1) / R_FRAC;
         const ushort hit_i = ushort(ri.phi + ushort(tq_i << 6));
@@ -603,7 +668,7 @@ kernel void bh_footprint(constant TraceParams& P [[buffer(0)]],
         fr = max(fr, dr);
         fp = max(fp, uint(abs(d_hit - d_tq * 64)));
     }
-    recs[i].meta = ushort(cov | (min(fr, FR_MAX) << 3) | (min((fp + 63) / 64, FP_MAX) << 9));
+    recs[i].meta = ushort(cov | (min(fr, FR_MAX) << 4) | (min((fp + 63) / 64, FP_MAX) << 9));
 }
 
 // ---------------------------------------------------------------- per-frame shading
@@ -615,9 +680,9 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     const uint i = y * P.width + x;
     const float3 bgv = unpackRGB9E5(bg[i]);
     const Rec rc = recs[i];
-    const uint ns = rc.meta & 7u;
+    const uint ns = rc.meta & COV_MAX;
     if (ns == 0) return bgv;
-    const uint fr_q = (rc.meta >> 3) & FR_MAX;
+    const uint fr_q = (rc.meta >> 4) & FR_MAX;
     const uint fp_q = (rc.meta >> 9) & FP_MAX;
 
     const float amp = TURB * fr.gnorm / 128.0f;
@@ -660,11 +725,20 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
         float boost = 0.0f;
         for (uint j = 0; j < NSPOT; j++) {
             if ((sm & (1u << j)) == 0) continue;
+            // A sheared spot's azimuth shifts with radius: across the pixel's radial footprint it
+            // moves by |dOmega/dr| * age * dr. Widen the azimuthal kernel by that too, or a thin
+            // sheared arc aliases into dots.
+            const float r15 = r * sqrt(r) + P.a;
+            const float dom_dbin = 1.5f * sqrt(r) / (r15 * r15) * r * (P.lnr_span / float(R_BINS));
+            const float smear = dom_dbin * fr.spot_age[j] * (65536.0f / TWO_PI) * (frf + 0.5f);
             const float wr2 = fr.spot_wr[j] * fr.spot_wr[j] + frf * frf;
-            const float wp2 = fr.spot_wp[j] * fr.spot_wp[j] + fpf * fpf;
+            const float wp2 = fr.spot_wp[j] * fr.spot_wp[j] + fpf * fpf + smear * smear;
             const float dr = rbf - fr.spot_rb[j];
-            const float dp = float(as_type<short>(ushort(rc.phi - fr.spot_q[j])));
-            if (fp_q == FP_MAX || fpf > 2.0f * fr.spot_wp[j] || frf > 2.0f * fr.spot_wr[j]) continue;
+            // Sheared: at this radius the clump has moved (Omega(r) - Omega_spot) * age further.
+            const float shear = (o.om - fr.spot_om[j]) * fr.spot_age[j] * (65536.0f / TWO_PI);
+            const float dp0 = float(as_type<short>(ushort(rc.phi - fr.spot_q[j]))) - shear;
+            const float dp = dp0 - 65536.0f * round(dp0 / 65536.0f);
+            if (fp_q == FP_MAX || fr_q == FR_MAX || fpf > 2.0f * fr.spot_wp[j] || frf > 2.0f * fr.spot_wr[j]) continue;
             const float q = dr * dr / wr2 + dp * dp / wp2;
             if (q < 1.0f) boost += fr.spot_amp[j] * (1.0f - q) * (1.0f - q) * fr.spot_wr[j] * fr.spot_wp[j] / sqrt(wr2 * wp2);
         }
@@ -677,7 +751,7 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     }
 
     const float3 c = spot_scale > 0.0f ? spot_rgb * spot_scale * k : rgb * k;
-    const float cov = float(ns) * 0.25f;
+    const float cov = float(ns) / float(COV_MAX);
     // bg holds the sky beside the disk samples and, under translucent gas, what lies behind it.
     return thin ? cov * c + (1.0f - cov * emit) * bgv : cov * c + bgv;
 }

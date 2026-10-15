@@ -35,7 +35,9 @@
 //  * Turbulence: emissivity fluctuations advected at the true Keplerian rate
 //    and refreshed every few inner orbits; the amplitude is a modelling choice.
 //  * Hot spots: plasma clumps on exact Kerr orbits (like Sgr A* flares). Each one
-//    shows up in every lensed image at once, with its own light-travel lag.
+//    shows up in every lensed image at once, with its own light-travel lag, and
+//    shears as it ages: every radius of the clump keeps its own Omega(r), so after
+//    an age a the part at r has moved Omega(r) a, and the clump draws out into an arc.
 //    Their count, size and brightness are choices; their motion is not.
 //  * Sky: a procedural Milky Way (band, dust lanes, bulge) and stars placed
 //    behind the hole and seen through the geodesics, so it bends into arcs and
@@ -515,10 +517,13 @@ pub const State = struct {
     spot_wp: [NSPOT]f32, // azimuthal half-width, Q16 units
     spot_q: [NSPOT]u16,
     spot_amp: [NSPOT]f32,
+    spot_age: [NSPOT]f32, // M since the spot was born (its shear)
+    spot_om: [NSPOT]f32, // Omega at the spot's birth radius
     spot_mask: [R_BINS]u8,
     gshift: [2][R_BINS]u16,
     grow: [2][R_BINS]u16,
     om_tab: [R_BINS]f64,
+    shear_tab: [R_BINS]f32, // |dOmega/d rbin| in Q16 per M: how fast a sheared spot's azimuth runs with radius
     tau_tab: [R_BINS]f32,
     lntau_tab: [R_BINS]f32,
     emit_tab: [EMIT_N + 1]f32,
@@ -611,6 +616,8 @@ pub const State = struct {
         for (0..R_BINS) |b| {
             const r = @exp(self.lnr_in + self.lnr_span * (@as(f64, @floatFromInt(b)) + 0.5) / @as(f64, @floatFromInt(R_BINS)));
             self.om_tab[b] = orbit(self.geo.a, r).om;
+            const r15 = r * @sqrt(r) + self.geo.a;
+            self.shear_tab[b] = @floatCast(1.5 * @sqrt(r) / (r15 * r15) * r * (self.lnr_span / @as(f64, @floatFromInt(R_BINS))) * 65536.0 / (2.0 * math.pi));
             self.tau_tab[b] = @floatCast(opticalDepth(r));
             self.lntau_tab[b] = @floatCast(@log(opticalDepth(r)));
         }
@@ -1215,6 +1222,8 @@ pub const State = struct {
             self.spot_wp[j] = @floatCast(wp);
             self.spot_q[j] = @truncate(@as(u32, @intFromFloat(ph / (2.0 * math.pi) * 65536.0)));
             self.spot_amp[j] = @floatCast(@as(f64, SPOT_AMP) * env * env);
+            self.spot_age[j] = @floatCast(age);
+            self.spot_om[j] = @floatCast(om);
             const lo: i64 = @intFromFloat(@floor(rb - wr - 12.0)); // margin for wide pixel footprints
             const hi: i64 = @intFromFloat(@ceil(rb + wr + 12.0));
             var b = @max(lo, 0);
@@ -1290,13 +1299,22 @@ pub const State = struct {
                 const sm = self.spot_mask[rb];
                 if (sm != 0) {
                     var boost: f32 = 0.0;
+                    // Azimuth a sheared spot sweeps across this pixel's radial footprint, per M of age.
+                    const shear_q_per_age = self.shear_tab[rb] * (frf + 0.5);
+                    const om_px: f32 = @floatCast(self.om_tab[rb]);
                     inline for (0..NSPOT) |j| {
                         if (sm & (@as(u8, 1) << j) != 0) {
                             // Spot seen through this pixel's footprint: widen the kernel, keep its energy.
+                            // A sheared spot's azimuth shifts with radius: across the pixel's radial footprint
+                            // it moves by |dOmega/dr| * age * dr. Widen the azimuthal kernel by that too.
+                            const smear = shear_q_per_age * self.spot_age[j];
                             const wr2 = self.spot_wr[j] * self.spot_wr[j] + frf * frf;
-                            const wp2 = self.spot_wp[j] * self.spot_wp[j] + fpf * fpf;
+                            const wp2 = self.spot_wp[j] * self.spot_wp[j] + fpf * fpf + smear * smear;
                             const dr = rbf - self.spot_rb[j];
-                            const dp: f32 = @floatFromInt(@as(i16, @bitCast(rc.phi -% self.spot_q[j])));
+                            // Sheared: at this radius the clump has moved (Omega(r) - Omega_spot) * age further.
+                            const shear: f32 = (om_px - self.spot_om[j]) * self.spot_age[j] * (65536.0 / (2.0 * math.pi));
+                            const dp0: f32 = @as(f32, @floatFromInt(@as(i16, @bitCast(rc.phi -% self.spot_q[j])))) - shear;
+                            const dp = dp0 - 65536.0 * @round(dp0 / 65536.0);
                             if (rc.fp == 255 or fpf > 2.0 * self.spot_wp[j] or frf > 2.0 * self.spot_wr[j]) {
                                 // Unresolved here (pixel footprint wider than the spot): widening the
                                 // kernel would smear it into long false arcs, so it is left out.
