@@ -86,7 +86,13 @@ pub const View = extern struct {
     rows_done: u32, // rows the trace has finished; later rows draw black
     exposure: f32,
     headroom: f32, // display EDR headroom: 1 = SDR
-    srgb_out: u32, // 1: encode sRGB for an RGBA8 target; 0: linear extended range
+    out_mode: OutMode,
+};
+
+pub const OutMode = enum(u32) {
+    linear = 0, // extended-range linear sRGB (RGBA16F)
+    srgb = 1, // 8-bit sRGB (menu previews, SDR layers)
+    pq = 2, // HDR10: BT.2020 primaries, PQ, 10-bit (EDR layers)
 };
 
 pub fn fillStatic(st: anytype, out: *Static) void {
@@ -175,5 +181,7 @@ pub fn ttabBytes(st: anytype) []const u8 {
     return std.mem.sliceAsBytes(&st.ttab);
 }
 
-/// Bytes per traced pixel on the GPU: record (18) + background (4, RGB9E5) + footprint (2).
-pub const BYTES_PER_PIXEL: usize = 24;
+/// Bytes per traced pixel kept on the GPU: record (6) + background (4, RGB9E5). The trace
+/// also needs 2 bytes per pixel of light-travel phase until the footprint pass is done.
+pub const BYTES_PER_PIXEL: usize = 10;
+pub const TEMP_BYTES_PER_PIXEL: usize = 2;

@@ -22,17 +22,22 @@ pub const CGRect = extern struct { x: f64, y: f64, w: f64, h: f64 };
 pub var hdr_enabled = true;
 
 /// A CAMetalLayer covering `host_layer` with a w x h drawable the kernels write directly:
-/// BGRA8 in `color_space`, or with `hdr` RGBA16F extended-range linear sRGB (EDR).
-fn makeLayer(dev: mtl.Id, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize, hdr: bool) mtl.Id {
+/// BGRA8 in `color_space`, or with `hdr` HDR10 (10-bit PQ, BT.2020) as EDR content, at
+/// 4 bytes per pixel like SDR. `drawables` caps the swap chain (2 or 3).
+fn makeLayer(dev: mtl.Id, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize, hdr: bool, drawables: usize) mtl.Id {
     const ml = mtl.msg(mtl.Id, mtl.cls("CAMetalLayer"), "layer", .{}) orelse return null;
     _ = mtl.msg(mtl.Id, ml, "retain", .{});
     mtl.msg(void, ml, "setDevice:", .{dev});
-    mtl.msg(void, ml, "setPixelFormat:", .{if (hdr) mtl.PIXEL_RGBA16F else mtl.PIXEL_BGRA8});
+    mtl.msg(void, ml, "setPixelFormat:", .{if (hdr) mtl.PIXEL_BGR10A2 else mtl.PIXEL_BGRA8});
     mtl.msg(void, ml, "setFramebufferOnly:", .{false});
+    mtl.msg(void, ml, "setMaximumDrawableCount:", .{drawables});
     mtl.msg(void, ml, "setDrawableSize:", .{mtl.CGSize{ .width = @floatFromInt(w), .height = @floatFromInt(h) }});
     if (hdr) {
         mtl.msg(void, ml, "setWantsExtendedDynamicRangeContent:", .{true});
-        if (extendedLinearSRGB()) |cs| mtl.msg(void, ml, "setColorspace:", .{cs});
+        if (colorSpaceNamed("kCGColorSpaceITUR_2100_PQ")) |cs| mtl.msg(void, ml, "setColorspace:", .{cs});
+        // PQ is absolute luminance: tell the compositor that 100 nits is display white (EDR 1.0).
+        const md = mtl.msg(mtl.Id, mtl.cls("CAEDRMetadata"), "HDR10MetadataWithMinLuminance:maxLuminance:opticalOutputScale:", .{ @as(f32, 0.005), @as(f32, 1600.0), @as(f32, 100.0) });
+        if (md != null) mtl.msg(void, ml, "setEDRMetadata:", .{md});
     } else if (color_space != null) mtl.msg(void, ml, "setColorspace:", .{color_space});
     mtl.msg(void, ml, "setOpaque:", .{true});
     mtl.msg(void, ml, "setFrame:", .{mtl.msg(CGRect, host_layer, "bounds", .{})});
@@ -78,7 +83,7 @@ pub const ThemePresenter = struct {
             std.debug.print("argus: {s}: {s}\n", .{ label, std.mem.sliceTo(&err_buf, 0) });
             return null;
         };
-        const layer = makeLayer(theme.dev, host_layer, color_space, w, h, false) orelse {
+        const layer = makeLayer(theme.dev, host_layer, color_space, w, h, false, 3) orelse {
             theme.deinit();
             return null;
         };
@@ -113,15 +118,15 @@ pub const ThemePresenter = struct {
         self.* = undefined;
     }
 };
-/// kCGColorSpaceExtendedLinearSRGB, created once (CoreGraphics is loaded by the app).
-var ext_linear: ?*anyopaque = null;
-fn extendedLinearSRGB() ?*anyopaque {
-    if (ext_linear) |cs| return cs;
+/// A named CoreGraphics colour space (e.g. kCGColorSpaceITUR_2100_PQ), created once.
+var pq_space: ?*anyopaque = null;
+fn colorSpaceNamed(comptime name: [*:0]const u8) ?*anyopaque {
+    if (pq_space) |cs| return cs;
     const cg = std.c.dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", .{ .LAZY = true }) orelse return null;
-    const name: *const ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(cg, "kCGColorSpaceExtendedLinearSRGB") orelse return null));
+    const sym: *const ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(cg, name) orelse return null));
     const create: *const fn (?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(cg, "CGColorSpaceCreateWithName") orelse return null));
-    ext_linear = create(name.*);
-    return ext_linear;
+    pq_space = create(sym.*);
+    return pq_space;
 }
 
 /// The main screen's current EDR headroom (1 = SDR; rises with brightness on XDR panels).
@@ -158,7 +163,6 @@ pub const Presenter = struct {
     hdr: bool,
     preview_w: usize, // the app's menu-preview size (the CPU canvas size)
     preview_h: usize,
-    snap_tex: mtl.Id = null,
 
     /// Returns null when the dylib isn't a GPU build or Metal is unavailable.
     /// `w` x `h` is the app's canvas size, used for menu previews; the GPU traces at the
@@ -187,7 +191,9 @@ pub const Presenter = struct {
         _ = engine.meter();
         engine.startTrace(16); // ~0.8 s of GPU work at 3024x1964, in ~120 short submissions
         const hdr = hdr_enabled;
-        const layer = makeLayer(engine.k.dev, host_layer, color_space, size[0], size[1], hdr) orelse {
+        // Two drawables: the image changes slowly and Argus draws at <= 30 FPS, so a third
+        // window-sized buffer would only cost memory.
+        const layer = makeLayer(engine.k.dev, host_layer, color_space, size[0], size[1], hdr, 2) orelse {
             engine.deinit();
             return null;
         };
@@ -215,26 +221,30 @@ pub const Presenter = struct {
         const drawable = mtl.msg(mtl.Id, self.layer, "nextDrawable", .{}) orelse return true;
         const cb = mtl.msg(mtl.Id, self.queue, "commandBuffer", .{});
         const p = self.engine.params;
-        self.engine.encodeShade(cb, &self.frame, mtl.msg(mtl.Id, drawable, "texture", .{}), p.width, p.height, if (self.hdr) edrHeadroom() else 1.0, !self.hdr);
+        self.engine.encodeShade(cb, &self.frame, mtl.msg(mtl.Id, drawable, "texture", .{}), p.width, p.height, if (self.hdr) edrHeadroom() else 1.0, if (self.hdr) .pq else .srgb);
         mtl.msg(void, cb, "presentDrawable:", .{drawable});
         mtl.msg(void, cb, "commit", .{});
         return true;
     }
 
     /// The current frame, again, into `dst` (packRGBA at the app's canvas size, SDR) for the
-    /// menu preview.
+    /// menu preview. The 9 MB texture lives only for the call: previews are occasional.
     pub fn snapshot(self: *Presenter, dst: []u32) bool {
+        // The preview waits for the GPU; while the trace is running that means waiting behind
+        // it on the main thread. The app retries a failed preview, so take it once the trace is done.
+        if (!self.engine.poll()) return false;
         const encode = struct {
             fn f(pr: *Presenter, cb: mtl.Id, out: mtl.Id) void {
-                pr.engine.encodeShade(cb, &pr.frame, out, pr.preview_w, pr.preview_h, 1.0, true);
+                pr.engine.encodeShade(cb, &pr.frame, out, pr.preview_w, pr.preview_h, 1.0, .srgb);
             }
         }.f;
-        return snapshotInto(self.engine.k.dev, self.queue, &self.snap_tex, self.preview_w, self.preview_h, dst, self, encode);
+        var tex: mtl.Id = null;
+        defer mtl.release(tex);
+        return snapshotInto(self.engine.k.dev, self.queue, &tex, self.preview_w, self.preview_h, dst, self, encode);
     }
 
     /// Detaches the layer and releases GPU objects. Call before the theme's state is freed.
     pub fn destroy(self: *Presenter) void {
-        mtl.release(self.snap_tex);
         detachLayer(self.layer);
         mtl.release(self.queue);
         self.engine.deinit();

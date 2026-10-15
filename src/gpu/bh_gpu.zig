@@ -3,7 +3,8 @@
 //
 // Opus_Black_Hole's GPU engine (kernels in opus_black_hole.metal), shared by the app's
 // presenter and `make gpu-bench`:
-//   init   upload the theme's tables, allocate the traced image (24 B/pixel, GPU-private)
+//   init   upload the theme's tables, allocate the traced image (10 B/pixel, GPU-private,
+//          plus 2 B/pixel freed when the trace is done)
 //   meter  exposure from inner-disk luminance (blocks ~tens of ms)
 //   trace  queue the geodesic trace in row tiles on its own command queue, then the
 //          footprint pass; poll() advances `rows_done` as tiles finish, so frames keep
@@ -86,7 +87,7 @@ pub const Engine = struct {
     noise: mtl.Id,
     recs: mtl.Id,
     bg: mtl.Id,
-    fpr: mtl.Id,
+    tq: mtl.Id, // light-travel phase: only until the footprint pass has run
     tiles: [MAX_TILES]mtl.Id = @splat(null),
     tile_rows: u32 = 0,
     n_tiles: usize = 0,
@@ -108,11 +109,11 @@ pub const Engine = struct {
             .stat = bufferCopy(dev, std.mem.asBytes(static)),
             .ttab = bufferCopy(dev, ttab),
             .noise = bufferCopy(dev, noise),
-            .recs = mtl.msg(mtl.Id, dev, "newBufferWithLength:options:", .{ n * 18, BUF_PRIVATE }),
+            .recs = mtl.msg(mtl.Id, dev, "newBufferWithLength:options:", .{ n * 6, BUF_PRIVATE }),
             .bg = mtl.msg(mtl.Id, dev, "newBufferWithLength:options:", .{ n * 4, BUF_PRIVATE }),
-            .fpr = mtl.msg(mtl.Id, dev, "newBufferWithLength:options:", .{ n * 2, BUF_PRIVATE }),
+            .tq = mtl.msg(mtl.Id, dev, "newBufferWithLength:options:", .{ n * 2, BUF_PRIVATE }),
         };
-        if (e.trace_queue == null or e.stat == null or e.ttab == null or e.noise == null or e.recs == null or e.bg == null or e.fpr == null) {
+        if (e.trace_queue == null or e.stat == null or e.ttab == null or e.noise == null or e.recs == null or e.bg == null or e.tq == null) {
             e.deinit();
             return error.MetalAlloc;
         }
@@ -157,6 +158,7 @@ pub const Engine = struct {
             mtl.msg(void, enc, "setBytes:length:atIndex:", .{ @as(*const anyopaque, &p), @as(usize, @sizeOf(bt.TraceParams)), @as(usize, 0) });
             mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.recs, @as(usize, 0), @as(usize, 3) });
             mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.bg, @as(usize, 0), @as(usize, 4) });
+            mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.tq, @as(usize, 0), @as(usize, 5) });
             self.k.trace.dispatch(enc, self.params.width, rows);
             mtl.msg(void, enc, "endEncoding", .{});
             mtl.msg(void, cb, "commit", .{});
@@ -167,7 +169,7 @@ pub const Engine = struct {
         const enc = mtl.msg(mtl.Id, cb, "computeCommandEncoder", .{});
         mtl.msg(void, enc, "setBytes:length:atIndex:", .{ @as(*const anyopaque, &self.params), @as(usize, @sizeOf(bt.TraceParams)), @as(usize, 0) });
         mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.recs, @as(usize, 0), @as(usize, 1) });
-        mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.fpr, @as(usize, 0), @as(usize, 2) });
+        mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.tq, @as(usize, 0), @as(usize, 2) });
         self.k.footprint.dispatch(enc, self.params.width, self.params.height);
         mtl.msg(void, enc, "endEncoding", .{});
         mtl.msg(void, cb, "commit", .{});
@@ -192,6 +194,8 @@ pub const Engine = struct {
             mtl.release(cb);
             self.footprint_cb = null;
         }
+        mtl.release(self.tq); // the footprints are in the records now
+        self.tq = null;
         self.done = true;
         return true;
     }
@@ -202,8 +206,8 @@ pub const Engine = struct {
         _ = self.poll();
     }
 
-    /// Encodes one frame into `tex` (out_w x out_h): HDR linear, or sRGB when `srgb`.
-    pub fn encodeShade(self: *const Engine, cb: mtl.Id, frame: *const bt.Frame, tex: mtl.Id, out_w: usize, out_h: usize, headroom: f32, srgb: bool) void {
+    /// Encodes one frame into `tex` (out_w x out_h) in the given encoding.
+    pub fn encodeShade(self: *const Engine, cb: mtl.Id, frame: *const bt.Frame, tex: mtl.Id, out_w: usize, out_h: usize, headroom: f32, mode: bt.OutMode) void {
         const view: bt.View = .{
             .width = self.params.width,
             .height = self.params.height,
@@ -212,16 +216,17 @@ pub const Engine = struct {
             .rows_done = if (self.done) self.params.height else self.rows_done,
             .exposure = self.params.exposure,
             .headroom = headroom,
-            .srgb_out = @intFromBool(srgb),
+            .out_mode = mode,
         };
         const enc = mtl.msg(mtl.Id, cb, "computeCommandEncoder", .{});
         mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.recs, @as(usize, 0), @as(usize, 0) });
         mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.bg, @as(usize, 0), @as(usize, 1) });
-        mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.fpr, @as(usize, 0), @as(usize, 2) });
-        mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.noise, @as(usize, 0), @as(usize, 3) });
-        mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.stat, @as(usize, 0), @as(usize, 4) });
-        mtl.msg(void, enc, "setBytes:length:atIndex:", .{ @as(*const anyopaque, frame), @as(usize, @sizeOf(bt.Frame)), @as(usize, 5) });
-        mtl.msg(void, enc, "setBytes:length:atIndex:", .{ @as(*const anyopaque, &view), @as(usize, @sizeOf(bt.View)), @as(usize, 6) });
+        mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.noise, @as(usize, 0), @as(usize, 2) });
+        mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.stat, @as(usize, 0), @as(usize, 3) });
+        mtl.msg(void, enc, "setBytes:length:atIndex:", .{ @as(*const anyopaque, frame), @as(usize, @sizeOf(bt.Frame)), @as(usize, 4) });
+        mtl.msg(void, enc, "setBytes:length:atIndex:", .{ @as(*const anyopaque, &view), @as(usize, @sizeOf(bt.View)), @as(usize, 5) });
+        mtl.msg(void, enc, "setBytes:length:atIndex:", .{ @as(*const anyopaque, &self.params), @as(usize, @sizeOf(bt.TraceParams)), @as(usize, 6) });
+        mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.ttab, @as(usize, 0), @as(usize, 7) });
         mtl.msg(void, enc, "setTexture:atIndex:", .{ tex, @as(usize, 0) });
         self.k.shade.dispatch(enc, out_w, out_h);
         mtl.msg(void, enc, "endEncoding", .{});
@@ -253,7 +258,7 @@ pub const Engine = struct {
     pub fn deinit(self: *Engine) void {
         for (self.tiles) |cb| mtl.release(cb);
         mtl.release(self.footprint_cb);
-        for ([_]mtl.Id{ self.stat, self.ttab, self.noise, self.recs, self.bg, self.fpr, self.trace_queue }) |o| mtl.release(o);
+        for ([_]mtl.Id{ self.stat, self.ttab, self.noise, self.recs, self.bg, self.tq, self.trace_queue }) |o| mtl.release(o);
         self.* = undefined;
     }
 

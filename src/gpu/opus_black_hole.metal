@@ -59,19 +59,20 @@ constant uint KIND_SKY = 0;
 constant uint KIND_DISK = 1;
 constant uint KIND_HOLE = 2;
 
-// Mirrors the theme's `extern struct Rec` (18 bytes, 2-byte aligned).
+// One traced pixel in 6 bytes (the theme's Rec, minus what bh_shade can recompute):
+//   rbin  radial bin in 1/R_FRAC bins (the radius, so the temperature and redshift follow)
+//   phi   emission azimuth + Omega * travel time, Q16 of 2 pi
+//   meta  disk samples (0-4) | radial footprint (r-bins, 6 bits) << 3 | azimuthal (64/65536 turn, 7 bits) << 9
+// The light-travel phase (the theme's tq) is only needed for the footprint pass; it lives
+// in a temporary buffer freed once the trace is done.
 struct Rec {
-    half r, g, b;
     ushort rbin;
     ushort phi;
-    uchar cov;
-    uchar fr;
-    half tobs;
-    uchar fp;
-    uchar pad;
-    ushort tq;
+    ushort meta;
 };
-static_assert(sizeof(Rec) == 18, "Rec layout must match the theme");
+static_assert(sizeof(Rec) == 6, "Rec must stay 6 bytes");
+constant uint FR_MAX = 63;  // footprints this wide already filter texture to nothing
+constant uint FP_MAX = 127; // saturated: the pixel spans too much azimuth to resolve a hot spot
 
 // Per-frame tables written by the theme's step().
 struct Frame {
@@ -113,8 +114,12 @@ struct TraceParams {
 struct View {
     uint width, height, out_w, out_h, rows_done;
     float exposure, headroom;
-    uint srgb_out;
+    uint out_mode; // OUT_LINEAR, OUT_SRGB or OUT_PQ
 };
+constant uint OUT_LINEAR = 0; // extended-range linear sRGB (RGBA16F)
+constant uint OUT_SRGB = 1;   // 8-bit sRGB (menu previews, SDR)
+constant uint OUT_PQ = 2;     // HDR10: BT.2020 primaries, PQ, 10-bit
+constant float PQ_REF_NITS = 100.0f; // display white (EDR 1.0) in PQ, as told to the layer
 
 static float luma(float3 c) { return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z; }
 
@@ -489,6 +494,7 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
                      device const float* ttab [[buffer(2)]],
                      device Rec* recs [[buffer(3)]],
                      device uint* bg [[buffer(4)]],
+                     device ushort* tq [[buffer(5)]],
                      uint2 gid [[thread_position_in_grid]]) {
     const uint x = gid.x;
     const uint y = gid.y + P.row0;
@@ -531,7 +537,6 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
         if (got) foot[l] = max(m * 2.0f, 0.25f * P.pix_ang);
     }
 
-    float3 disk_rgb = float3(0.0f);
     float3 bg_rgb = float3(0.0f);
     float3 disk_behind = float3(0.0f); // light behind the disk samples, used only if translucent
     uint nd = 0;
@@ -552,7 +557,6 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
             }
             if (nd == 0) first = smp;
             nd += 1;
-            disk_rgb += smp.rgb;
             disk_behind += behind(P, st, ttab, alpha, hits[s][1], hits[s][2], foot);
         } else if (hit.kind == KIND_SKY) {
             bg_rgb += sky(P, st, hit.dir, foot.x);
@@ -564,85 +568,76 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
     if (nd > 0 && st.tau_tab[first.rbin / R_FRAC] < TAU_BEHIND) bg_rgb += disk_behind;
     const uint idx = y * P.width + x;
     bg[idx] = packRGB9E5(bg_rgb * 0.25f);
-    Rec rc;
-    rc.fr = 0;
-    rc.fp = 0;
-    rc.pad = 0;
-    if (nd > 0) {
-        const float3 c = disk_rgb / float(nd);
-        rc.r = half(c.x);
-        rc.g = half(c.y);
-        rc.b = half(c.z);
-        rc.rbin = ushort(first.rbin);
-        rc.phi = ushort(first.phi);
-        rc.cov = uchar(nd * 255 / 4);
-        rc.tobs = half(min(first.tobs, 60000.0f));
-        rc.tq = ushort(first.tq);
-    } else {
-        rc.r = rc.g = rc.b = half(0.0f);
-        rc.rbin = 0;
-        rc.phi = 0;
-        rc.cov = 0;
-        rc.tobs = half(0.0f);
-        rc.tq = 0;
-    }
-    recs[idx] = rc;
+    recs[idx] = nd > 0 ? Rec{ushort(first.rbin), ushort(first.phi), ushort(nd)} : Rec{0, 0, 0};
+    tq[idx] = nd > 0 ? ushort(first.tq) : ushort(0);
 }
 
 // Each disk pixel's footprint on the disk, from its neighbours (the theme's second pass).
+// Writes only the footprint bits of each record's meta; neighbours read rbin, phi and the
+// sample count, which no thread changes.
 kernel void bh_footprint(constant TraceParams& P [[buffer(0)]],
-                         device const Rec* recs [[buffer(1)]],
-                         device uchar2* fpr [[buffer(2)]],
+                         device Rec* recs [[buffer(1)]],
+                         device const ushort* tq [[buffer(2)]],
                          uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= P.width || gid.y >= P.height) return;
     const uint i = gid.y * P.width + gid.x;
     const Rec ri = recs[i];
-    if (ri.cov == 0) {
-        fpr[i] = uchar2(0);
-        return;
-    }
+    const uint cov = ri.meta & 7u;
+    if (cov == 0) return;
+    const ushort tq_i = tq[i];
     uint fr = 0;
     uint fp = 0;
     const int2 nb[4] = {int2(1, 0), int2(-1, 0), int2(0, 1), int2(0, -1)};
     for (uint k = 0; k < 4; k++) {
         const int2 q = int2(gid) + nb[k];
         if (q.x < 0 || q.y < 0 || q.x >= int(P.width) || q.y >= int(P.height)) continue;
-        const Rec rj = recs[uint(q.y) * P.width + uint(q.x)];
-        if (rj.cov == 0) continue;
+        const uint j = uint(q.y) * P.width + uint(q.x);
+        const Rec rj = recs[j];
+        if ((rj.meta & 7u) == 0) continue;
+        const ushort tq_j = tq[j];
         const uint dr = (uint(abs(int(rj.rbin) - int(ri.rbin))) + R_FRAC - 1) / R_FRAC;
-        const ushort hit_i = ushort(ri.phi + ushort(ri.tq << 6));
-        const ushort hit_j = ushort(rj.phi + ushort(rj.tq << 6));
+        const ushort hit_i = ushort(ri.phi + ushort(tq_i << 6));
+        const ushort hit_j = ushort(rj.phi + ushort(tq_j << 6));
         const int d_hit = int(as_type<short>(ushort(hit_j - hit_i)));
-        const int d_tq = int(as_type<short>(ushort(rj.tq - ri.tq)));
+        const int d_tq = int(as_type<short>(ushort(tq_j - tq_i)));
         fr = max(fr, dr);
         fp = max(fp, uint(abs(d_hit - d_tq * 64)));
     }
-    fpr[i] = uchar2(uchar(min(fr, 255u)), uchar(min((fp + 63) / 64, 255u)));
+    recs[i].meta = ushort(cov | (min(fr, FR_MAX) << 3) | (min((fp + 63) / 64, FP_MAX) << 9));
 }
 
 // ---------------------------------------------------------------- per-frame shading
 
 // One pixel of the theme's draw(), composited before tone mapping (light adds in linear).
-static float3 shadePre(uint x, uint y, uint w,
-                       device const Rec* recs, device const uint* bg, device const uchar2* fpr,
+static float3 shadePre(uint x, uint y, constant TraceParams& P, device const float* ttab,
+                       device const Rec* recs, device const uint* bg,
                        device const uchar* noise, constant Static& st, constant Frame& fr, float exposure) {
-    const uint i = y * w + x;
+    const uint i = y * P.width + x;
     const float3 bgv = unpackRGB9E5(bg[i]);
     const Rec rc = recs[i];
-    if (rc.cov == 0) return bgv;
-    const uchar2 foot = fpr[i];
+    const uint ns = rc.meta & 7u;
+    if (ns == 0) return bgv;
+    const uint fr_q = (rc.meta >> 3) & FR_MAX;
+    const uint fp_q = (rc.meta >> 9) & FP_MAX;
 
     const float amp = TURB * fr.gnorm / 128.0f;
     const float w0 = fr.gw[0] * amp;
     const float w1 = fr.gw[1] * amp;
     const uint rb = rc.rbin / R_FRAC;
     const float rbf = float(rc.rbin) / float(R_FRAC);
+    // Observed temperature, as the trace's shadeDisk had it: T(r) and the Kerr redshift for
+    // this pixel's photon angular momentum.
+    const float r = exp(P.lnr_in + P.lnr_span * rbf / float(R_BINS));
+    const float L = -((float(x) + 0.5f - 0.5f * float(P.width)) * P.mpp) * P.sin_i;
+    const Orbit o = orbitAt(P.a, r);
+    const float tobs = temperature(P, ttab, r) / (o.ut * (1.0f - o.om * L));
+    const float3 rgb = bbLookup(st, tobs);
     const uint pa = ushort(rc.phi - fr.gshift[0][rb]) >> 6;
     const uint pb = ushort(rc.phi - fr.gshift[1][rb]) >> 6;
     const float na = float(int(noise[fr.grow[0][rb] * NP + pa]) - 128);
     const float nb = float(int(noise[fr.grow[1][rb] * NP + pb]) - 128);
-    const float frf = float(foot.x);
-    const float fpf = float(foot.y) * 64.0f;
+    const float frf = float(fr_q);
+    const float fpf = float(fp_q) * 64.0f;
     const float tex = 1.0f / (1.0f + (frf * frf) / 64.0f + (fpf * fpf) / 116000.0f);
     float k = max(0.0f, 1.0f + tex * (w0 * na + w1 * nb)) * exposure;
 
@@ -669,28 +664,35 @@ static float3 shadePre(uint x, uint y, uint w,
             const float wp2 = fr.spot_wp[j] * fr.spot_wp[j] + fpf * fpf;
             const float dr = rbf - fr.spot_rb[j];
             const float dp = float(as_type<short>(ushort(rc.phi - fr.spot_q[j])));
-            if (foot.y == 255 || fpf > 2.0f * fr.spot_wp[j] || frf > 2.0f * fr.spot_wr[j]) continue;
+            if (fp_q == FP_MAX || fpf > 2.0f * fr.spot_wp[j] || frf > 2.0f * fr.spot_wr[j]) continue;
             const float q = dr * dr / wr2 + dp * dp / wp2;
             if (q < 1.0f) boost += fr.spot_amp[j] * (1.0f - q) * (1.0f - q) * fr.spot_wr[j] * fr.spot_wp[j] / sqrt(wr2 * wp2);
         }
-        if (boost > 1e-3f && float(rc.tobs) > 0.0f) {
-            const float t0 = float(rc.tobs);
-            spot_rgb = bbLookup(st, t0 * sqrt(sqrt(1.0f + boost)));
-            const float lum0 = luma(float3(float(rc.r), float(rc.g), float(rc.b)));
-            spot_scale = lum0 / max(luma(bbLookup(st, t0)), 1e-12f);
+        if (boost > 1e-3f && tobs > 0.0f) {
+            spot_rgb = bbLookup(st, tobs * sqrt(sqrt(1.0f + boost)));
+            spot_scale = 1.0f;
         } else {
             k *= 1.0f + boost;
         }
     }
 
-    const float3 c = spot_scale > 0.0f ? spot_rgb * spot_scale * k : float3(float(rc.r), float(rc.g), float(rc.b)) * k;
-    const float cov = float(rc.cov) / 255.0f;
+    const float3 c = spot_scale > 0.0f ? spot_rgb * spot_scale * k : rgb * k;
+    const float cov = float(ns) * 0.25f;
     // bg holds the sky beside the disk samples and, under translucent gas, what lies behind it.
     return thin ? cov * c + (1.0f - cov * emit) * bgv : cov * c + bgv;
 }
 
 static float srgbEncode(float v) {
     return v <= 0.0031308f ? 12.92f * v : 1.055f * pow(v, 1.0f / 2.4f) - 0.055f;
+}
+
+// HDR10 encoding: linear sRGB (1.0 = display white) -> BT.2020 primaries -> PQ.
+static float3 pqEncode(float3 c) {
+    const float3 c2020 = float3(dot(float3(0.6274040f, 0.3292820f, 0.0433136f), c),
+                                dot(float3(0.0690970f, 0.9195400f, 0.0113612f), c),
+                                dot(float3(0.0163916f, 0.0880132f, 0.8955950f), c));
+    const float3 Lp = pow(clamp(c2020 * (PQ_REF_NITS / 10000.0f), 0.0f, 1.0f), 0.1593017578125f);
+    return pow((0.8359375f + 18.8515625f * Lp) / (1.0f + 18.6875f * Lp), 78.84375f);
 }
 
 // Reinhard on luminance, hue preserved, saturating at the display's headroom
@@ -701,11 +703,12 @@ static float3 toneMap(float3 c, float headroom) {
 
 kernel void bh_shade(device const Rec* recs [[buffer(0)]],
                      device const uint* bg [[buffer(1)]],
-                     device const uchar2* fpr [[buffer(2)]],
-                     device const uchar* noise [[buffer(3)]],
-                     constant Static& st [[buffer(4)]],
-                     constant Frame& fr [[buffer(5)]],
-                     constant View& v [[buffer(6)]],
+                     device const uchar* noise [[buffer(2)]],
+                     constant Static& st [[buffer(3)]],
+                     constant Frame& fr [[buffer(4)]],
+                     constant View& v [[buffer(5)]],
+                     constant TraceParams& P [[buffer(6)]],
+                     device const float* ttab [[buffer(7)]],
                      texture2d<float, access::write> out [[texture(0)]],
                      uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= v.out_w || gid.y >= v.out_h) return;
@@ -713,9 +716,10 @@ kernel void bh_shade(device const Rec* recs [[buffer(0)]],
     const uint x = min(uint((float(gid.x) + 0.5f) * float(v.width) / float(v.out_w)), v.width - 1);
     const uint y = min(uint((float(gid.y) + 0.5f) * float(v.height) / float(v.out_h)), v.height - 1);
     float3 c = float3(0.0f);
-    if (y < v.rows_done) c = toneMap(shadePre(x, y, v.width, recs, bg, fpr, noise, st, fr, v.exposure), max(v.headroom, 1.0f));
+    if (y < v.rows_done) c = toneMap(shadePre(x, y, P, ttab, recs, bg, noise, st, fr, v.exposure), max(v.headroom, 1.0f));
     c = max(c, 0.0f);
-    if (v.srgb_out != 0) c = float3(srgbEncode(min(c.x, 1.0f)), srgbEncode(min(c.y, 1.0f)), srgbEncode(min(c.z, 1.0f)));
+    if (v.out_mode == OUT_SRGB) c = float3(srgbEncode(min(c.x, 1.0f)), srgbEncode(min(c.y, 1.0f)), srgbEncode(min(c.z, 1.0f)));
+    else if (v.out_mode == OUT_PQ) c = pqEncode(c);
     out.write(float4(c, 1.0f), gid);
 }
 

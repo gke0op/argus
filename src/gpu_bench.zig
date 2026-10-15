@@ -61,8 +61,8 @@ fn gpuFrame(st: *theme.State, w: u32, h: u32, frames: usize, out: []u32, io: std
     defer mtl.release(queue);
     const tex8 = mtl.newTexture(dev, mtl.PIXEL_RGBA8, w, h, mtl.STORAGE_SHARED);
     defer mtl.release(tex8);
-    const tex16 = mtl.newTexture(dev, mtl.PIXEL_RGBA16F, w, h, mtl.STORAGE_PRIVATE);
-    defer mtl.release(tex16);
+    const tex10 = mtl.newTexture(dev, mtl.PIXEL_BGR10A2, w, h, mtl.STORAGE_PRIVATE);
+    defer mtl.release(tex10);
 
     var frame: bt.Frame = undefined;
     var shade_ms: f64 = 0;
@@ -74,7 +74,7 @@ fn gpuFrame(st: *theme.State, w: u32, h: u32, frames: usize, out: []u32, io: std
         bt.fillFrame(st, &frame);
         const hdr = f % 2 == 1; // alternate the HDR (16-bit float) and sRGB paths
         const cb = mtl.msg(mtl.Id, queue, "commandBuffer", .{});
-        e.encodeShade(cb, &frame, if (hdr) tex16 else tex8, w, h, if (hdr) 4.0 else 1.0, !hdr);
+        e.encodeShade(cb, &frame, if (hdr) tex10 else tex8, w, h, if (hdr) 4.0 else 1.0, if (hdr) .pq else .srgb);
         mtl.msg(void, cb, "commit", .{});
         mtl.msg(void, cb, "waitUntilCompleted", .{});
         if (hdr) hdr_ms += gpuMs(cb) else shade_ms += gpuMs(cb);
@@ -84,7 +84,7 @@ fn gpuFrame(st: *theme.State, w: u32, h: u32, frames: usize, out: []u32, io: std
         const pool = mtl.poolPush();
         defer mtl.poolPop(pool);
         const cb = mtl.msg(mtl.Id, queue, "commandBuffer", .{});
-        e.encodeShade(cb, &frame, tex8, w, h, 1.0, true);
+        e.encodeShade(cb, &frame, tex8, w, h, 1.0, .srgb);
         mtl.msg(void, cb, "commit", .{});
         mtl.msg(void, cb, "waitUntilCompleted", .{});
         mtl.msg(void, tex8, "getBytes:bytesPerRow:fromRegion:mipmapLevel:", .{
@@ -206,9 +206,10 @@ pub fn main(init: std.process.Init) !void {
     const g2 = try gpuFrame(st, nw, nh, frames, nat, io);
     saveRgba("/tmp/argus_bh_native.rgba", nat);
     std.debug.print(" {d}x{d} GPU meter / trace  : {d:.1} ms / {d:.1} ms (2x2 samples per pixel)\n", .{ nw, nh, g2.meter_ms, g2.trace_ms });
-    std.debug.print(" {d}x{d} shade sRGB / HDR   : {d:.3} / {d:.3} ms GPU per frame ({d} frames)\n", .{ nw, nh, g2.shade_ms, g2.hdr_ms, frames });
-    std.debug.print(" traced image memory         : {d:.1} MB\n========================================================================\n", .{
+    std.debug.print(" {d}x{d} shade sRGB / HDR10 : {d:.3} / {d:.3} ms GPU per frame ({d} frames)\n", .{ nw, nh, g2.shade_ms, g2.hdr_ms, frames });
+    std.debug.print(" traced image memory         : {d:.1} MB kept (+{d:.1} MB while tracing)\n========================================================================\n", .{
         @as(f64, @floatFromInt(@as(usize, nw) * nh * bt.BYTES_PER_PIXEL)) / 1e6,
+        @as(f64, @floatFromInt(@as(usize, nw) * nh * bt.TEMP_BYTES_PER_PIXEL)) / 1e6,
     });
     if (edge > 0.01) return error.ShadowEdge;
 }
