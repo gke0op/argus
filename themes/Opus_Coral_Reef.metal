@@ -119,7 +119,9 @@ static inline float hash1(uint i) { return float(argus_hash(i * 747796405u + 289
 static inline float2 split(float v) { float hi = float(half(v)); return float2(hi, v - hi); }
 static inline float joinf(float2 p) { return p.x + p.y; }
 
-static inline uint2 linTex(uint n, uint row0) { return uint2(n % SW, row0 + n / SW); }
+// Linear tables use 2048 of the 2049 columns: a power-of-two stride turns the index
+// split into a mask and a shift (dividing by 2049 is emulated: ~30x slower per read).
+static inline uint2 linTex(uint n, uint row0) { return uint2(n & 2047u, row0 + (n >> 11)); }
 
 // Centre of the sandy channel the camera follows, as a function of z.
 static inline float channelX(float z) { return 64.0f + 14.0f * sin(KW * z) + 6.0f * sin(2.0f * KW * z + 1.0f); }
@@ -1192,8 +1194,8 @@ kernel void argus_init(constant ArgusFrame& f [[buffer(0)]],
             state.write(float4(boxMax(x0 - 0.2f, z0 - 0.2f, x0 + 4.2f, z0 + 4.2f), 0.0f, 0.0f, 0.0f), gid);
         }
     } else if (gid.y >= R_FBLK && gid.y < R_FBLK + 8u) {
-        const uint n = (gid.y - R_FBLK) * SW + gid.x;
-        if (n < 16384u) {
+        const uint n = (gid.y - R_FBLK) * 2048u + gid.x;
+        if (gid.x < 2048u && n < 16384u) {
             const float x0 = float(n & 127u), z0 = float(n >> 7);
             state.write(float4(boxMax(x0 - 0.2f, z0 - 0.2f, x0 + 1.2f, z0 + 1.2f), 0.0f, 0.0f, 0.0f), gid);
         }
@@ -1268,7 +1270,8 @@ kernel void argus_step(constant ArgusFrame& f [[buffer(0)]],
         // endpoints as offsets (+4, so >= 1) from its chunk box corner; the signs of three
         // of them carry the branch depth, which gives thickness and colour.
         const bool isSeg = gid.y >= R_SSEG;
-        const uint m = (gid.y - (isSeg ? R_SSEG : R_SCHUNK)) * SW + gid.x;
+        if (gid.x >= 2048u) return;
+        const uint m = (gid.y - (isSeg ? R_SSEG : R_SCHUNK)) * 2048u + gid.x;
         const uint lim = isSeg ? uint(N_CORAL * SEG_SLOTS) : uint(N_CORAL * NCH);
         if (m >= lim) return;
         const float4 empty = isSeg ? float4(0.0f) : float4(1.0e4f, 1.0e4f, -1.0e4f, -1.0e4f);
@@ -1312,13 +1315,14 @@ kernel void argus_step(constant ArgusFrame& f [[buffer(0)]],
     }
     // Tile bins: four threads per screen tile, each scanning one range of items
     // and writing its own part of the tile's 12-texel list of ids + 1 (0 ends a part).
-    const uint n = (gid.y - R_BIN) * SW + gid.x;
+    if (gid.x >= 2048u) return;
+    const uint n = (gid.y - R_BIN) * 2048u + gid.x;
     const uint ti = n / BIN_TEX, part = n % BIN_TEX;
     if (ti >= TILES_X * TILES_Y || (part != 0u && part != 4u && part != 7u && part != 10u)) return;
     const int pi = part == 0u ? 0 : (part == 4u ? 1 : (part == 7u ? 2 : 3));
     const int i0 = BIN_LO[pi], i1 = BIN_HI[pi];
     const int cap = int(BIN_PART_TEX[pi]) * 4;
-    const float tw = ceil(c.w / float(TILES_X)), th = ceil(c.h / float(TILES_Y));
+    const float tw = 32.0f * ceil(c.w / (32.0f * float(TILES_X))), th = ceil(c.h / float(TILES_Y));
     const float4 tile = float4(float(ti % TILES_X) * tw, float(ti / TILES_X) * th, float(ti % TILES_X + 1u) * tw, float(ti / TILES_X + 1u) * th);
     float ids[16];
     int cnt = 0;
@@ -1342,6 +1346,8 @@ static inline float hAt(texture2d<float> st, float wx, float wz) { return mapAt(
 
 static inline float3 fogged(float3 c, float z) { return mix3(c, WATER_HOR, 1.0f - exp(-FOG_K * z)); }
 
+static inline uint ballot(bool v) { return uint(static_cast<simd_vote::vote_t>(simd_ballot(v))); }
+
 // Distance from p to segment ab, measured the way the Zig line rasteriser fills
 // (a span across the major axis), compared against half the pixel thickness.
 static inline bool onLine(float2 p, float2 a, float2 b, float tw) {
@@ -1357,7 +1363,8 @@ static inline bool onLine(float2 p, float2 a, float2 b, float tw) {
 kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
                        texture2d<float, access::write> out [[texture(0)]],
                        texture2d<float> st [[texture(1)]],
-                       uint2 gid [[thread_position_in_grid]]) {
+                       uint2 gid [[thread_position_in_grid]],
+                       uint lane [[thread_index_in_simdgroup]]) {
     if (gid.x >= f.width || gid.y >= f.height) return;
     const float t = f.time;
     const Cam c = camera(f, t);
@@ -1438,7 +1445,9 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
     }
 
     // ---- corals, fish and bubbles listed for this pixel's tile ----
-    const float tw = ceil(c.w / float(TILES_X)), th = ceil(c.h / float(TILES_Y));
+    // Tiles are a multiple of 32 px wide, so the 32 pixels of a SIMD group (one row of a
+    // 32-wide threadgroup) share one tile and walk one list together.
+    const float tw = 32.0f * ceil(c.w / (32.0f * float(TILES_X))), th = ceil(c.h / float(TILES_Y));
     const uint ti = min(uint(px.x / tw), TILES_X - 1u) + TILES_X * min(uint(px.y / th), TILES_Y - 1u);
     float3 add = float3(0.0f);
     for (uint kk = 0; kk < BIN_TEX; kk++) {
@@ -1487,7 +1496,25 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
                 const float tk0 = co.size * (co.kind == 1 ? 0.13f : (co.kind == 2 ? 0.05f : 0.085f));
                 const float dsc = co.kind == 2 ? 6.0f : 4.0f;
                 const int nch = (co.nseg + 3) >> 2;
-                for (int ch = 0; ch < nch && !on; ch++) {
+                // Pixels of one SIMD group normally share a tile, so they walk the same coral.
+                // Then the active lanes split its chunk boxes between them (one read each, all at
+                // once, instead of up to 23 in a row per pixel) and keep the chunks that touch any
+                // of their pixels; the pixels visit only those, in chunk order as before.
+                uint cm = nch >= 32 ? 0xFFFFFFFFu : (1u << uint(nch)) - 1u;
+                if (simd_all(k2 == simd_broadcast_first(k2))) {
+                    const uint act = ballot(true);
+                    const uint rank = popcount(act & ((1u << lane) - 1u)), nact = popcount(act);
+                    const float2 glo = float2(simd_min(px.x), simd_min(px.y)), ghi = float2(simd_max(px.x), simd_max(px.y));
+                    uint bits = 0u;
+                    for (int ch = int(rank); ch < nch; ch += int(nact)) {
+                        const float4 lb = st.read(linTex(uint(k2 * NCH + ch), R_SCHUNK));
+                        if (!(glo.x > lb.z || ghi.x < lb.x || glo.y > lb.w || ghi.y < lb.y)) bits |= 1u << uint(ch);
+                    }
+                    cm = simd_or(bits);
+                }
+                while (cm != 0u && !on) {
+                    const int ch = int(ctz(cm));
+                    cm &= cm - 1u;
                     const float4 bx = st.read(linTex(uint(k2 * NCH + ch), R_SCHUNK));
                     if (px.x < bx.x || px.x > bx.z || px.y < bx.y || px.y > bx.w) continue;
                     const int se = min(co.nseg, ch * 4 + 4);

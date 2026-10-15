@@ -5,7 +5,7 @@ THEME ?= themes/Echo.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: all app desktop kronos harness claims test run stop clean gpu-bench
+.PHONY: all app desktop kronos harness claims test run stop clean gpu-bench gpu-probes
 
 all: app kronos
 
@@ -42,5 +42,8 @@ clean:
 
 # GPU prototype: Opus_Black_Hole's draw() as a Metal compute kernel, timed and diffed against the CPU.
 GPU_FRAMES ?= 240
+gpu-probes:
+	tools/gpu_probes/run.sh
+
 gpu-bench:
 	$(ZIG) run -O ReleaseFast -target aarch64-macos -lc --dep theme -Mroot=src/gpu_bench.zig -O ReleaseFast -Mtheme=themes/Opus_Black_Hole.zig -- --frames $(GPU_FRAMES)
