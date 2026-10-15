@@ -193,6 +193,8 @@ const MacBridge = struct {
     // Metal-only themes (themes/*.metal), one presenter per Space.
     mt: [MAX_SPACES]?gpu.ThemePresenter = @splat(null),
     mt_last_tick: [MAX_SPACES]usize = @splat(0),
+    // GPU Spaces have no CPU frame; they publish a snapshot as sp.cg_image for the menu previews.
+    snap_tick: [MAX_SPACES]usize = @splat(0), // frame_idx + 1 of the last snapshot, 0 = none yet
     perf_renders: [MAX_SPACES]u16 = @splat(0),
     perf_visible: u16 = 0,
     screen_rect: CGRect,
@@ -597,6 +599,21 @@ const MacBridge = struct {
         }
     }
 
+    /// A GPU Space's preview is due right after it loads, then every 0.5 s while the menu is open.
+    fn snapshotDue(self: *const MacBridge, idx: usize) bool {
+        const last = self.snap_tick[idx];
+        return last == 0 or (self.popover_visible and self.frame_idx + 1 >= last + 15);
+    }
+
+    /// Wraps the snapshot now in the Space's own pixel buffer as its preview image.
+    fn publishSnapshot(self: *MacBridge, idx: usize) void {
+        self.snap_tick[idx] = self.frame_idx + 1;
+        const img = self.CGImageCreate(NATIVE_W, NATIVE_H, 8, 32, NATIVE_W * 4, self.color_space, 5 | (4 << 12), self.native_data_providers[idx], null, false, 0) orelse return;
+        const sp = &self.obs.spaces[idx];
+        if (sp.cg_image) |old| self.CGImageRelease(old);
+        sp.cg_image = img;
+    }
+
     fn dropMetalTheme(self: *MacBridge, idx: usize) void {
         if (self.mt[idx]) |*p| p.destroy();
         self.mt[idx] = null;
@@ -616,11 +633,15 @@ const MacBridge = struct {
             const seed: u32 = @truncate(std.hash.Wyhash.hash(sp.space_id, sp.getPath()));
             self.mt[idx] = gpu.ThemePresenter.create(src, sp.getLabel(), sp.dylib_gen, seed, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H) orelse return false;
             self.mt_last_tick[idx] = self.frame_idx;
+            self.snap_tick[idx] = 0;
         }
         const ticks = self.frame_idx -| self.mt_last_tick[idx];
         self.mt_last_tick[idx] = self.frame_idx;
         const dt = std.math.clamp(@as(f32, @floatFromInt(ticks)) / 30.0, 1.0 / 30.0, 0.5);
-        return self.mt[idx].?.render(dt);
+        const p = &self.mt[idx].?;
+        if (!p.render(dt)) return false;
+        if (self.snapshotDue(idx) and p.snapshot(&self.obs.space_native_pixels[idx])) self.publishSnapshot(idx);
+        return true;
     }
 
     fn dropGpu(self: *MacBridge, idx: usize) void {
@@ -640,9 +661,13 @@ const MacBridge = struct {
             if (self.gpu_tried[idx] == sp.dylib_handle) return false; // not a GPU build: don't retry every frame
             self.gpu_tried[idx] = sp.dylib_handle;
             self.gpu[idx] = gpu.Presenter.create(sp.dylib_handle, sp.theme_state, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H) orelse return false;
+            self.snap_tick[idx] = 0;
         }
         self.obs.stepSpace(idx);
-        return self.gpu[idx].?.render();
+        const p = &self.gpu[idx].?;
+        if (!p.render()) return false;
+        if (self.snapshotDue(idx) and p.snapshot(&self.obs.space_native_pixels[idx])) self.publishSnapshot(idx);
+        return true;
     }
 
     /// True while the login window / lock screen covers the session (CGSSessionScreenIsLocked).
@@ -924,11 +949,9 @@ const MacBridge = struct {
 
     pub fn assignFileToSpace(self: *MacBridge, space_idx: usize, path: []const u8) bool {
         if (space_idx >= self.obs.n_spaces) return false;
-        if (isImagePath(path)) {
-            return self.loadImageIntoSpace(space_idx, path);
-        } else {
-            return self.loadCodeFileIntoSpace(space_idx, path);
-        }
+        const ok = if (isImagePath(path)) self.loadImageIntoSpace(space_idx, path) else self.loadCodeFileIntoSpace(space_idx, path);
+        std.debug.print("argus: {s} -> Space {d}: {s}\n", .{ path, space_idx + 1, if (ok) "loaded" else "refused" });
+        return ok;
     }
 
     pub fn bakeCGImageCover(self: *MacBridge, raw_img: ?*anyopaque) ?*anyopaque {

@@ -34,6 +34,24 @@ fn makeLayer(dev: mtl.Id, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize
     return ml;
 }
 
+/// Copies a w x h RGBA8 frame out of the GPU into `dst` (packRGBA layout), for menu previews.
+/// `encode` writes the frame into the texture it's given. Blocks until the GPU is done (~1-2 ms).
+fn snapshotInto(dev: mtl.Id, queue: mtl.Id, tex: *mtl.Id, w: usize, h: usize, dst: []u32, ctx: anytype, comptime encode: fn (@TypeOf(ctx), mtl.Id, mtl.Id) void) bool {
+    if (dst.len < w * h) return false;
+    if (tex.* == null) tex.* = mtl.newTexture(dev, mtl.PIXEL_RGBA8, w, h, mtl.STORAGE_SHARED);
+    if (tex.* == null) return false;
+    const pool = mtl.poolPush();
+    defer mtl.poolPop(pool);
+    const cb = mtl.msg(mtl.Id, queue, "commandBuffer", .{});
+    encode(ctx, cb, tex.*);
+    mtl.msg(void, cb, "commit", .{});
+    mtl.msg(void, cb, "waitUntilCompleted", .{});
+    mtl.msg(void, tex.*, "getBytes:bytesPerRow:fromRegion:mipmapLevel:", .{
+        @as(*anyopaque, @ptrCast(dst.ptr)), w * 4, mtl.MTLRegion{ .x = 0, .y = 0, .z = 0, .w = w, .h = h, .d = 1 }, @as(usize, 0),
+    });
+    return true;
+}
+
 fn detachLayer(layer: mtl.Id) void {
     if (layer == null) return;
     mtl.msg(void, layer, "removeFromSuperlayer", .{});
@@ -45,6 +63,7 @@ pub const ThemePresenter = struct {
     theme: metal_theme.Theme,
     layer: mtl.Id,
     gen: u32, // SpaceConfig.dylib_gen of the load this was built for
+    snap_tex: mtl.Id = null,
 
     pub fn create(src: []const u8, label: []const u8, gen: u32, seed: u32, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize) ?ThemePresenter {
         var err_buf: [2048]u8 = undefined;
@@ -70,7 +89,18 @@ pub const ThemePresenter = struct {
         return true;
     }
 
+    /// Draws the current state once more into `dst` (packRGBA, w x h) for the menu preview.
+    pub fn snapshot(self: *ThemePresenter, dst: []u32) bool {
+        const encode = struct {
+            fn f(t: *metal_theme.Theme, cb: mtl.Id, out: mtl.Id) void {
+                t.encodeDrawOnly(cb, out);
+            }
+        }.f;
+        return snapshotInto(self.theme.dev, self.theme.queue, &self.snap_tex, self.theme.frame.width, self.theme.frame.height, dst, &self.theme, encode);
+    }
+
     pub fn destroy(self: *ThemePresenter) void {
+        mtl.release(self.snap_tex);
         detachLayer(self.layer);
         self.theme.deinit();
         self.* = undefined;
@@ -93,6 +123,7 @@ pub const Presenter = struct {
     stat: mtl.Id,
     fill_frame: FillFrameFn,
     frame: bt.Frame = undefined,
+    snap_tex: mtl.Id = null,
 
     /// Returns null when the dylib isn't a GPU build or Metal is unavailable.
     pub fn create(handle: ?*anyopaque, state_ptr: ?*anyopaque, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize) ?Presenter {
@@ -150,8 +181,26 @@ pub const Presenter = struct {
         defer mtl.poolPop(pool);
         self.fill_frame(self.state, &self.frame);
         const drawable = mtl.msg(mtl.Id, self.layer, "nextDrawable", .{}) orelse return false;
-        const tex = mtl.msg(mtl.Id, drawable, "texture", .{});
         const cb = mtl.msg(mtl.Id, k.queue, "commandBuffer", .{});
+        self.encodeInto(cb, mtl.msg(mtl.Id, drawable, "texture", .{}));
+        mtl.msg(void, cb, "presentDrawable:", .{drawable});
+        mtl.msg(void, cb, "commit", .{});
+        return true;
+    }
+
+    /// The current frame, again, into `dst` (packRGBA, w x h) for the menu preview.
+    pub fn snapshot(self: *Presenter, dst: []u32) bool {
+        const k = &(kernel orelse return false);
+        const encode = struct {
+            fn f(p: *Presenter, cb: mtl.Id, out: mtl.Id) void {
+                p.encodeInto(cb, out);
+            }
+        }.f;
+        return snapshotInto(k.device, k.queue, &self.snap_tex, self.frame.width, self.frame.height, dst, self, encode);
+    }
+
+    fn encodeInto(self: *Presenter, cb: mtl.Id, tex: mtl.Id) void {
+        const k = &kernel.?;
         const enc = mtl.msg(mtl.Id, cb, "computeCommandEncoder", .{});
         mtl.msg(void, enc, "setComputePipelineState:", .{k.pso});
         for (self.data, self.offs, 0..) |b, o, i| mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ b, o, i });
@@ -162,13 +211,11 @@ pub const Presenter = struct {
             mtl.MTLSize{ .w = self.frame.width, .h = self.frame.height, .d = 1 }, k.groupSize(),
         });
         mtl.msg(void, enc, "endEncoding", .{});
-        mtl.msg(void, cb, "presentDrawable:", .{drawable});
-        mtl.msg(void, cb, "commit", .{});
-        return true;
     }
 
     /// Detaches the layer and releases GPU objects. Call before the theme's state is freed.
     pub fn destroy(self: *Presenter) void {
+        mtl.release(self.snap_tex);
         detachLayer(self.layer);
         // The zero-copy buffer is bound up to five times but owned once.
         var seen: [5]mtl.Id = @splat(null);
