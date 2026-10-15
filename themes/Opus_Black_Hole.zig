@@ -35,7 +35,8 @@
 //  * Turbulence: emissivity fluctuations advected at the true Keplerian rate
 //    and refreshed every few inner orbits; the amplitude is a modelling choice.
 //  * Hot spots: plasma clumps on exact Kerr orbits (like Sgr A* flares). Each one
-//    shows up in every lensed image at once, with its own light-travel lag, and
+//    shows up in every lensed image at once, its orbital phase lagging by each image's
+//    light-travel time (its birth and fade do not lag: not modelled), and
 //    shears as it ages: every radius of the clump keeps its own Omega(r), so after
 //    an age a the part at r has moved Omega(r) a, and the clump draws out into an arc.
 //    Their count, size and brightness are choices; their motion is not.
@@ -474,7 +475,7 @@ const Rec = extern struct {
     fr: u8 = 0, // pixel footprint on the disk: radial extent in r-bins (saturating)
     tobs: f16 = 0, // observed blackbody temperature g*T, for re-coloring hotter gas
     fp: u8 = 0, // pixel footprint: azimuthal extent in units of 64/65536 turn (saturating)
-    _pad: u8 = 0,
+    bf: u8 = 0, // share of bg (luminance, /255) that lies behind this pixel's translucent gas
     tq: u16 = 0, // light-travel phase Omega*t in 1/1024 turn, mod 64 turns: kept apart so it can be unwrapped
 };
 
@@ -629,7 +630,7 @@ pub const State = struct {
             const v = @as(f64, @floatFromInt(k)) / 255.0;
             self.lin8[k] = @floatCast(if (v <= 0.04045) v / 12.92 else math.pow(f64, (v + 0.055) / 1.055, 2.4));
         }
-        // Tileable turbulence: three octaves of smoothed value noise, periodic in r-bin and phi.
+        // Tileable turbulence: two octaves of smoothed value noise, periodic in r-bin and phi.
         for (0..R_BINS) |ri| {
             for (0..NP) |pi| {
                 var v: f64 = 0.0;
@@ -1046,6 +1047,7 @@ pub const State = struct {
                     for (bx * BLOCK..x_end) |px| {
                         var disk_rgb = [3]f64{ 0, 0, 0 };
                         var bg_rgb = [3]f64{ 0, 0, 0 };
+                        var disk_behind = [3]f64{ 0, 0, 0 }; // behind the disk samples: in bg only if translucent
                         var nd: usize = 0;
                         var first: Sample = .{};
                         const sub: usize = if (cl.cls == .edge) ss else 1; // supersample true edges only
@@ -1106,7 +1108,7 @@ pub const State = struct {
                                 for (0..3) |i| disk_rgb[i] += s.rgb[i];
                                 if (opticalDepth(hit.r) < TAU_BEHIND) {
                                     const bh = self.behind(fx, backs, foot);
-                                    for (0..3) |i| bg_rgb[i] += bh[i];
+                                    for (0..3) |i| disk_behind[i] += bh[i];
                                 }
                             } else {
                                 for (0..3) |i| bg_rgb[i] += s.rgb[i];
@@ -1114,6 +1116,15 @@ pub const State = struct {
                         }
                         const idx = py * w + px;
                         const fs: f64 = @floatFromInt(nsamp);
+                        // draw() composites translucent pixels as cov*c + (1 - bf*emit)*bg: only the light
+                        // behind the gas (share bf) is dimmed by it, not the sky beside it.
+                        var bf: u8 = 0;
+                        if (nd > 0 and self.tau_tab[first.rbin / R_FRAC] < TAU_BEHIND) {
+                            const lb = luma(disk_behind);
+                            for (0..3) |i| bg_rgb[i] += disk_behind[i];
+                            const lt = luma(bg_rgb);
+                            if (lt > 1e-12) bf = @intFromFloat(@round(math.clamp(lb / lt, 0.0, 1.0) * 255.0));
+                        }
                         self.bg[idx] = self.packBg(.{ bg_rgb[0] / fs, bg_rgb[1] / fs, bg_rgb[2] / fs });
                         if (nd > 0) {
                             const fd: f64 = @floatFromInt(nd);
@@ -1124,6 +1135,7 @@ pub const State = struct {
                                 .cov = @intCast(nd * 255 / nsamp),
                                 .tobs = @floatCast(@min(first.tobs, 60000.0)),
                                 .tq = first.tq,
+                                .bf = bf,
                             };
                             self.row_x0[py] = @min(self.row_x0[py], @as(u16, @intCast(px)));
                             self.row_x1[py] = @max(self.row_x1[py], @as(u16, @intCast(px + 1)));
@@ -1301,7 +1313,15 @@ pub const State = struct {
                     var boost: f32 = 0.0;
                     // Azimuth a sheared spot sweeps across this pixel's radial footprint, per M of age.
                     const shear_q_per_age = self.shear_tab[rb] * (frf + 0.5);
-                    const om_px: f32 = @floatCast(self.om_tab[rb]);
+                    // Omega at this pixel's radius, between the table's bin centres.
+                    const om_px: f32 = blk: {
+                        const xb = math.clamp(rbf - 0.5, 0.0, @as(f32, R_BINS - 1) - 0.001);
+                        const ib: usize = @intFromFloat(xb);
+                        const fb = xb - @as(f32, @floatFromInt(ib));
+                        const o0: f32 = @floatCast(self.om_tab[ib]);
+                        const o1: f32 = @floatCast(self.om_tab[@min(ib + 1, R_BINS - 1)]);
+                        break :blk o0 + (o1 - o0) * fb;
+                    };
                     inline for (0..NSPOT) |j| {
                         if (sm & (@as(u8, 1) << j) != 0) {
                             // Spot seen through this pixel's footprint: widen the kernel, keep its energy.
@@ -1315,7 +1335,8 @@ pub const State = struct {
                             const shear: f32 = (om_px - self.spot_om[j]) * self.spot_age[j] * (65536.0 / (2.0 * math.pi));
                             const dp0: f32 = @as(f32, @floatFromInt(@as(i16, @bitCast(rc.phi -% self.spot_q[j])))) - shear;
                             const dp = dp0 - 65536.0 * @round(dp0 / 65536.0);
-                            if (rc.fp == 255 or fpf > 2.0 * self.spot_wp[j] or frf > 2.0 * self.spot_wr[j]) {
+                            // Saturated footprints as on the GPU (7-bit azimuth, 5-bit radius).
+                            if (rc.fp >= 127 or rc.fr >= 31 or fpf > 2.0 * self.spot_wp[j] or frf > 2.0 * self.spot_wr[j]) {
                                 // Unresolved here (pixel footprint wider than the spot): widening the
                                 // kernel would smear it into long false arcs, so it is left out.
                                 // Emission phase winds > 1/4 turn across this pixel (lensing time delays):
@@ -1337,7 +1358,7 @@ pub const State = struct {
                         spot_rgb = .{ @floatCast(hot[0]), @floatCast(hot[1]), @floatCast(hot[2]) };
                     } else k *= 1.0 + boost;
                 }
-                var c = if (spot_scale > 0.0)
+                const c = if (spot_scale > 0.0)
                     [3]f32{ spot_rgb[0] * spot_scale * k, spot_rgb[1] * spot_scale * k, spot_rgb[2] * spot_scale * k }
                 else
                     [3]f32{ @as(f32, rc.rgb[0]) * k, @as(f32, rc.rgb[1]) * k, @as(f32, rc.rgb[2]) * k };
@@ -1345,10 +1366,11 @@ pub const State = struct {
                 const tm = 1.0 / (1.0 + yl); // Reinhard on luminance, hue preserved
                 const bgp = bg_row[x];
                 if (thin) {
-                    // I = cov * B(1 - e^-tau) + bg * (1 - cov (1 - e^-tau)); bg holds what lies behind.
+                    // I = cov * B(1 - e^-tau) + bg * (1 - bf (1 - e^-tau)): bg holds the light beside the gas
+                    // and, a share bf of it, the light behind it, which only that share sees dimmed.
                     var out: [3]u8 = undefined;
                     const cov: f32 = @as(f32, @floatFromInt(rc.cov)) / 255.0;
-                    const tr = 1.0 - cov * emit;
+                    const tr = 1.0 - @as(f32, @floatFromInt(rc.bf)) / 255.0 * emit;
                     for (0..3) |i| {
                         const bl = self.lin8[(bgp >> @intCast(8 * i)) & 0xFF];
                         const v = @min(cov * c[i] * tm + tr * bl, 1.0);
@@ -1361,13 +1383,14 @@ pub const State = struct {
                     const b0 = self.srgb[@intFromFloat(@min(c[2] * tm, 1.0) * 4095.0)];
                     row[x] = sdk.packRGBA(r0, g0, b0);
                 } else {
+                    // Partly covered opaque pixel, blended in linear light: bg already holds the sky
+                    // of the uncovered samples (weighted by their share), so it adds as is.
                     var out: [3]u8 = undefined;
                     const cov: f32 = @as(f32, @floatFromInt(rc.cov)) / 255.0;
                     for (0..3) |i| {
-                        c[i] = @min(c[i] * tm, 1.0);
-                        const dv: f32 = @floatFromInt(self.srgb[@intFromFloat(c[i] * 4095.0)]);
-                        const bv: f32 = @floatFromInt((bgp >> @intCast(8 * i)) & 0xFF);
-                        out[i] = @intFromFloat(@round(dv * cov + bv * (1.0 - cov)));
+                        const bl = self.lin8[(bgp >> @intCast(8 * i)) & 0xFF];
+                        const v = @min(cov * c[i] * tm + bl, 1.0);
+                        out[i] = self.srgb[@intFromFloat(v * 4095.0)];
                     }
                     row[x] = sdk.packRGBA(out[0], out[1], out[2]);
                 }

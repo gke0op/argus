@@ -89,7 +89,6 @@ struct Frame {
     float gw[2];
     float gnorm;
     float exposure;
-    float tau_behind;
     uint width;
     uint height;
     float spot_age[NSPOT]; // M since birth: the shear
@@ -545,6 +544,7 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
                      device Rec* recs [[buffer(3)]],
                      device uint* bg [[buffer(4)]],
                      device ushort* tq [[buffer(5)]],
+                     device uchar* bfrac [[buffer(6)]],
                      uint2 gid [[thread_position_in_grid]]) {
     const uint x = gid.x;
     const uint y = gid.y + P.row0;
@@ -590,12 +590,17 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
     // A pixel whose samples disagree (an edge) or see light that crossed the disk plane more
     // than once (the photon rings) is traced again with REFINE x REFINE samples: the n = 2
     // ring is a fraction of a pixel wide, and 4 samples would alias it.
+    // Every layer counts: a ring or an edge seen through translucent gas needs it as much.
     bool refine = false;
-    for (uint s = 1; s < 4; s++) {
-        if (hits[s][0].kind != hits[0][0].kind || hits[s][0].n != hits[0][0].n) refine = true;
-    }
-    for (uint s = 0; s < 4; s++) {
-        if (hits[s][0].kind == KIND_DISK && hits[s][0].n >= 2) refine = true;
+    for (uint l = 0; l < 3; l++) {
+        for (uint s = 1; s < 4; s++) {
+            if (hits[s][l].kind != hits[0][l].kind || hits[s][l].n != hits[0][l].n) refine = true;
+        }
+        // Thin photon rings: two or more crossings in front; seen through gas, the wide secondary
+        // image already has two, so there a ring means three or more.
+        for (uint s = 0; s < 4; s++) {
+            if (hits[s][l].kind == KIND_DISK && hits[s][l].n >= (l == 0 ? 2u : 3u)) refine = true;
+        }
     }
 
     Px px = pxNew();
@@ -604,35 +609,67 @@ kernel void bh_trace(constant TraceParams& P [[buffer(0)]],
         for (uint s = 0; s < 4; s++) addSample(px, P, st, ttab, alphas[s], hits[s][0], hits[s][1], hits[s][2], foot);
     } else {
         N = REFINE * REFINE;
-        for (uint i = 0; i < N; i++) {
-            const float fx = float(x) + (float(i % REFINE) + 0.5f) / float(REFINE);
-            const float fy = float(y) + (float(i / REFINE) + 0.5f) / float(REFINE);
-            const float2 ab = alphaBeta(P, fx, fy);
-            Ray ray = startRay(P, ab.x, ab.y);
-            Hit h[3] = {traceNext(P, ray, true), hitNone(), hitNone()};
-            for (uint l = 1; l < 3; l++) {
-                if (h[l - 1].kind != KIND_DISK || opticalDepth(h[l - 1].r) >= 2.0f * TAU_BEHIND) break;
-                h[l] = traceNext(P, ray, true);
+        // One row of samples at a time: the sky footprint of each layer is re-measured from
+        // horizontally adjacent samples (1/REFINE pixel apart) before the row is shaded, so stars
+        // at refined edges keep their brightness even where no 2x2 pair saw the sky.
+        for (uint row = 0; row < REFINE; row++) {
+            Hit h[REFINE][3];
+            float al[REFINE];
+            float3 m = float3(0.0f);
+            bool3 got = bool3(false);
+            for (uint c = 0; c < REFINE; c++) {
+                const float fx = float(x) + (float(c) + 0.5f) / float(REFINE);
+                const float fy = float(y) + (float(row) + 0.5f) / float(REFINE);
+                const float2 ab = alphaBeta(P, fx, fy);
+                al[c] = ab.x;
+                Ray ray = startRay(P, ab.x, ab.y);
+                h[c][0] = traceNext(P, ray, true);
+                h[c][1] = hitNone();
+                h[c][2] = hitNone();
+                for (uint l = 1; l < 3; l++) {
+                    if (h[c][l - 1].kind != KIND_DISK || opticalDepth(h[c][l - 1].r) >= 2.0f * TAU_BEHIND) break;
+                    h[c][l] = traceNext(P, ray, true);
+                }
+                if (c > 0) {
+                    for (uint l = 0; l < 3; l++) {
+                        if (h[c][l].kind == KIND_SKY && h[c - 1][l].kind == KIND_SKY) {
+                            m[l] = max(m[l], length(h[c][l].dir - h[c - 1][l].dir));
+                            got[l] = true;
+                        }
+                    }
+                }
             }
-            addSample(px, P, st, ttab, ab.x, h[0], h[1], h[2], foot);
+            float3 rfoot = foot;
+            for (uint l = 0; l < 3; l++) {
+                if (got[l]) rfoot[l] = max(m[l] * float(REFINE), 0.25f * P.pix_ang);
+            }
+            for (uint c = 0; c < REFINE; c++) addSample(px, P, st, ttab, al[c], h[c][0], h[c][1], h[c][2], rfoot);
         }
     }
 
     // The lowest-order disk image stays animated; higher orders go into bg as static light.
+    // The animated layer is the lowest order that covers at least 1/30 of the pixel.
     int p = -1;
-    for (int o = 2; o >= 0; o--) if (px.cnt[o] > 0) p = o;
-    float3 bg_rgb = px.bg;
     uint covq = 0;
-    if (p >= 0) {
-        covq = min((px.cnt[p] * COV_MAX + N / 2) / N, COV_MAX);
-        if (covq == 0) p = -1; // under 1/30 of the pixel: static like the rest
+    for (int o = 0; o < 3 && p < 0; o++) {
+        const uint q = min((px.cnt[o] * COV_MAX + N / 2) / N, COV_MAX);
+        if (q > 0) {
+            p = o;
+            covq = q;
+        }
     }
-    for (int o = 0; o < 3; o++) if (o != p) bg_rgb += px.stat[o];
-    // bh_shade composites translucent pixels as cov*c + (1 - cov*emit)*bg and opaque ones as
-    // cov*c + bg: the light behind the animated samples belongs in bg only in the first case.
-    if (p >= 0 && st.tau_tab[px.first[p].rbin / R_FRAC] < TAU_BEHIND) bg_rgb += px.behind[p];
+    float3 beside = px.bg;
+    for (int o = 0; o < 3; o++) if (o != p) beside += px.stat[o];
+    // Light behind the animated gas (translucent pixels only) is dimmed every frame by that gas;
+    // light beside it is not. bh_shade composites cov*c + (1 - f*emit)*bg, where f is the share of
+    // bg that lies behind the gas: exact when both parts have the same colour.
+    float3 under = float3(0.0f);
+    if (p >= 0 && st.tau_tab[px.first[p].rbin / R_FRAC] < TAU_BEHIND) under = px.behind[p];
+    const float3 bg_rgb = beside + under;
+    const float lt = luma(bg_rgb);
     const uint idx = y * P.width + x;
     bg[idx] = packRGB9E5(bg_rgb / float(N));
+    bfrac[idx] = uchar(lt > 1e-12f ? clamp(luma(under) / lt, 0.0f, 1.0f) * 255.0f + 0.5f : 0.0f);
     recs[idx] = p >= 0 ? Rec{ushort(px.first[p].rbin), ushort(px.first[p].phi), ushort(covq)} : Rec{0, 0, 0};
     tq[idx] = p >= 0 ? ushort(px.first[p].tq) : ushort(0);
 }
@@ -675,7 +712,7 @@ kernel void bh_footprint(constant TraceParams& P [[buffer(0)]],
 
 // One pixel of the theme's draw(), composited before tone mapping (light adds in linear).
 static float3 shadePre(uint x, uint y, constant TraceParams& P, device const float* ttab,
-                       device const Rec* recs, device const uint* bg,
+                       device const Rec* recs, device const uint* bg, device const uchar* bfrac,
                        device const uchar* noise, constant Static& st, constant Frame& fr, float exposure) {
     const uint i = y * P.width + x;
     const float3 bgv = unpackRGB9E5(bg[i]);
@@ -752,8 +789,10 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
 
     const float3 c = spot_scale > 0.0f ? spot_rgb * spot_scale * k : rgb * k;
     const float cov = float(ns) / float(COV_MAX);
-    // bg holds the sky beside the disk samples and, under translucent gas, what lies behind it.
-    return thin ? cov * c + (1.0f - cov * emit) * bgv : cov * c + bgv;
+    // bg holds the light beside the disk samples and, under translucent gas, what lies behind it;
+    // only the second part (share f) is dimmed by the gas.
+    const float f = float(bfrac[i]) / 255.0f;
+    return thin ? cov * c + (1.0f - f * emit) * bgv : cov * c + bgv;
 }
 
 static float srgbEncode(float v) {
@@ -783,6 +822,7 @@ kernel void bh_shade(device const Rec* recs [[buffer(0)]],
                      constant View& v [[buffer(5)]],
                      constant TraceParams& P [[buffer(6)]],
                      device const float* ttab [[buffer(7)]],
+                     device const uchar* bfrac [[buffer(8)]],
                      texture2d<float, access::write> out [[texture(0)]],
                      uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= v.out_w || gid.y >= v.out_h) return;
@@ -790,7 +830,7 @@ kernel void bh_shade(device const Rec* recs [[buffer(0)]],
     const uint x = min(uint((float(gid.x) + 0.5f) * float(v.width) / float(v.out_w)), v.width - 1);
     const uint y = min(uint((float(gid.y) + 0.5f) * float(v.height) / float(v.out_h)), v.height - 1);
     float3 c = float3(0.0f);
-    if (y < v.rows_done) c = toneMap(shadePre(x, y, P, ttab, recs, bg, noise, st, fr, v.exposure), max(v.headroom, 1.0f));
+    if (y < v.rows_done) c = toneMap(shadePre(x, y, P, ttab, recs, bg, bfrac, noise, st, fr, v.exposure), max(v.headroom, 1.0f));
     c = max(c, 0.0f);
     if (v.out_mode == OUT_SRGB) c = float3(srgbEncode(min(c.x, 1.0f)), srgbEncode(min(c.y, 1.0f)), srgbEncode(min(c.z, 1.0f)));
     else if (v.out_mode == OUT_PQ) c = pqEncode(c);

@@ -19,8 +19,6 @@ pub const NSPOT = 6;
 pub const EMIT_N = 1024;
 pub const BB_N = 1024;
 pub const PT_N = 4096;
-/// TAU_THICK * e^TAU_NOISE, private in the theme.
-pub const TAU_BEHIND: f32 = @floatCast(5.0 * @exp(@as(f64, 1.2)));
 /// Samples per pixel side in the GPU trace (2 -> 4 samples per pixel).
 pub const SS: u32 = 2;
 /// Exposure metering grid width (the theme meters on the same 192-wide grid).
@@ -38,7 +36,6 @@ pub const Frame = extern struct {
     gw: [2]f32,
     gnorm: f32,
     exposure: f32,
-    tau_behind: f32,
     width: u32,
     height: u32,
     spot_age: [NSPOT]f32,
@@ -118,7 +115,6 @@ pub fn fillFrame(st: anytype, out: *Frame) void {
     out.gw = st.gw;
     out.gnorm = st.gnorm;
     out.exposure = st.exposure;
-    out.tau_behind = TAU_BEHIND;
     out.width = @intCast(st.w);
     out.height = @intCast(st.h);
     out.spot_age = st.spot_age;
@@ -185,7 +181,8 @@ pub fn ttabBytes(st: anytype) []const u8 {
     return std.mem.sliceAsBytes(&st.ttab);
 }
 
-/// Bytes per traced pixel kept on the GPU: record (6) + background (4, RGB9E5). The trace
-/// also needs 2 bytes per pixel of light-travel phase until the footprint pass is done.
-pub const BYTES_PER_PIXEL: usize = 10;
+/// Bytes per traced pixel kept on the GPU: record (6) + background (4, RGB9E5) + the share of
+/// the background that lies behind the animated gas (1). The trace also needs 2 bytes per pixel
+/// of light-travel phase until the footprint pass is done.
+pub const BYTES_PER_PIXEL: usize = 11;
 pub const TEMP_BYTES_PER_PIXEL: usize = 2;
