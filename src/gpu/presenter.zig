@@ -1,19 +1,81 @@
 // ============================================================================
-// ARGUS GPU PROTOTYPE // src/gpu/presenter.zig
+// ARGUS GPU // src/gpu/presenter.zig
 //
-// Presents a GPU-ported theme through a CAMetalLayer on its Space's window: the theme
-// steps on the CPU, the Metal kernel shades every pixel straight into the drawable.
-// No CGImage, no CPU pixel buffer. The theme's tables are bound zero-copy (Apple silicon
-// shares memory between CPU and GPU), so the GPU path adds no per-pixel memory.
+// Presents GPU themes through a CAMetalLayer on their Space's window, shading straight
+// into the drawable (no CGImage, no CPU pixel buffer):
+//  - ThemePresenter: Metal-only themes (themes/*.metal, see metal_theme.zig).
+//  - Presenter: Zig + Metal hybrids. The Zig theme steps on the CPU and a Metal kernel
+//    shades every pixel from its tables, bound zero-copy (Apple silicon shares memory
+//    between CPU and GPU). Today: Opus_Black_Hole via src/gpu/bh_export.zig.
 // ============================================================================
 
 const std = @import("std");
 const mtl = @import("metal.zig");
 const bt = @import("bh_tables.zig");
+const metal_theme = @import("metal_theme.zig");
 
 pub const CGRect = extern struct { x: f64, y: f64, w: f64, h: f64 };
 
 const MSL = @embedFile("opus_black_hole.metal");
+
+/// A CAMetalLayer covering `host_layer` with a w x h BGRA8 drawable the kernels write directly.
+fn makeLayer(dev: mtl.Id, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize) mtl.Id {
+    const ml = mtl.msg(mtl.Id, mtl.cls("CAMetalLayer"), "layer", .{}) orelse return null;
+    _ = mtl.msg(mtl.Id, ml, "retain", .{});
+    mtl.msg(void, ml, "setDevice:", .{dev});
+    mtl.msg(void, ml, "setPixelFormat:", .{mtl.PIXEL_BGRA8});
+    mtl.msg(void, ml, "setFramebufferOnly:", .{false});
+    mtl.msg(void, ml, "setDrawableSize:", .{mtl.CGSize{ .width = @floatFromInt(w), .height = @floatFromInt(h) }});
+    if (color_space != null) mtl.msg(void, ml, "setColorspace:", .{color_space});
+    mtl.msg(void, ml, "setOpaque:", .{true});
+    mtl.msg(void, ml, "setFrame:", .{mtl.msg(CGRect, host_layer, "bounds", .{})});
+    mtl.msg(void, ml, "setAutoresizingMask:", .{@as(u32, 2 | 16)}); // width | height sizable
+    mtl.msg(void, host_layer, "addSublayer:", .{ml});
+    return ml;
+}
+
+fn detachLayer(layer: mtl.Id) void {
+    if (layer == null) return;
+    mtl.msg(void, layer, "removeFromSuperlayer", .{});
+    mtl.release(layer);
+}
+
+/// A Metal-only theme on a Space window.
+pub const ThemePresenter = struct {
+    theme: metal_theme.Theme,
+    layer: mtl.Id,
+    gen: u32, // SpaceConfig.dylib_gen of the load this was built for
+
+    pub fn create(src: []const u8, label: []const u8, gen: u32, seed: u32, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize) ?ThemePresenter {
+        var err_buf: [2048]u8 = undefined;
+        var theme = metal_theme.Theme.compile(src, label, @intCast(w), @intCast(h), seed, &err_buf) catch {
+            std.debug.print("argus: {s}: {s}\n", .{ label, std.mem.sliceTo(&err_buf, 0) });
+            return null;
+        };
+        const layer = makeLayer(theme.dev, host_layer, color_space, w, h) orelse {
+            theme.deinit();
+            return null;
+        };
+        return .{ .theme = theme, .layer = layer, .gen = gen };
+    }
+
+    pub fn render(self: *ThemePresenter, dt: f32) bool {
+        const pool = mtl.poolPush();
+        defer mtl.poolPop(pool);
+        const drawable = mtl.msg(mtl.Id, self.layer, "nextDrawable", .{}) orelse return false;
+        const cb = mtl.msg(mtl.Id, self.theme.queue, "commandBuffer", .{});
+        self.theme.encode(cb, mtl.msg(mtl.Id, drawable, "texture", .{}), dt);
+        mtl.msg(void, cb, "presentDrawable:", .{drawable});
+        mtl.msg(void, cb, "commit", .{});
+        return true;
+    }
+
+    pub fn destroy(self: *ThemePresenter) void {
+        detachLayer(self.layer);
+        self.theme.deinit();
+        self.* = undefined;
+    }
+};
 const PAGE: usize = 16384;
 
 const FillFrameFn = *const fn (*anyopaque, *bt.Frame) callconv(.c) void;
@@ -77,18 +139,7 @@ pub const Presenter = struct {
             for (0..5) |i| p.data[i] = k.bufferCopy(@as([*]const u8, @ptrFromInt(ptrs[i]))[0..lens[i]]);
         }
 
-        const ml = mtl.msg(mtl.Id, mtl.cls("CAMetalLayer"), "layer", .{}) orelse return null;
-        _ = mtl.msg(mtl.Id, ml, "retain", .{});
-        mtl.msg(void, ml, "setDevice:", .{k.device});
-        mtl.msg(void, ml, "setPixelFormat:", .{mtl.PIXEL_BGRA8});
-        mtl.msg(void, ml, "setFramebufferOnly:", .{false});
-        mtl.msg(void, ml, "setDrawableSize:", .{mtl.CGSize{ .width = @floatFromInt(w), .height = @floatFromInt(h) }});
-        if (color_space != null) mtl.msg(void, ml, "setColorspace:", .{color_space});
-        mtl.msg(void, ml, "setOpaque:", .{true});
-        mtl.msg(void, ml, "setFrame:", .{mtl.msg(CGRect, host_layer, "bounds", .{})});
-        mtl.msg(void, ml, "setAutoresizingMask:", .{@as(u32, 2 | 16)}); // width | height sizable
-        mtl.msg(void, host_layer, "addSublayer:", .{ml});
-        p.layer = ml;
+        p.layer = makeLayer(k.device, host_layer, color_space, w, h) orelse return null;
         return p;
     }
 
@@ -118,10 +169,7 @@ pub const Presenter = struct {
 
     /// Detaches the layer and releases GPU objects. Call before the theme's state is freed.
     pub fn destroy(self: *Presenter) void {
-        if (self.layer != null) {
-            mtl.msg(void, self.layer, "removeFromSuperlayer", .{});
-            mtl.release(self.layer);
-        }
+        detachLayer(self.layer);
         // The zero-copy buffer is bound up to five times but owned once.
         var seen: [5]mtl.Id = @splat(null);
         for (self.data, 0..) |b, i| {

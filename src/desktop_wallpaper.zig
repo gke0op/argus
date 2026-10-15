@@ -3,6 +3,7 @@ const math = std.math;
 pub const sc = @import("desktop/space_config.zig");
 pub const obs_mod = @import("desktop/observatory.zig");
 const gpu = @import("gpu/presenter.zig");
+const metal_theme = @import("gpu/metal_theme.zig");
 const status_glyph = @import("desktop/status_glyph.zig");
 
 pub const NATIVE_W = sc.NATIVE_W;
@@ -189,6 +190,9 @@ const MacBridge = struct {
     gpu_enabled: bool = false,
     gpu: [MAX_SPACES]?gpu.Presenter = @splat(null),
     gpu_tried: [MAX_SPACES]?*anyopaque = @splat(null),
+    // Metal-only themes (themes/*.metal), one presenter per Space.
+    mt: [MAX_SPACES]?gpu.ThemePresenter = @splat(null),
+    mt_last_tick: [MAX_SPACES]usize = @splat(0),
     perf_renders: [MAX_SPACES]u16 = @splat(0),
     perf_visible: u16 = 0,
     screen_rect: CGRect,
@@ -546,7 +550,12 @@ const MacBridge = struct {
             }
         }
 
-        if (sp.mode != .custom_shader) self.dropGpu(idx);
+        if (sp.mode != .custom_shader or !sp.metal_theme) self.dropMetalTheme(idx);
+        if (sp.mode != .custom_shader or sp.metal_theme) self.dropGpu(idx);
+        if (sp.mode == .custom_shader and sp.metal_theme) {
+            _ = self.renderSpaceMetal(idx);
+            return;
+        }
         if (sp.mode == .custom_shader and self.gpu_enabled and self.renderSpaceGpu(idx)) return;
 
         // A picture Space whose image failed to load shows the window's black background.
@@ -586,6 +595,32 @@ const MacBridge = struct {
             if (sp.cg_image) |old| self.CGImageRelease(old);
             sp.cg_image = cg_img;
         }
+    }
+
+    fn dropMetalTheme(self: *MacBridge, idx: usize) void {
+        if (self.mt[idx]) |*p| p.destroy();
+        self.mt[idx] = null;
+    }
+
+    /// Draws a Metal-only theme into its Space's CAMetalLayer. Time advances by the real gap
+    /// since the Space's last frame, so warm (10 FPS) neighbors animate at the right speed.
+    fn renderSpaceMetal(self: *MacBridge, idx: usize) bool {
+        const sp = &self.obs.spaces[idx];
+        if (self.mt[idx]) |*p| {
+            const host = self.msg0(p.layer, self.sel_registerName("superlayer"));
+            if (p.gen != sp.dylib_gen or host != sp.desktop_layer) self.dropMetalTheme(idx);
+        }
+        if (self.mt[idx] == null) {
+            var buf: [131072]u8 = undefined;
+            const src = std.Io.Dir.cwd().readFile(g_io, sp.getPath(), &buf) catch return false;
+            const seed: u32 = @truncate(std.hash.Wyhash.hash(sp.space_id, sp.getPath()));
+            self.mt[idx] = gpu.ThemePresenter.create(src, sp.getLabel(), sp.dylib_gen, seed, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H) orelse return false;
+            self.mt_last_tick[idx] = self.frame_idx;
+        }
+        const ticks = self.frame_idx -| self.mt_last_tick[idx];
+        self.mt_last_tick[idx] = self.frame_idx;
+        const dt = std.math.clamp(@as(f32, @floatFromInt(ticks)) / 30.0, 1.0 / 30.0, 0.5);
+        return self.mt[idx].?.render(dt);
     }
 
     fn dropGpu(self: *MacBridge, idx: usize) void {
@@ -1021,8 +1056,10 @@ const MacBridge = struct {
         const content = std.Io.Dir.cwd().readFile(g_io, path, &buf) catch return false;
         if (content.len == 0) return false;
 
-        // Live Hot-Compilable Custom .zig Shader (`sdk.exportTheme` or `export fn argus_render_theme`)
-        if (std.mem.indexOf(u8, content, "argus_render_theme") != null or
+        // Live Hot-Compilable Custom .zig Shader (`sdk.exportTheme` or `export fn argus_render_theme`),
+        // or a Metal-only theme (`.metal` with `kernel void argus_draw`)
+        if ((std.mem.endsWith(u8, path, ".metal") and std.mem.indexOf(u8, content, "argus_draw") != null) or
+            std.mem.indexOf(u8, content, "argus_render_theme") != null or
             std.mem.indexOf(u8, content, "exportTheme") != null or
             std.mem.indexOf(u8, content, "argus_theme_init") != null or
             std.mem.indexOf(u8, content, "argus_theme_sdk.zig") != null or
@@ -1240,6 +1277,17 @@ fn onPopoverMouseUp(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c)
 /// Off-screen neighbors re-render every 3rd 30 Hz tick (~10 FPS).
 const NEIGHBOR_WARM_TICKS: usize = 3;
 
+/// Compiles a `.metal` theme to check it before it replaces a Space's current theme.
+fn validateMetalTheme(src: []const u8, label: []const u8) bool {
+    var err_buf: [2048]u8 = undefined;
+    var t = metal_theme.Theme.compile(src, label, @intCast(NATIVE_W), @intCast(NATIVE_H), 0, &err_buf) catch {
+        std.debug.print("argus: {s} not loaded: {s}\n", .{ label, std.mem.sliceTo(&err_buf, 0) });
+        return false;
+    };
+    t.deinit();
+    return true;
+}
+
 fn isAnimatedSpaceMode(m: SpaceMode) bool {
     return m == .custom_shader;
 }
@@ -1404,6 +1452,8 @@ pub fn main(init: std.process.Init) !void {
             perf_log = true;
         } else if (std.mem.eql(u8, a, "--gpu")) {
             sc.gpu_ports = true;
+        } else if (std.mem.eql(u8, a, "--cpu")) {
+            sc.gpu_ports = false;
         } else if (std.mem.eql(u8, a, "--window")) {
             normal_window = true;
         } else if (std.mem.eql(u8, a, "--frames") and i + 1 < args.len) {
@@ -1814,6 +1864,7 @@ pub fn main(init: std.process.Init) !void {
         .max_frames = max_frames,
     };
     g_bridge = &bridge;
+    sc.metal_validate = validateMetalTheme;
 
     // Disable macOS App Nap so NSTimer is never coalesced or throttled during Space swipes.
     // 0x00EFFFFF = NSActivityUserInitiatedAllowingIdleSystemSleep: clears bit 20
@@ -2043,4 +2094,44 @@ test "Mission Control Space reordering moves themes with space_id and resets mov
 
 test {
     _ = status_glyph;
+    _ = metal_theme;
+}
+
+test "Metal-only themes load into a Space and render on the GPU" {
+    g_io = std.testing.io;
+    sc.g_io = std.testing.io;
+    const alloc = std.testing.allocator;
+    const obs = try Observatory.init(alloc);
+    defer obs.deinit(alloc);
+    obs.n_spaces = 2;
+
+    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Tutorial_Reef.metal"));
+    try std.testing.expect(obs.spaces[1].metal_theme);
+    try std.testing.expectEqual(SpaceMode.custom_shader, obs.spaces[1].mode);
+    try std.testing.expectEqualStrings("Tutorial_Reef.metal", obs.spaces[1].getLabel());
+    // A .metal file without `argus_draw` is refused and the Space keeps its theme.
+    try std.Io.Dir.cwd().writeFile(g_io, .{ .sub_path = "/tmp/argus_not_a_theme.metal", .data = "kernel void other() {}" });
+    try std.testing.expect(!obs.loadShaderIntoSpace(1, "/tmp/argus_not_a_theme.metal"));
+    try std.testing.expectEqualStrings("Tutorial_Reef.metal", obs.spaces[1].getLabel());
+
+    const mtl = @import("gpu/metal.zig");
+    for ([_][]const u8{ "themes/Tutorial_Tides.metal", "themes/Tutorial_Reef.metal" }) |path| {
+        var buf: [131072]u8 = undefined;
+        const src = try std.Io.Dir.cwd().readFile(g_io, path, &buf);
+        var err_buf: [2048]u8 = undefined;
+        var t = metal_theme.Theme.compile(src, path, 64, 40, 1, &err_buf) catch |e| {
+            std.debug.print("{s}: {s}\n", .{ path, std.mem.sliceTo(&err_buf, 0) });
+            return e;
+        };
+        defer t.deinit();
+        const out = mtl.newTexture(t.dev, mtl.PIXEL_RGBA32F, 64, 40, mtl.STORAGE_SHARED);
+        defer mtl.release(out);
+        for (0..3) |_| {
+            const cb = mtl.msg(mtl.Id, t.queue, "commandBuffer", .{});
+            t.encode(cb, out, 1.0 / 30.0);
+            mtl.msg(void, cb, "commit", .{});
+            mtl.msg(void, cb, "waitUntilCompleted", .{});
+            try std.testing.expect(mtl.msg(usize, cb, "status", .{}) != 5);
+        }
+    }
 }

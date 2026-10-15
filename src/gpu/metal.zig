@@ -1,5 +1,5 @@
 // ============================================================================
-// ARGUS GPU PROTOTYPE // src/gpu/metal.zig
+// ARGUS GPU // src/gpu/metal.zig
 //
 // Minimal Metal + CAMetalLayer glue over objc_msgSend (no headers, no Swift).
 // ============================================================================
@@ -9,6 +9,7 @@ const std = @import("std");
 pub const Id = ?*anyopaque;
 pub const MTLSize = extern struct { w: usize, h: usize, d: usize };
 pub const CGSize = extern struct { width: f64, height: f64 };
+pub const MTLRegion = extern struct { x: usize, y: usize, z: usize, w: usize, h: usize, d: usize };
 
 // Resolved at runtime with dlopen/dlsym, like the app does: no SDK needed to build.
 var rt: struct {
@@ -77,14 +78,31 @@ pub fn nsString(s: [*:0]const u8) Id {
     return msg(Id, cls("NSString"), "stringWithUTF8String:", .{s});
 }
 
-fn describe(err: Id) [*:0]const u8 {
+pub fn describe(err: Id) [*:0]const u8 {
     const d = msg(Id, err, "localizedDescription", .{});
     return msg(?[*:0]const u8, d, "UTF8String", .{}) orelse "?";
 }
 
 /// Shared-storage options: on Apple silicon CPU and GPU see the same memory.
 pub const STORAGE_SHARED: usize = 0;
+pub const STORAGE_PRIVATE: usize = 2;
 pub const PIXEL_BGRA8: usize = 80;
+pub const PIXEL_RGBA16F: usize = 115;
+pub const PIXEL_RGBA32F: usize = 125;
+pub const USAGE_READ_WRITE: usize = 1 | 2; // MTLTextureUsageShaderRead | ShaderWrite
+
+/// The system GPU, after loading the frameworks.
+pub fn device() !Id {
+    try load();
+    return rt.createDevice() orelse error.NoMetalDevice;
+}
+
+pub fn newTexture(dev: Id, format: usize, w: usize, h: usize, storage: usize) Id {
+    const desc = msg(Id, cls("MTLTextureDescriptor"), "texture2DDescriptorWithPixelFormat:width:height:mipmapped:", .{ format, w, h, false });
+    msg(void, desc, "setUsage:", .{USAGE_READ_WRITE});
+    msg(void, desc, "setStorageMode:", .{storage});
+    return msg(Id, dev, "newTextureWithDescriptor:", .{desc});
+}
 
 pub const Kernel = struct {
     device: Id,
@@ -94,18 +112,18 @@ pub const Kernel = struct {
     /// Compiles `src` at runtime and builds a compute pipeline for `entry`.
     pub fn init(src: [*:0]const u8, entry: [*:0]const u8) !Kernel {
         try load();
-        const device = rt.createDevice() orelse return error.NoMetalDevice;
+        const dev = rt.createDevice() orelse return error.NoMetalDevice;
         var err: Id = null;
-        const lib = msg(Id, device, "newLibraryWithSource:options:error:", .{ nsString(src), @as(Id, null), &err }) orelse {
+        const lib = msg(Id, dev, "newLibraryWithSource:options:error:", .{ nsString(src), @as(Id, null), &err }) orelse {
             std.debug.print("metal compile failed: {s}\n", .{describe(err)});
             return error.MetalCompile;
         };
         const func = msg(Id, lib, "newFunctionWithName:", .{nsString(entry)}) orelse return error.MetalNoEntry;
-        const pso = msg(Id, device, "newComputePipelineStateWithFunction:error:", .{ func, &err }) orelse {
+        const pso = msg(Id, dev, "newComputePipelineStateWithFunction:error:", .{ func, &err }) orelse {
             std.debug.print("metal pipeline failed: {s}\n", .{describe(err)});
             return error.MetalPipeline;
         };
-        return .{ .device = device, .queue = msg(Id, device, "newCommandQueue", .{}), .pso = pso };
+        return .{ .device = dev, .queue = msg(Id, dev, "newCommandQueue", .{}), .pso = pso };
     }
 
     pub fn bufferCopy(self: *const Kernel, bytes: []const u8) Id {
