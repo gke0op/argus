@@ -89,6 +89,9 @@ const SPOT_LIFE: f64 = 90.0; // M of time each hot spot lives
 const SPOT_SIZE: f64 = 1.1; // M
 const SPOT_AMP: f32 = 6.0; // peak emissivity boost (hotter gas: T rises as boost^(1/4))
 const HALF_PI: f64 = math.pi / 2.0;
+/// Built by Argus's GPU path (src/gpu/bh_export.zig): the GPU traces the image itself at the
+/// window's native size, so init() skips the CPU trace and draw() runs it only if it's ever called.
+const gpu_traced = @hasDecl(@import("root"), "argus_gpu_traces_opus_black_hole");
 const K_NEAR: f64 = 0.08; // tuned against the Bardeen test: ~1e-5 M shadow-edge error
 const MAX_STEPS: u32 = 40_000;
 
@@ -491,6 +494,8 @@ pub const State = struct {
     bg: []u32,
     row_x0: []u16,
     row_x1: []u16,
+    corners: []Hit,
+    deferred: bool, // CPU trace not run yet (GPU builds)
 
     geo: Geo,
     mpp: f64,
@@ -543,7 +548,8 @@ pub const State = struct {
         const rows: [*]u16 = @ptrCast(@alignCast(slab.ptr + off_rows));
         self.row_x0 = rows[0..h];
         self.row_x1 = rows[h .. 2 * h];
-        const corners = @as([*]Hit, @ptrCast(@alignCast(slab.ptr + off_corn)))[0 .. 6 * (nbx + 1)];
+        self.corners = @as([*]Hit, @ptrCast(@alignCast(slab.ptr + off_corn)))[0 .. 6 * (nbx + 1)];
+        self.deferred = n_px > 0;
 
         self.geo = Geo.init(SPIN, INCL, R_OUT);
         self.mpp = if (h > 0) 2.0 * HALF_H / @as(f64, @floatFromInt(h)) else 1.0;
@@ -571,12 +577,16 @@ pub const State = struct {
             self.gal_c = c;
         }
         self.spot_mask = @splat(0);
-        if (n_px > 0) {
-            self.meterExposure();
-            self.render(corners);
-        }
+        if (!gpu_traced) self.traceNow();
         self.step(1e-9);
         return self;
+    }
+
+    fn traceNow(self: *State) void {
+        if (!self.deferred) return;
+        self.deferred = false;
+        self.meterExposure();
+        self.render(self.corners);
     }
 
     pub fn deinit(self: *State, alloc: std.mem.Allocator) void {
@@ -1217,6 +1227,8 @@ pub const State = struct {
     }
 
     pub fn draw(self: *const State, buf: []u32, stride: usize) void {
+        // GPU builds trace on the GPU; if the CPU draw is used after all (no Metal), trace now, once.
+        if (self.deferred) @constCast(self).traceNow();
         const w = self.w;
         if (w == 0 or self.h == 0 or stride < w) return;
         const h: usize = @min(self.h, buf.len / stride);

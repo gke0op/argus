@@ -1906,6 +1906,8 @@ pub fn main(init: std.process.Init) !void {
         } else if (std.mem.eql(u8, a, "--snapshot-popover") and i + 1 < args.len) {
             i += 1;
             snapshot_dir = args[i];
+        } else if (std.mem.eql(u8, a, "--sdr")) {
+            gpu.hdr_enabled = false; // GPU themes stay in standard range even on HDR displays
         } else if (std.mem.eql(u8, a, "--window")) {
             normal_window = true;
         } else if (std.mem.eql(u8, a, "--frames") and i + 1 < args.len) {

@@ -4,29 +4,41 @@
 // Presents GPU themes through a CAMetalLayer on their Space's window, shading straight
 // into the drawable (no CGImage, no CPU pixel buffer):
 //  - ThemePresenter: Metal-only themes (themes/*.metal, see metal_theme.zig).
-//  - Presenter: Zig + Metal hybrids. The Zig theme steps on the CPU and a Metal kernel
-//    shades every pixel from its tables, bound zero-copy (Apple silicon shares memory
-//    between CPU and GPU). Today: Opus_Black_Hole via src/gpu/bh_export.zig.
+//  - Presenter: Zig + Metal hybrids. The Zig theme steps on the CPU; the GPU traces the
+//    image itself at the window's native pixel size and shades it every frame from the
+//    theme's tables, into an extended-range (HDR) layer. Today: Opus_Black_Hole via
+//    src/gpu/bh_export.zig and src/gpu/bh_gpu.zig.
 // ============================================================================
 
 const std = @import("std");
 const mtl = @import("metal.zig");
 const bt = @import("bh_tables.zig");
 const metal_theme = @import("metal_theme.zig");
+const bh_gpu = @import("bh_gpu.zig");
 
 pub const CGRect = extern struct { x: f64, y: f64, w: f64, h: f64 };
 
-const MSL = @embedFile("opus_black_hole.metal");
+/// HDR output for hybrid themes on displays with EDR headroom. `--sdr` turns it off.
+pub var hdr_enabled = true;
 
-/// A CAMetalLayer covering `host_layer` with a w x h BGRA8 drawable the kernels write directly.
-fn makeLayer(dev: mtl.Id, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize) mtl.Id {
+/// A CAMetalLayer covering `host_layer` with a w x h drawable the kernels write directly:
+/// BGRA8 in `color_space`, or with `hdr` HDR10 (10-bit PQ, BT.2020) as EDR content, at
+/// 4 bytes per pixel like SDR. `drawables` caps the swap chain (2 or 3).
+fn makeLayer(dev: mtl.Id, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize, hdr: bool, drawables: usize) mtl.Id {
     const ml = mtl.msg(mtl.Id, mtl.cls("CAMetalLayer"), "layer", .{}) orelse return null;
     _ = mtl.msg(mtl.Id, ml, "retain", .{});
     mtl.msg(void, ml, "setDevice:", .{dev});
-    mtl.msg(void, ml, "setPixelFormat:", .{mtl.PIXEL_BGRA8});
+    mtl.msg(void, ml, "setPixelFormat:", .{if (hdr) mtl.PIXEL_BGR10A2 else mtl.PIXEL_BGRA8});
     mtl.msg(void, ml, "setFramebufferOnly:", .{false});
+    mtl.msg(void, ml, "setMaximumDrawableCount:", .{drawables});
     mtl.msg(void, ml, "setDrawableSize:", .{mtl.CGSize{ .width = @floatFromInt(w), .height = @floatFromInt(h) }});
-    if (color_space != null) mtl.msg(void, ml, "setColorspace:", .{color_space});
+    if (hdr) {
+        mtl.msg(void, ml, "setWantsExtendedDynamicRangeContent:", .{true});
+        if (colorSpaceNamed("kCGColorSpaceITUR_2100_PQ")) |cs| mtl.msg(void, ml, "setColorspace:", .{cs});
+        // PQ is absolute luminance: tell the compositor that 100 nits is display white (EDR 1.0).
+        const md = mtl.msg(mtl.Id, mtl.cls("CAEDRMetadata"), "HDR10MetadataWithMinLuminance:maxLuminance:opticalOutputScale:", .{ @as(f32, 0.005), @as(f32, 1600.0), @as(f32, 100.0) });
+        if (md != null) mtl.msg(void, ml, "setEDRMetadata:", .{md});
+    } else if (color_space != null) mtl.msg(void, ml, "setColorspace:", .{color_space});
     mtl.msg(void, ml, "setOpaque:", .{true});
     mtl.msg(void, ml, "setFrame:", .{mtl.msg(CGRect, host_layer, "bounds", .{})});
     mtl.msg(void, ml, "setAutoresizingMask:", .{@as(u32, 2 | 16)}); // width | height sizable
@@ -71,7 +83,7 @@ pub const ThemePresenter = struct {
             std.debug.print("argus: {s}: {s}\n", .{ label, std.mem.sliceTo(&err_buf, 0) });
             return null;
         };
-        const layer = makeLayer(theme.dev, host_layer, color_space, w, h) orelse {
+        const layer = makeLayer(theme.dev, host_layer, color_space, w, h, false, 3) orelse {
             theme.deinit();
             return null;
         };
@@ -106,125 +118,136 @@ pub const ThemePresenter = struct {
         self.* = undefined;
     }
 };
-const PAGE: usize = 16384;
+/// A named CoreGraphics colour space (e.g. kCGColorSpaceITUR_2100_PQ), created once.
+var pq_space: ?*anyopaque = null;
+fn colorSpaceNamed(comptime name: [*:0]const u8) ?*anyopaque {
+    if (pq_space) |cs| return cs;
+    const cg = std.c.dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", .{ .LAZY = true }) orelse return null;
+    const sym: *const ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(cg, name) orelse return null));
+    const create: *const fn (?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(cg, "CGColorSpaceCreateWithName") orelse return null));
+    pq_space = create(sym.*);
+    return pq_space;
+}
 
-const FillFrameFn = *const fn (*anyopaque, *bt.Frame) callconv(.c) void;
-const FillStaticFn = *const fn (*anyopaque, *bt.Static) callconv(.c) void;
-const BuffersFn = *const fn (*anyopaque, *[5]usize, *[5]usize) callconv(.c) void;
+/// The main screen's current EDR headroom (1 = SDR; rises with brightness on XDR panels).
+fn edrHeadroom() f32 {
+    const screen = mtl.msg(mtl.Id, mtl.cls("NSScreen"), "mainScreen", .{}) orelse return 1.0;
+    const v = mtl.msg(f64, screen, "maximumExtendedDynamicRangeColorComponentValue", .{});
+    return @floatCast(std.math.clamp(v, 1.0, 16.0));
+}
 
-var kernel: ?mtl.Kernel = null;
+/// The host layer's size in screen pixels (points x the main screen's backing scale).
+fn nativeSize(host_layer: mtl.Id, fallback_w: usize, fallback_h: usize) [2]u32 {
+    const b = mtl.msg(CGRect, host_layer, "bounds", .{});
+    const screen = mtl.msg(mtl.Id, mtl.cls("NSScreen"), "mainScreen", .{});
+    const scale: f64 = if (screen != null) mtl.msg(f64, screen, "backingScaleFactor", .{}) else 1.0;
+    const w = @round(b.w * scale);
+    const h = @round(b.h * scale);
+    if (!(w >= 64 and h >= 64 and w <= 8192 and h <= 8192)) return .{ @intCast(fallback_w), @intCast(fallback_h) };
+    return .{ @intFromFloat(w), @intFromFloat(h) };
+}
+
+const StaticFn = *const fn (*anyopaque, *bt.Static) callconv(.c) void;
+const FrameFn = *const fn (*anyopaque, *bt.Frame) callconv(.c) void;
+const TraceFn = *const fn (*anyopaque, u32, u32, *bt.TraceParams) callconv(.c) void;
+const TablesFn = *const fn (*anyopaque, *[2]usize, *[2]usize) callconv(.c) void;
 
 pub const Presenter = struct {
     handle: ?*anyopaque, // the theme dylib this presenter was built for
     state: *anyopaque,
     layer: mtl.Id, // CAMetalLayer, a sublayer of the Space window's host layer
-    data: [5]mtl.Id, // buffers 0-4 (one zero-copy buffer bound five times, or five copies)
-    offs: [5]usize,
-    stat: mtl.Id,
-    fill_frame: FillFrameFn,
+    queue: mtl.Id,
+    engine: bh_gpu.Engine,
+    fill_frame: FrameFn,
     frame: bt.Frame = undefined,
-    snap_tex: mtl.Id = null,
+    hdr: bool,
+    preview_w: usize, // the app's menu-preview size (the CPU canvas size)
+    preview_h: usize,
 
     /// Returns null when the dylib isn't a GPU build or Metal is unavailable.
+    /// `w` x `h` is the app's canvas size, used for menu previews; the GPU traces at the
+    /// window's native pixel size.
     pub fn create(handle: ?*anyopaque, state_ptr: ?*anyopaque, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize) ?Presenter {
         const h_lib = handle orelse return null;
         const st = state_ptr orelse return null;
-        const fill_frame: FillFrameFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_frame") orelse return null));
-        const fill_static: FillStaticFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_static") orelse return null));
-        const buffers: BuffersFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_buffers") orelse return null));
-        if (kernel == null) kernel = mtl.Kernel.init(MSL, "bh_to_texture") catch return null;
-        const k = &kernel.?;
+        const fill_frame: FrameFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_frame") orelse return null));
+        const fill_static: StaticFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_static") orelse return null));
+        const fill_trace: TraceFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_trace_params") orelse return null));
+        const tables: TablesFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_tables") orelse return null));
+        mtl.load() catch return null; // nativeSize messages AppKit before the engine loads Metal
 
-        var ptrs: [5]usize = undefined;
-        var lens: [5]usize = undefined;
-        buffers(st, &ptrs, &lens);
-        var p: Presenter = .{
+        const size = nativeSize(host_layer, w, h);
+        var stat: bt.Static = undefined;
+        fill_static(st, &stat);
+        var params: bt.TraceParams = undefined;
+        fill_trace(st, size[0], size[1], &params);
+        var ptrs: [2]usize = undefined;
+        var lens: [2]usize = undefined;
+        tables(st, &ptrs, &lens);
+        const noise = @as([*]const u8, @ptrFromInt(ptrs[0]))[0..lens[0]];
+        const ttab = @as([*]const u8, @ptrFromInt(ptrs[1]))[0..lens[1]];
+
+        var engine = bh_gpu.Engine.init(&stat, params, noise, ttab) catch return null;
+        _ = engine.meter();
+        engine.startTrace(16); // ~0.8 s of GPU work at 3024x1964, in ~120 short submissions
+        const hdr = hdr_enabled;
+        // Two drawables: the image changes slowly and Argus draws at <= 30 FPS, so a third
+        // window-sized buffer would only cost memory.
+        const layer = makeLayer(engine.k.dev, host_layer, color_space, size[0], size[1], hdr, 2) orelse {
+            engine.deinit();
+            return null;
+        };
+        return .{
             .handle = handle,
             .state = st,
-            .layer = null,
-            .data = @splat(null),
-            .offs = @splat(0),
-            .stat = k.bufferNew(@sizeOf(bt.Static)),
+            .layer = layer,
+            .queue = mtl.msg(mtl.Id, engine.k.dev, "newCommandQueue", .{}),
+            .engine = engine,
             .fill_frame = fill_frame,
+            .hdr = hdr,
+            .preview_w = w,
+            .preview_h = h,
         };
-        fill_static(st, @ptrCast(@alignCast(mtl.contents(p.stat))));
-
-        // All five live in the theme's single page-aligned slab: wrap its pages once, no copy.
-        var lo: usize = std.math.maxInt(usize);
-        var hi: usize = 0;
-        for (ptrs, lens) |a, n| {
-            lo = @min(lo, a);
-            hi = @max(hi, a + n);
-        }
-        const base = lo & ~(PAGE - 1);
-        const span = std.mem.alignForward(usize, hi - base, PAGE);
-        const nocopy = mtl.msg(mtl.Id, k.device, "newBufferWithBytesNoCopy:length:options:deallocator:", .{
-            @as(*anyopaque, @ptrFromInt(base)), span, mtl.STORAGE_SHARED, @as(?*anyopaque, null),
-        });
-        if (nocopy != null) {
-            for (0..5) |i| {
-                p.data[i] = nocopy;
-                p.offs[i] = ptrs[i] - base;
-            }
-        } else {
-            for (0..5) |i| p.data[i] = k.bufferCopy(@as([*]const u8, @ptrFromInt(ptrs[i]))[0..lens[i]]);
-        }
-
-        p.layer = makeLayer(k.device, host_layer, color_space, w, h) orelse return null;
-        return p;
     }
 
-    /// Shades one frame from the theme's current step state and presents it.
+    /// Shades one frame from the theme's current step state and presents it. Rows the trace
+    /// hasn't reached yet draw black. Never fails once created: with no free drawable the
+    /// frame is skipped (the caller must not fall back to the theme's CPU draw).
     pub fn render(self: *Presenter) bool {
-        const k = &(kernel orelse return false);
         const pool = mtl.poolPush();
         defer mtl.poolPop(pool);
+        _ = self.engine.poll();
         self.fill_frame(self.state, &self.frame);
-        const drawable = mtl.msg(mtl.Id, self.layer, "nextDrawable", .{}) orelse return false;
-        const cb = mtl.msg(mtl.Id, k.queue, "commandBuffer", .{});
-        self.encodeInto(cb, mtl.msg(mtl.Id, drawable, "texture", .{}));
+        const drawable = mtl.msg(mtl.Id, self.layer, "nextDrawable", .{}) orelse return true;
+        const cb = mtl.msg(mtl.Id, self.queue, "commandBuffer", .{});
+        const p = self.engine.params;
+        self.engine.encodeShade(cb, &self.frame, mtl.msg(mtl.Id, drawable, "texture", .{}), p.width, p.height, if (self.hdr) edrHeadroom() else 1.0, if (self.hdr) .pq else .srgb);
         mtl.msg(void, cb, "presentDrawable:", .{drawable});
         mtl.msg(void, cb, "commit", .{});
         return true;
     }
 
-    /// The current frame, again, into `dst` (packRGBA, w x h) for the menu preview.
+    /// The current frame, again, into `dst` (packRGBA at the app's canvas size, SDR) for the
+    /// menu preview. The 9 MB texture lives only for the call: previews are occasional.
     pub fn snapshot(self: *Presenter, dst: []u32) bool {
-        const k = &(kernel orelse return false);
+        // The preview waits for the GPU; while the trace is running that means waiting behind
+        // it on the main thread. The app retries a failed preview, so take it once the trace is done.
+        if (!self.engine.poll()) return false;
         const encode = struct {
-            fn f(p: *Presenter, cb: mtl.Id, out: mtl.Id) void {
-                p.encodeInto(cb, out);
+            fn f(pr: *Presenter, cb: mtl.Id, out: mtl.Id) void {
+                pr.engine.encodeShade(cb, &pr.frame, out, pr.preview_w, pr.preview_h, 1.0, .srgb);
             }
         }.f;
-        return snapshotInto(k.device, k.queue, &self.snap_tex, self.frame.width, self.frame.height, dst, self, encode);
-    }
-
-    fn encodeInto(self: *Presenter, cb: mtl.Id, tex: mtl.Id) void {
-        const k = &kernel.?;
-        const enc = mtl.msg(mtl.Id, cb, "computeCommandEncoder", .{});
-        mtl.msg(void, enc, "setComputePipelineState:", .{k.pso});
-        for (self.data, self.offs, 0..) |b, o, i| mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ b, o, i });
-        mtl.msg(void, enc, "setBuffer:offset:atIndex:", .{ self.stat, @as(usize, 0), @as(usize, 5) });
-        mtl.msg(void, enc, "setBytes:length:atIndex:", .{ @as(*const anyopaque, &self.frame), @as(usize, @sizeOf(bt.Frame)), @as(usize, 6) });
-        mtl.msg(void, enc, "setTexture:atIndex:", .{ tex, @as(usize, 0) });
-        mtl.msg(void, enc, "dispatchThreads:threadsPerThreadgroup:", .{
-            mtl.MTLSize{ .w = self.frame.width, .h = self.frame.height, .d = 1 }, k.groupSize(),
-        });
-        mtl.msg(void, enc, "endEncoding", .{});
+        var tex: mtl.Id = null;
+        defer mtl.release(tex);
+        return snapshotInto(self.engine.k.dev, self.queue, &tex, self.preview_w, self.preview_h, dst, self, encode);
     }
 
     /// Detaches the layer and releases GPU objects. Call before the theme's state is freed.
     pub fn destroy(self: *Presenter) void {
-        mtl.release(self.snap_tex);
         detachLayer(self.layer);
-        // The zero-copy buffer is bound up to five times but owned once.
-        var seen: [5]mtl.Id = @splat(null);
-        for (self.data, 0..) |b, i| {
-            if (b == null or std.mem.indexOfScalar(mtl.Id, seen[0..i], b) != null) continue;
-            seen[i] = b;
-            mtl.release(b);
-        }
-        mtl.release(self.stat);
+        mtl.release(self.queue);
+        self.engine.deinit();
         self.* = undefined;
     }
 };

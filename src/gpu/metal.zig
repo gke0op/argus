@@ -89,6 +89,7 @@ pub const STORAGE_PRIVATE: usize = 2;
 pub const PIXEL_BGRA8: usize = 80;
 pub const PIXEL_RGBA8: usize = 70;
 pub const PIXEL_RGBA16F: usize = 115;
+pub const PIXEL_BGR10A2: usize = 94;
 pub const PIXEL_RGBA32F: usize = 125;
 pub const USAGE_READ_WRITE: usize = 1 | 2; // MTLTextureUsageShaderRead | ShaderWrite
 
