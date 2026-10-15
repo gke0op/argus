@@ -21,7 +21,13 @@
 //    coordinate travel time, so lensed images lag the direct one.
 //
 // What is chosen (stated honestly):
-//  * Spin a = 0.94 M, inclination 88 deg (nearly edge-on), disk extends to 24 M.
+//  * Spin a = 0.94 M, inclination 80 deg (steeply tilted).
+//  * Outer disk: no wall. Viscous spreading (Lynden-Bell & Pringle 1974) rolls the
+//    surface density off as Sigma ~ (R_C/r) exp(-r/R_C); optical depth follows it, so
+//    past ~15 M the cool gas turns translucent and light from behind (sky, the lensed
+//    far side) is traced through it: I = B(T)(1 - e^-tau) + I_behind e^-tau. Turbulence
+//    modulates the column density, so the edge frays into drifting wisps.
+//    The scale R_C and normalisation TAU0 are choices; the falloff law is not.
 //  * Peak disk temperature 6,500 K: a heavy supermassive black hole with a low
 //    accretion rate (T_peak ~ (Mdot / M^2)^(1/4)). Hotter disks look bluer-white;
 //    most of a 5,000 K disk is honestly a warm off-white, not orange.
@@ -47,10 +53,27 @@ const math = std.math;
 const sdk = @import("argus_theme_sdk.zig");
 
 pub const SPIN: f64 = 0.94;
-pub const INCL: f64 = 88.0 * math.pi / 180.0;
-pub const R_OUT: f64 = 24.0;
+pub const INCL: f64 = 80.0 * math.pi / 180.0;
+pub const R_OUT: f64 = 48.0; // geometry only: tau(48 M) ~ 2e-3, the gas has already faded out
+pub const R_C: f64 = 5.0; // M: exponential roll-off scale of the outer disk
+pub const TAU0: f64 = 220.0; // tau = 1 near r = 20 M; opaque (tau > 15) inside ~10 M
+const TAU_NOISE: f32 = 1.2; // turbulence modulates the column: tau * exp(TAU_NOISE * n), |n| <= 1
+const TAU_THICK: f64 = 5.0; // fully opaque above this (leaks < 0.7%)
+const TAU_BEHIND: f64 = TAU_THICK * @exp(@as(f64, TAU_NOISE)); // above this even thinned gas is opaque
+const TAU_MIN: f64 = 0.01; // thinner than this (max opacity 3%, emission nil) the gas is left out
+const EMIT_FLOOR: f64 = 3e-4; // display-linear (~1/255): gas that can't reach this even stirred is baked
+const SPOT_RMAX: f64 = 12.0; // M: hot spots orbit inside this (r_in * 5.35 + width); never baked there
+const EXPO_R: f64 = 24.0; // exposure is metered on the bright inner disk only
+const EMIT_N: usize = 1024; // 1 - exp(-e^x) table over x = ln(tau) in [EMIT_X0, EMIT_X1]
+const EMIT_X0: f32 = -7.0;
+const EMIT_X1: f32 = 4.0;
 pub const T_PEAK: f64 = 6_500.0;
 const OBS_R: f64 = 1000.0;
+// Common light-travel time from the hole to the camera (radial tortoise coordinate,
+// r + 2 ln(r/2 - 1) ~ r + 2 ln(r/2)). Only delays relative to it are observable; left in,
+// Omega(r) * 1000 M would wind the disk pattern ~0.5 rad per pixel radially and the
+// footprint filter would (rightly) erase all turbulence and hot spots.
+const T_REF: f64 = OBS_R + 2.0 * @log(OBS_R / 2.0);
 const HALF_H: f64 = 15.5; // half the screen height, in units of M
 const TIME_LAPSE: f64 = 10.0; // M of coordinate time per unit of Argus dt
 const LIFE_M: f64 = 60.0; // turbulence generation lifetime, in M
@@ -127,6 +150,11 @@ pub fn pageThorne(a: f64, r_in: f64, r_max: f64, out: *[PT_N]f64) void {
         prev = g;
         out[k] = if (k == 0) 0.0 else -dOm / (emo * emo) * integ / r;
     }
+}
+
+/// Optical depth of the disk at r: proportional to the viscously spread surface density.
+pub fn opticalDepth(r: f64) f64 {
+    return TAU0 * (R_C / r) * @exp(-r / R_C);
 }
 
 // ---------------------------------------------------------------- geodesics
@@ -252,12 +280,25 @@ pub fn initialState(g: *const Geo, alpha: f64, beta: f64) struct { y: V6, L: f64
     return .{ .y = .{ r, g.incl, 0.0, 0.0, pr, pth }, .L = L };
 }
 
-pub fn traceRay(g: *const Geo, alpha: f64, beta: f64, with_disk: bool) Hit {
+pub const Ray = struct { y: V6, L: f64, n: u8 = 0, steps: u32 = 0 };
+
+pub fn startRay(g: *const Geo, alpha: f64, beta: f64) Ray {
     const st = initialState(g, alpha, beta);
-    var y = st.y;
-    const L = st.L;
-    var n: u8 = 0;
-    var steps: u32 = 0;
+    return .{ .y = st.y, .L = st.L };
+}
+
+pub fn traceRay(g: *const Geo, alpha: f64, beta: f64, with_disk: bool) Hit {
+    var ray = startRay(g, alpha, beta);
+    return traceNext(g, &ray, with_disk);
+}
+
+/// Follow the ray to the next thing it meets. On a disk hit the state is left just past
+/// the crossing, so calling again finds what lies behind translucent gas.
+pub fn traceNext(g: *const Geo, ray: *Ray, with_disk: bool) Hit {
+    var y = ray.y;
+    const L = ray.L;
+    var n = ray.n;
+    var steps = ray.steps;
     while (steps < MAX_STEPS) : (steps += 1) {
         const r = y[0];
         if (r < g.rh + 0.02) return .{ .kind = .hole, .steps = steps };
@@ -310,6 +351,7 @@ pub fn traceRay(g: *const Geo, alpha: f64, beta: f64, with_disk: bool) Hit {
             }
             const rc = yc[0];
             if (with_disk and rc >= g.r_in and rc <= g.r_out) {
+                ray.* = .{ .y = y, .L = L, .n = n, .steps = steps + 1 };
                 return .{ .kind = .disk, .n = n, .r = rc, .ph = yc[2], .t = yc[3], .steps = steps };
             }
         }
@@ -472,6 +514,10 @@ pub const State = struct {
     gshift: [2][R_BINS]u16,
     grow: [2][R_BINS]u16,
     om_tab: [R_BINS]f64,
+    tau_tab: [R_BINS]f32,
+    lntau_tab: [R_BINS]f32,
+    emit_tab: [EMIT_N + 1]f32,
+    lin8: [256]f32, // sRGB byte -> linear
     ttab: [PT_N]f32,
     bb: [BB_N][3]f32,
     srgb: [4096]u8,
@@ -480,12 +526,12 @@ pub const State = struct {
     pub fn init(alloc: std.mem.Allocator, w: usize, h: usize, scale: f64) !*State {
         const n_px = w * h;
         const nbx = (w + BLOCK - 1) / BLOCK;
-        // One slab: State | recs | bg | row ranges | two rows of corner hits.
+        // One slab: State | recs | bg | row ranges | two rows of corner hits (front + 2 behind).
         const off_recs = std.mem.alignForward(usize, @sizeOf(State), 16);
         const off_bg = std.mem.alignForward(usize, off_recs + n_px * @sizeOf(Rec), 16);
         const off_rows = std.mem.alignForward(usize, off_bg + n_px * 4, 16);
         const off_corn = std.mem.alignForward(usize, off_rows + h * 4, 16);
-        const total = off_corn + 2 * (nbx + 1) * @sizeOf(Hit);
+        const total = off_corn + 6 * (nbx + 1) * @sizeOf(Hit);
         const slab = try alloc.alignedAlloc(u8, .@"16", total);
         const self: *State = @ptrCast(@alignCast(slab.ptr));
         self.slab = slab;
@@ -497,7 +543,7 @@ pub const State = struct {
         const rows: [*]u16 = @ptrCast(@alignCast(slab.ptr + off_rows));
         self.row_x0 = rows[0..h];
         self.row_x1 = rows[h .. 2 * h];
-        const corners = @as([*]Hit, @ptrCast(@alignCast(slab.ptr + off_corn)))[0 .. 2 * (nbx + 1)];
+        const corners = @as([*]Hit, @ptrCast(@alignCast(slab.ptr + off_corn)))[0 .. 6 * (nbx + 1)];
 
         self.geo = Geo.init(SPIN, INCL, R_OUT);
         self.mpp = if (h > 0) 2.0 * HALF_H / @as(f64, @floatFromInt(h)) else 1.0;
@@ -525,7 +571,10 @@ pub const State = struct {
             self.gal_c = c;
         }
         self.spot_mask = @splat(0);
-        if (n_px > 0) self.render(corners);
+        if (n_px > 0) {
+            self.meterExposure();
+            self.render(corners);
+        }
         self.step(1e-9);
         return self;
     }
@@ -552,6 +601,16 @@ pub const State = struct {
         for (0..R_BINS) |b| {
             const r = @exp(self.lnr_in + self.lnr_span * (@as(f64, @floatFromInt(b)) + 0.5) / @as(f64, @floatFromInt(R_BINS)));
             self.om_tab[b] = orbit(self.geo.a, r).om;
+            self.tau_tab[b] = @floatCast(opticalDepth(r));
+            self.lntau_tab[b] = @floatCast(@log(opticalDepth(r)));
+        }
+        for (0..EMIT_N + 1) |k| {
+            const x = EMIT_X0 + (EMIT_X1 - EMIT_X0) * @as(f32, @floatFromInt(k)) / @as(f32, @floatFromInt(EMIT_N));
+            self.emit_tab[k] = @floatCast(-std.math.expm1(-@exp(@as(f64, x))));
+        }
+        for (0..256) |k| {
+            const v = @as(f64, @floatFromInt(k)) / 255.0;
+            self.lin8[k] = @floatCast(if (v <= 0.04045) v / 12.92 else math.pow(f64, (v + 0.055) / 1.055, 2.4));
         }
         // Tileable turbulence: three octaves of smoothed value noise, periodic in r-bin and phi.
         for (0..R_BINS) |ri| {
@@ -614,6 +673,89 @@ pub const State = struct {
         const ab = self.alphaBeta(x, y);
         self.rays_traced += 1;
         return traceRay(&self.geo, ab[0], ab[1], true);
+    }
+
+    /// Front hit, then up to two more things seen through translucent gas (else .hole):
+    /// e.g. near-side gas, the lensed far side's underside behind it, and the sky behind that.
+    fn traceLayers(self: *State, x: f64, y: f64, tau_max: f64) [3]Hit {
+        const ab = self.alphaBeta(x, y);
+        self.rays_traced += 1;
+        var ray = startRay(&self.geo, ab[0], ab[1]);
+        var out = [3]Hit{ traceNext(&self.geo, &ray, true), .{}, .{} };
+        for (1..3) |i| {
+            const prev = out[i - 1];
+            if (prev.kind != .disk or opticalDepth(prev.r) >= tau_max) break;
+            out[i] = traceNext(&self.geo, &ray, true);
+        }
+        return out;
+    }
+
+    /// Display-linear light reaching the camera from behind translucent gas, in sky units
+    /// (packBg multiplies by STAR_GAIN), composited front to back over the layers behind.
+    /// Gas seen there is drawn static, at its own opacity.
+    fn behind(self: *const State, x: f64, backs: [2]Hit, foot: f64) [3]f64 {
+        var acc = [3]f64{ 0, 0, 0 };
+        var tr: f64 = 1.0;
+        for (backs) |b| {
+            switch (b.kind) {
+                .hole => break,
+                .sky => {
+                    const c = self.sky(b.dir, foot);
+                    for (0..3) |i| acc[i] += tr * c[i];
+                    break;
+                },
+                .disk => {
+                    const tau = opticalDepth(b.r);
+                    const s = self.shadeDisk(x, b.r, b.ph, b.t);
+                    const k = @as(f64, self.exposure) * -std.math.expm1(-tau);
+                    const c = [3]f64{ s.rgb[0] * k, s.rgb[1] * k, s.rgb[2] * k };
+                    const tm = 1.0 / (1.0 + luma(c));
+                    for (0..3) |i| acc[i] += tr * @min(c[i] * tm, 1.0) / STAR_GAIN;
+                    tr *= @exp(-tau);
+                },
+            }
+        }
+        return acc;
+    }
+
+    /// Can the hits behind a block be interpolated? A lensed sky seen through gas may be, even
+    /// where it curves; a disk must pass the strict test (phase/radius continuity).
+    fn smoothBehind(self: *const State, cb: [4]Hit) bool {
+        for (cb) |hb| if (hb.kind != cb[0].kind) return false;
+        return cb[0].kind != .disk or self.uniform(cb);
+    }
+
+    /// Camera exposure, metered before rendering (translucent gas is composited with it):
+    /// put the 99th-percentile luminance of the inner disk at EXPO_TARGET.
+    fn meterExposure(self: *State) void {
+        const gx: usize = 192;
+        const gy: usize = @max(1, gx * self.h / @max(self.w, 1));
+        var hist: [512]u32 = @splat(0);
+        var count: u64 = 0;
+        for (0..gy) |iy| {
+            for (0..gx) |ix| {
+                const x = (@as(f64, @floatFromInt(ix)) + 0.5) * @as(f64, @floatFromInt(self.w)) / @as(f64, @floatFromInt(gx));
+                const y = (@as(f64, @floatFromInt(iy)) + 0.5) * @as(f64, @floatFromInt(self.h)) / @as(f64, @floatFromInt(gy));
+                const hit = self.trace(x, y);
+                if (hit.kind != .disk or hit.r > EXPO_R) continue;
+                const yl = luma(self.shadeDisk(x, hit.r, hit.ph, hit.t).rgb);
+                if (!(yl > 0.0)) continue;
+                const bin: usize = @intFromFloat(math.clamp((@log2(yl) + 32.0) * 8.0, 0.0, 511.0));
+                hist[bin] += 1;
+                count += 1;
+            }
+        }
+        if (count == 0) return;
+        var acc: u64 = 0;
+        const want = count - count / 100;
+        for (hist, 0..) |c, b| {
+            acc += c;
+            if (acc >= want) {
+                const yp = math.pow(f64, 2.0, @as(f64, @floatFromInt(b)) / 8.0 - 32.0);
+                self.exposure = @floatCast(EXPO_TARGET / yp);
+                break;
+            }
+        }
     }
 
     /// Point stars seen through the lens. `foot` is the sky angle one pixel covers here:
@@ -714,7 +856,8 @@ pub const State = struct {
         return a2 < margin * margin;
     }
 
-    fn shadeDisk(self: *const State, x: f64, r: f64, ph: f64, t: f64) Sample {
+    fn shadeDisk(self: *const State, x: f64, r: f64, ph: f64, t_hit: f64) Sample {
+        const t = t_hit + T_REF; // backward-traced t is negative: this is minus the relative delay
         const alpha = (x - 0.5 * @as(f64, @floatFromInt(self.w))) * self.mpp;
         const L = -alpha * self.geo.sin_i;
         const o = orbit(self.geo.a, r);
@@ -835,17 +978,37 @@ pub const State = struct {
         const ss: usize = 2; // 2x2 supersampling on true edges, at every resolution
         var top = corners[0 .. nbx + 1];
         var bot = corners[nbx + 1 .. 2 * (nbx + 1)];
-        for (0..nbx + 1) |bx| top[bx] = self.trace(@floatFromInt(bx * BLOCK), 0.0);
+        var topb = corners[2 * (nbx + 1) .. 3 * (nbx + 1)];
+        var botb = corners[3 * (nbx + 1) .. 4 * (nbx + 1)];
+        var topc = corners[4 * (nbx + 1) .. 5 * (nbx + 1)];
+        var botc = corners[5 * (nbx + 1) .. 6 * (nbx + 1)];
+        // Corners fetch what is behind gas a little denser than needed, so blocks straddling
+        // the threshold still interpolate.
+        const tau_corner = 2.0 * TAU_BEHIND;
+        for (0..nbx + 1) |bx| {
+            const p = self.traceLayers(@floatFromInt(bx * BLOCK), 0.0, tau_corner);
+            top[bx] = p[0];
+            topb[bx] = p[1];
+            topc[bx] = p[2];
+        }
         for (0..h) |y| {
             self.row_x0[y] = @intCast(@min(w, 0xFFFF));
             self.row_x1[y] = 0;
         }
         for (0..nby) |by| {
             const yb: f64 = @floatFromInt((by + 1) * BLOCK);
-            for (0..nbx + 1) |bx| bot[bx] = self.trace(@floatFromInt(bx * BLOCK), yb);
+            for (0..nbx + 1) |bx| {
+                const p = self.traceLayers(@floatFromInt(bx * BLOCK), yb, tau_corner);
+                bot[bx] = p[0];
+                botb[bx] = p[1];
+                botc[bx] = p[2];
+            }
             for (0..nbx) |bx| {
                 const c = [4]Hit{ top[bx], top[bx + 1], bot[bx], bot[bx + 1] };
+                const cb = [4]Hit{ topb[bx], topb[bx + 1], botb[bx], botb[bx + 1] };
+                const cc = [4]Hit{ topc[bx], topc[bx + 1], botc[bx], botc[bx + 1] };
                 const cl = self.classify(c);
+                const back_smooth = self.smoothBehind(cb) and self.smoothBehind(cc);
                 // Sky angle one pixel covers here, from any pair of adjacent sky corners.
                 var foot = 8.0 * self.pix_ang; // typical value inside the Einstein ring, if unmeasurable
                 {
@@ -877,7 +1040,9 @@ pub const State = struct {
                             const fy = @as(f64, @floatFromInt(py)) + sy;
                             const u = (fx - @as(f64, @floatFromInt(bx * BLOCK))) / BLOCK;
                             const v = (fy - @as(f64, @floatFromInt(by * BLOCK))) / BLOCK;
-                            const hit = switch (cl.cls) {
+                            var backs = [2]Hit{ .{}, .{} };
+                            var have_back = false;
+                            var hit = switch (cl.cls) {
                                 .uniform => interpolate(c, u, v),
                                 .sky_curved => blk: {
                                     // Interpolation is off by at most ~e2/4; if no star can be that
@@ -886,13 +1051,46 @@ pub const State = struct {
                                     const margin = 0.5 * cl.e2 + 4.0 * 0.75 * @max(foot, self.pix_ang);
                                     break :blk if (self.starNear(guess.dir, margin)) self.trace(fx, fy) else guess;
                                 },
-                                else => self.trace(fx, fy),
+                                else => blk: {
+                                    const p = self.traceLayers(fx, fy, TAU_BEHIND);
+                                    backs = .{ p[1], p[2] };
+                                    have_back = true;
+                                    break :blk p[0];
+                                },
                             };
+                            const thin = hit.kind == .disk and opticalDepth(hit.r) < TAU_BEHIND;
+                            if (thin and !have_back) {
+                                if (back_smooth) {
+                                    backs = .{ interpolate(cb, u, v), interpolate(cc, u, v) };
+                                } else {
+                                    const p = self.traceLayers(fx, fy, TAU_BEHIND);
+                                    hit = p[0];
+                                    backs = .{ p[1], p[2] };
+                                }
+                            }
+                            if (hit.kind == .disk and hit.r > SPOT_RMAX) {
+                                const tau = opticalDepth(hit.r);
+                                const dim = luma(self.shadeDisk(fx, hit.r, hit.ph, hit.t).rgb) * self.exposure * 2.0 < EMIT_FLOOR;
+                                if (tau * @exp(@as(f64, TAU_NOISE)) < TAU_MIN or dim) {
+                                    // Gas too thin or too cool to show even when turbulence stirs it:
+                                    // baked into the background at its mean opacity, not redrawn per frame.
+                                    if (tau < TAU_BEHIND) {
+                                        const bh = self.behind(fx, backs, foot);
+                                        const tr = @exp(-tau);
+                                        for (0..3) |i| bg_rgb[i] += tr * bh[i];
+                                    }
+                                    continue;
+                                }
+                            }
                             const s = self.shadeHit(fx, hit, foot);
                             if (s.disk) {
                                 if (nd == 0) first = s;
                                 nd += 1;
                                 for (0..3) |i| disk_rgb[i] += s.rgb[i];
+                                if (opticalDepth(hit.r) < TAU_BEHIND) {
+                                    const bh = self.behind(fx, backs, foot);
+                                    for (0..3) |i| bg_rgb[i] += bh[i];
+                                }
                             } else {
                                 for (0..3) |i| bg_rgb[i] += s.rgb[i];
                             }
@@ -921,6 +1119,12 @@ pub const State = struct {
             const tmp = top;
             top = bot;
             bot = tmp;
+            const tmpb = topb;
+            topb = botb;
+            botb = tmpb;
+            const tmpc = topc;
+            topc = botc;
+            botc = tmpc;
         }
         // Each disk pixel's footprint on the disk, from its neighbours: lensing can squeeze a
         // wide patch of disk into one pixel, and texture finer than that must be filtered.
@@ -952,30 +1156,6 @@ pub const State = struct {
                 }
                 self.recs[i].fr = @intCast(@min(fr, 255));
                 self.recs[i].fp = @intCast(@min((fp + 63) / 64, 255));
-            }
-        }
-
-        // Camera exposure: put the 99th-percentile disk luminance at EXPO_TARGET.
-        var hist: [512]u32 = @splat(0);
-        var count: u64 = 0;
-        for (self.recs) |rc| {
-            if (rc.cov == 0) continue;
-            const yl = luma(.{ rc.rgb[0], rc.rgb[1], rc.rgb[2] });
-            if (!(yl > 0.0)) continue;
-            const bin: usize = @intFromFloat(math.clamp((@log2(yl) + 32.0) * 8.0, 0.0, 511.0));
-            hist[bin] += 1;
-            count += 1;
-        }
-        if (count > 0) {
-            var acc: u64 = 0;
-            const want = count - count / 100;
-            for (hist, 0..) |c, b| {
-                acc += c;
-                if (acc >= want) {
-                    const yp = math.pow(f64, 2.0, @as(f64, @floatFromInt(b)) / 8.0 - 32.0);
-                    self.exposure = @floatCast(EXPO_TARGET / yp);
-                    break;
-                }
             }
         }
     }
@@ -1080,6 +1260,19 @@ pub const State = struct {
                 // Turbulence cells are ~16 r-bins by ~683 Q16 units; unresolved texture averages out.
                 const tex = 1.0 / (1.0 + (frf * frf) / 64.0 + (fpf * fpf) / 116_000.0);
                 var k = @max(0.0, 1.0 + tex * (w0 * na + w1 * nb)) * expo;
+                // Translucent outer gas: emitted fraction 1 - e^-tau, column density stirred by
+                // the same turbulence (unresolved texture averages out, as above).
+                const tau_b = self.tau_tab[rb];
+                const thin = tau_b < TAU_BEHIND;
+                var emit: f32 = 1.0;
+                if (thin) {
+                    const nt = math.clamp((self.gw[0] * na + self.gw[1] * nb) * self.gnorm / 128.0 * tex, -1.0, 1.0);
+                    const xi = math.clamp((self.lntau_tab[rb] + TAU_NOISE * nt - EMIT_X0) * (@as(f32, EMIT_N) / (EMIT_X1 - EMIT_X0)), 0.0, @as(f32, EMIT_N) - 0.001);
+                    const ii: usize = @intFromFloat(xi);
+                    const fr_e = xi - @as(f32, @floatFromInt(ii));
+                    emit = self.emit_tab[ii] + (self.emit_tab[ii + 1] - self.emit_tab[ii]) * fr_e;
+                    k *= emit;
+                }
                 var spot_rgb: [3]f32 = undefined;
                 var spot_scale: f32 = 0.0;
                 const sm = self.spot_mask[rb];
@@ -1121,7 +1314,18 @@ pub const State = struct {
                 const yl = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
                 const tm = 1.0 / (1.0 + yl); // Reinhard on luminance, hue preserved
                 const bgp = bg_row[x];
-                if (rc.cov == 255) {
+                if (thin) {
+                    // I = cov * B(1 - e^-tau) + bg * (1 - cov (1 - e^-tau)); bg holds what lies behind.
+                    var out: [3]u8 = undefined;
+                    const cov: f32 = @as(f32, @floatFromInt(rc.cov)) / 255.0;
+                    const tr = 1.0 - cov * emit;
+                    for (0..3) |i| {
+                        const bl = self.lin8[(bgp >> @intCast(8 * i)) & 0xFF];
+                        const v = @min(cov * c[i] * tm + tr * bl, 1.0);
+                        out[i] = self.srgb[@intFromFloat(v * 4095.0)];
+                    }
+                    row[x] = sdk.packRGBA(out[0], out[1], out[2]);
+                } else if (rc.cov == 255) {
                     const r0 = self.srgb[@intFromFloat(@min(c[0] * tm, 1.0) * 4095.0)];
                     const g0 = self.srgb[@intFromFloat(@min(c[1] * tm, 1.0) * 4095.0)];
                     const b0 = self.srgb[@intFromFloat(@min(c[2] * tm, 1.0) * 4095.0)];
@@ -1264,6 +1468,15 @@ test "Page-Thorne flux: zero at the ISCO, positive outside, Newtonian at large r
     const rb = r_in * @exp(dl * @as(f64, @floatFromInt(k2)));
     const ratio = (f[k1] * ra * ra * ra) / (f[k2] * rb * rb * rb);
     try testing.expectApproxEqAbs(1.0, ratio, 0.02);
+}
+
+test "outer disk: opaque inside, translucent edge, gone before the geometry ends" {
+    try testing.expect(opticalDepth(isco(SPIN)) > 50.0);
+    try testing.expect(opticalDepth(10.0) > TAU_THICK);
+    try testing.expect(opticalDepth(19.0) > 0.5 and opticalDepth(22.0) < 1.0);
+    try testing.expect(opticalDepth(R_OUT) * @exp(@as(f64, TAU_NOISE)) < 0.01);
+    var r: f64 = 3.0;
+    while (r < R_OUT) : (r += 0.25) try testing.expect(opticalDepth(r + 0.25) < opticalDepth(r));
 }
 
 test "blackbody colours: 6500 K is near white, 3000 K is warm, 20000 K is blue" {
