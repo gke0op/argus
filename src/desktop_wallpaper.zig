@@ -183,6 +183,16 @@ const MacBridge = struct {
     color_space: ?*anyopaque,
     display_id: u32,
     CGDisplayIsAsleep: *const fn (u32) callconv(.c) u32,
+    CGSessionCopyCurrentDictionary: *const fn () callconv(.c) ?*anyopaque,
+    cf_key_screen_locked: ?*anyopaque,
+    cf_true: ?*const anyopaque,
+    screen_locked: bool = false,
+    sel_occlusion_state: ?*anyopaque,
+    /// frame_idx + 1 of each Space's last rendered frame (0 = never), for warm-rate neighbors.
+    last_render_tick: [MAX_SPACES]usize = @splat(0),
+    perf_log: bool = false,
+    perf_renders: [MAX_SPACES]u16 = @splat(0),
+    perf_visible: u16 = 0,
     screen_rect: CGRect,
     pboard_filenames_type: ?*anyopaque,
     popover_visible: bool = false,
@@ -600,6 +610,36 @@ const MacBridge = struct {
             if (sp.cg_image) |old| self.CGImageRelease(old);
             sp.cg_image = cg_img;
         }
+    }
+
+    /// True while the login window / lock screen covers the session (CGSSessionScreenIsLocked).
+    pub fn isScreenLocked(self: *MacBridge) bool {
+        const dict = self.CGSessionCopyCurrentDictionary() orelse return false;
+        defer self.CFRelease(dict);
+        const v = self.CFDictionaryGetValue(dict, self.cf_key_screen_locked) orelse return false;
+        return @intFromPtr(v) == @intFromPtr(self.cf_true);
+    }
+
+    /// True when any part of the Space's window is on screen (NSWindowOcclusionStateVisible).
+    /// A neighbor's window turns visible as soon as a swipe starts dragging it in.
+    pub fn spaceWindowVisible(self: *MacBridge, idx: usize) bool {
+        const win = self.obs.spaces[idx].desktop_win orelse return false;
+        const state: usize = @bitCast(self.msgRetInt(win, self.sel_occlusion_state));
+        return (state & (1 << 1)) != 0;
+    }
+
+    /// Renders a Space if it is on screen, or if it is a warm neighbor whose last frame is
+    /// `warm_ticks` old. Returns true when it rendered.
+    fn renderIfDue(self: *MacBridge, idx: usize, warm_ticks: usize) bool {
+        const visible = self.spaceWindowVisible(idx);
+        if (visible) self.perf_visible |= @as(u16, 1) << @intCast(idx);
+        const last = self.last_render_tick[idx];
+        const due = visible or (warm_ticks != 0 and (last == 0 or self.frame_idx + 1 >= last + warm_ticks));
+        if (!due) return false;
+        self.renderSpaceAtIndex(idx);
+        self.last_render_tick[idx] = self.frame_idx + 1;
+        self.perf_renders[idx] +|= 1;
+        return true;
     }
 
     pub fn renderAllSpaces(self: *MacBridge) void {
@@ -1199,6 +1239,9 @@ fn onPopoverMouseDragged(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callcon
 
 fn onPopoverMouseUp(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {}
 
+/// Off-screen neighbors re-render every 3rd 30 Hz tick (~10 FPS).
+const NEIGHBOR_WARM_TICKS: usize = 3;
+
 fn isAnimatedSpaceMode(m: SpaceMode) bool {
     return m == .custom_shader;
 }
@@ -1238,57 +1281,59 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
         if (b.popover_visible) b.flushPopoverLayer();
     }
 
-    // Render the active Space, its nearest animated left/right neighbors (scanning past passthrough/picture
-    // Spaces), and all lightweight canvas Spaces at full 30 FPS using isolated per-Space framebuffers,
-    // so swiping between Spaces is already live-animating at frame 0 of the gesture.
-    const active_idx = b.obs.active_space_idx;
-    var rendered_any = false;
-    if (!b.obs.paused and active_idx < b.obs.n_spaces) {
-        b.obs.phase_accum += (1.0 / 150.0) * b.obs.spin_mult;
+    // Once per second: is the lock screen up? (Display sleep is handled above.)
+    if ((b.frame_idx % 30) == 0) {
+        b.screen_locked = b.isScreenLocked();
+    }
 
-        var rendered_mask: u16 = 0;
+    // Render only what can be seen. The active Space renders at 30 FPS while its window is on screen.
+    // Its nearest animated left/right neighbors (scanning past passthrough / picture Spaces) stay warm
+    // at ~10 FPS so a swipe never reveals a stale frame, and jump to 30 FPS the moment their window
+    // turns visible mid-swipe. Nothing renders while a fullscreen app's Space is active (it is not one
+    // of ours, so active_space_id no longer matches the active slot), or while the screen is locked.
+    const active_idx = b.obs.active_space_idx;
+    const active_is_ours = active_idx < b.obs.n_spaces and
+        b.obs.spaces[active_idx].space_id == b.obs.active_space_id;
+    var rendered_any = false;
+    if (!b.obs.paused and active_is_ours and !b.screen_locked) {
+        b.obs.phase_accum += (1.0 / 150.0) * b.obs.spin_mult;
 
         if (isAnimatedSpaceMode(b.obs.spaces[active_idx].mode)) {
             const t0 = std.Io.Clock.awake.now(g_io);
-            b.renderSpaceAtIndex(active_idx);
-            const elapsed_ns: u64 = @intCast(@max(@as(i96, 0), t0.durationTo(std.Io.Clock.awake.now(g_io)).nanoseconds));
-            b.obs.last_compute_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
-            rendered_mask |= (@as(u16, 1) << @intCast(active_idx));
-            rendered_any = true;
+            // First second: render unconditionally while AppKit settles window visibility.
+            if (b.renderIfDue(active_idx, if (b.frame_idx < 30) 1 else 0)) {
+                const elapsed_ns: u64 = @intCast(@max(@as(i96, 0), t0.durationTo(std.Io.Clock.awake.now(g_io)).nanoseconds));
+                b.obs.last_compute_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
+                rendered_any = true;
+            }
         }
 
-        // Nearest animated Space to the left at full 30 FPS (scans past passthrough / static picture Spaces)
         var scan_l: usize = active_idx;
         while (scan_l > 0) {
             scan_l -= 1;
             if (isAnimatedSpaceMode(b.obs.spaces[scan_l].mode)) {
-                b.renderSpaceAtIndex(scan_l);
-                rendered_mask |= (@as(u16, 1) << @intCast(scan_l));
-                rendered_any = true;
+                if (b.renderIfDue(scan_l, NEIGHBOR_WARM_TICKS)) rendered_any = true;
                 break;
             }
         }
 
-        // Nearest animated Space to the right at full 30 FPS (scans past passthrough / static picture Spaces)
         var scan_r: usize = active_idx + 1;
         while (scan_r < b.obs.n_spaces) : (scan_r += 1) {
             if (isAnimatedSpaceMode(b.obs.spaces[scan_r].mode)) {
-                b.renderSpaceAtIndex(scan_r);
-                rendered_mask |= (@as(u16, 1) << @intCast(scan_r));
-                rendered_any = true;
+                if (b.renderIfDue(scan_r, NEIGHBOR_WARM_TICKS)) rendered_any = true;
                 break;
             }
         }
+    }
 
-        // Round-robin 1 additional non-adjacent animated Space per tick
-        if (b.obs.n_spaces > 2) {
-            const bg_idx = b.frame_idx % b.obs.n_spaces;
-            const bit = @as(u16, 1) << @intCast(bg_idx);
-            if ((rendered_mask & bit) == 0 and isAnimatedSpaceMode(b.obs.spaces[bg_idx].mode)) {
-                b.renderSpaceAtIndex(bg_idx);
-                rendered_any = true;
-            }
-        }
+    if (b.perf_log and (b.frame_idx % 30) == 29) {
+        std.debug.print("[perf] t={d} active={d} ours={} locked={} visible=0x{x:0>2} renders/s:", .{
+            b.frame_idx / 30, active_idx, active_is_ours, b.screen_locked, b.perf_visible,
+        });
+        for (0..b.obs.n_spaces) |idx| std.debug.print(" {d}", .{b.perf_renders[idx]});
+        std.debug.print(" active_us={d:.0}\n", .{b.obs.last_compute_us});
+        b.perf_renders = @splat(0);
+        b.perf_visible = 0;
     }
 
     if (b.popover_visible and (b.frame_idx % 3) == 0) {
@@ -1336,6 +1381,7 @@ pub fn main(init: std.process.Init) !void {
     var headless_test = false;
     var normal_window = false;
     var max_frames: usize = 0;
+    var perf_log = false;
 
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -1350,6 +1396,8 @@ pub fn main(init: std.process.Init) !void {
             }
         } else if (std.mem.eql(u8, a, "--test-frame") or std.mem.eql(u8, a, "--headless")) {
             headless_test = true;
+        } else if (std.mem.eql(u8, a, "--perf-log")) {
+            perf_log = true;
         } else if (std.mem.eql(u8, a, "--window")) {
             normal_window = true;
         } else if (std.mem.eql(u8, a, "--frames") and i + 1 < args.len) {
@@ -1413,6 +1461,7 @@ pub fn main(init: std.process.Init) !void {
     const CGDisplayBounds: *const fn (u32) callconv(.c) CGRect = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGDisplayBounds") orelse return error.SymbolMissing));
     const CGDisplayCopyColorSpace: *const fn (u32) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGDisplayCopyColorSpace") orelse return error.SymbolMissing));
     const CGDisplayIsAsleep: *const fn (u32) callconv(.c) u32 = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGDisplayIsAsleep") orelse return error.SymbolMissing));
+    const CGSessionCopyCurrentDictionary: *const fn () callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGSessionCopyCurrentDictionary") orelse return error.SymbolMissing));
     const CGWindowLevelForKey: *const fn (i32) callconv(.c) i32 = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGWindowLevelForKey") orelse return error.SymbolMissing));
     const CGColorSpaceCreateDeviceRGB: *const fn () callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGColorSpaceCreateDeviceRGB") orelse return error.SymbolMissing));
     const CGBitmapContextCreate: *const fn (?*anyopaque, usize, usize, usize, usize, ?*anyopaque, u32) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGBitmapContextCreate") orelse return error.SymbolMissing));
@@ -1780,6 +1829,11 @@ pub fn main(init: std.process.Init) !void {
         .color_space = color_space,
         .display_id = display_id,
         .CGDisplayIsAsleep = CGDisplayIsAsleep,
+        .CGSessionCopyCurrentDictionary = CGSessionCopyCurrentDictionary,
+        .cf_key_screen_locked = CFStringCreateWithCString(null, "CGSSessionScreenIsLocked", 0x08000100),
+        .cf_true = kCFBooleanTrue_ptr.*,
+        .sel_occlusion_state = sel_registerName("occlusionState"),
+        .perf_log = perf_log,
         .screen_rect = screen_rect,
         .pboard_filenames_type = pboard_filenames_type,
         .CATransaction = objc_getClass("CATransaction"),
