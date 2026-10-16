@@ -661,14 +661,14 @@ test "still signature: passthrough is 0, themes change with path and mtime" {
     var sp: sc.SpaceConfig = .{ .mode = .passthrough };
     try std.testing.expectEqual(@as(u64, 0), stillSignature(&sp));
     sp.mode = .custom_shader;
-    sp.setPath("themes/Echo.zig");
+    sp.setPath("themes/Cygnus_A.zig");
     const a = stillSignature(&sp);
     try std.testing.expect(a != 0);
     try std.testing.expectEqual(a, stillSignature(&sp));
     sp.last_mtime = 42;
     const b = stillSignature(&sp);
     try std.testing.expect(b != a);
-    sp.setPath("themes/Gemini_Wormhole.zig");
+    sp.setPath("themes/Night_Tide.metal");
     try std.testing.expect(stillSignature(&sp) != b);
 }
 

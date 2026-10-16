@@ -93,5 +93,5 @@ Other targets:
 | Command | What it does |
 | --- | --- |
 | `make check-themes` | Runs the headless harness on every theme: CPU for `.zig`, GPU for `.metal`. |
-| `make harness THEME=themes/Echo.zig` | Runs the harness on one theme. |
+| `make harness THEME=themes/Cygnus_A.zig` | Runs the harness on one theme. |
 | `make release` | Builds `dist/Argus-v0.1.0-macos-arm64.zip`, with the `.zig` themes precompiled. |

@@ -283,11 +283,11 @@ test "popover layout: speed detents" {
 
 test "popover layout: theme list sorts, filters and steps" {
     var l: ThemeList = .{};
-    for ([_][]const u8{ "Echo.zig", "argus_theme_sdk.zig", "Tutorial_Tides.metal", "README.md", "Argon_Black_Hole.zig" }) |f| l.add(f);
+    for ([_][]const u8{ "Night_Tide.metal", "argus_theme_sdk.zig", "Tutorial_Tides.metal", "README.md", "Cygnus_A.zig" }) |f| l.add(f);
     try std.testing.expectEqual(@as(usize, 3), l.n);
-    try std.testing.expectEqualStrings("Argon_Black_Hole.zig", l.name(0));
+    try std.testing.expectEqualStrings("Cygnus_A.zig", l.name(0));
     try std.testing.expectEqualStrings("Tutorial_Tides.metal", l.name(2));
-    try std.testing.expectEqual(@as(?usize, 1), l.indexOf("Echo.zig"));
+    try std.testing.expectEqual(@as(?usize, 1), l.indexOf("Night_Tide.metal"));
     try std.testing.expectEqual(@as(usize, 3), l.step(2, 1)); // past the last theme: macOS Default
     try std.testing.expectEqual(@as(usize, 0), l.step(3, 1));
     try std.testing.expectEqual(@as(usize, 3), l.step(0, -1));

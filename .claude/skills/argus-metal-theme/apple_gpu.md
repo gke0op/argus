@@ -4,7 +4,8 @@ How Apple-silicon GPUs work and what that means for Argus's engine: measured on 
 (`make gpu-arch`, the harness, `make gpu-probes`) and checked against Apple's own material.
 Tags: **[measured]** here, **[Apple]** stated by Apple, **[RE]** reverse-engineered by
 others. Numbers are for an M3 at 1920x1200 unless noted; ratios travel better than
-absolutes.
+absolutes. Some measurements name themes that are no longer in `themes/` (Coral Reef,
+Gemini Aquarium, Lizard Island); they are in the history: `git show f566e3a:themes/<name>`.
 
 ## 1. The machine
 

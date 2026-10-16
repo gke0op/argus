@@ -14,13 +14,13 @@ By contributing you agree that your work is released under the MIT License (see
 | :--- | :--- | :--- |
 | Runs on | the GPU, every pixel in parallel | one CPU core |
 | Good for | fields, ray marching, shading, simulations on a grid | sequential, branchy state (agents, networks, game logic) |
-| Start from | [`themes/Tutorial_Tides.metal`](themes/Tutorial_Tides.metal), then [`themes/Tutorial_Reef.metal`](themes/Tutorial_Reef.metal) | [`themes/Echo.zig`](themes/Echo.zig) and [`themes/argus_theme_sdk.zig`](themes/argus_theme_sdk.zig) |
+| Start from | [`themes/Tutorial_Tides.metal`](themes/Tutorial_Tides.metal), then [`themes/Tutorial_Reef.metal`](themes/Tutorial_Reef.metal) | [`themes/argus_theme_sdk.zig`](themes/argus_theme_sdk.zig) (its header shows the whole contract); no small Zig example ships, but the former reference theme is in the history: `git show f566e3a:themes/Echo.zig` |
 | Full contract | [`.claude/skills/argus-metal-theme/SKILL.md`](.claude/skills/argus-metal-theme/SKILL.md) | [BENCHMARK.md](BENCHMARK.md) §3–4 |
 
 Prefer Metal unless the work really is sequential.
 
 Name the file `themes/<Author>_<Name>.metal` (or `.zig`), where `<Author>` is you or the model
-that wrote it, e.g. `Night_Tide.metal`, `Fable_Chimera.zig`.
+that wrote it, e.g. `Night_Tide.metal`, `Fable_Chimera.zig` (an earlier theme, in the git history).
 
 ### 2. The contract, in short
 
@@ -127,7 +127,7 @@ The engine is `src/`: the app (`src/desktop_wallpaper.zig`, `src/desktop/`), the
 - Use Zig 0.17.0 exactly. The Makefile looks for `./.toolchain/zig` first.
 - Run `make test` before you open a PR. It also checks that the generated quasar themes match
   their source.
-- The quasar family (`Cygnus_A`, `J0834`, `PG1426`) is generated: edit
+- The quasar theme (`Cygnus_A`) is generated: edit
   `tools/quasar_template.zig` or `tools/gen_quasars.py`, then `make quasars`.
 - Keep it lean: no new dependencies, no allocations in the frame loop, nothing that runs when
   no Space is visible.

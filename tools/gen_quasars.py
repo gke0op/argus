@@ -27,6 +27,8 @@ LOCAL_DIR = os.path.join(ROOT, "tools", "local")
 # `edd` is the snapshot's ISCO inflow (Mdot_Edd units); the snapshot radiates ~0.55 of a steady
 # disk at that inflow, so edd ~ lambda / 0.55 (tuned so the test's absolute L/L_Edd lands on
 # lambda). `computed` holds the values its header quotes; its "computed disk" test checks them.
+# The published family is Cygnus A alone. Other configurations (J0834 and PG1426 in the owner's
+# checkout) live in tools/local/*.json and generate untracked themes.
 QUASARS = [
     {
         "file": "Cygnus_A.zig",
@@ -52,55 +54,6 @@ QUASARS = [
 // infrared (Privon et al. 2012, ApJ 747, 46), puts it at lambda ~ 0.012 of Eddington: a thin disk
 // near the low end of the radiatively efficient range. Its spin is unmeasured (the torus hides
 // the inner disk's X-ray reflection): a = 0.9 here is a choice. This camera sits at 88 deg.
-""",
-    },
-    {
-        "file": "J0834.zig",
-        "title": "J0834",
-        "slug": "j0834",
-        # Computed by this theme's disk solution; its "computed disk" test checks them (HEADER).
-        "computed": {"pt_25": 0.82, "pt_5": 0.47, "lum": 0.57, "l_edd": 0.040, "t_peak": 64_600.0, "r_peak": 1.96, "h_over_r": 0.021},
-        "spin": "0.99",
-        "spin_note": "Spin a = 0.99 M (Piotrovich et al. 2024's models), inclination 88 deg (nearly edge-on).",
-        "mass": "3.2e9",
-        "mass_note": "a 3.2e9 Msun hole (Piotrovich et al. 2024, Table 1)",
-        "edd": "0.067",
-        "lam": 0.040,
-        "lam_ref": "lambda = 0.040 (log -1.402; Piotrovich, Buliga & Natsvlishvili 2024, Table 1)",
-        "t_lo": 55_000.0,
-        "t_hi": 75_000.0,
-        "para": """\
-// Modelled on F2MS J0834+3506 (z ~ 0.47), a dust-reddened "red quasar" from the FIRST-2MASS
-// survey, thought to be young and emerging from its dust. Its literature mass, 3.2e9 Msun
-// (log 9.502), and Eddington ratio, 0.040 (log -1.402), are as compiled by Piotrovich, Buliga &
-// Natsvlishvili (2024, Astron. Nachr., arXiv:2410.04851, Table 1): a thin disk. Their
-// radiative-efficiency models give a near-extreme spin, a = 0.990-0.998 across three models
-// (each assuming a thin disk), with inclinations of 50-70 deg found by stepping from 45 deg, not
-// measured. a = 0.99 here follows those models; this camera sits at 88 deg (a choice).
-""",
-    },
-    {
-        "file": "PG1426.zig",
-        "title": "PG 1426",
-        "slug": "pg1426",
-        # Computed by this theme's disk solution; its "computed disk" test checks them (HEADER).
-        "computed": {"pt_25": 0.87, "pt_5": 0.51, "lum": 0.55, "l_edd": 0.0244, "t_peak": 56_000.0, "r_peak": 3.41, "h_over_r": 0.008},
-        "spin": "0.9",
-        "spin_note": "Spin a = 0.9 M (inside PG 1426+015's a* >~ 0.7), inclination 88 deg (nearly edge-on).",
-        "mass": "1.0e9",
-        "mass_note": "a 1.0e9 Msun hole (reverberation mapped)",
-        "edd": "0.045",
-        "lam": 0.024,
-        "lam_ref": "lambda ~ 0.024 from its SED (Vasudevan & Fabian 2009, as compiled)",
-        "t_lo": 45_000.0,
-        "t_hi": 65_000.0,
-        "para": """\
-// Modelled on PG 1426+015 (z ~ 0.09), a "bare" quasar with an unobscured view of its nucleus and
-// the most massive reverberation-mapped black hole: log M = 9.01 (+0.11 / -0.16) (Walton et al.
-// 2025, arXiv:2509.13411). Its X-ray reflection gives a* >~ 0.7 (Walton et al. 2025,
-// preliminary: it assumes reflection dominates the soft excess); a = 0.9 here, inside that
-// range. Its Eddington ratio, ~0.024 from its SED (Vasudevan & Fabian 2009, as compiled; not
-// re-checked here), makes it a thin disk. This camera sits at 88 deg (a choice).
 """,
     },
 ]

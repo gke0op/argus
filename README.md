@@ -14,7 +14,7 @@ for a few milliseconds of GPU a frame, or really anything you can write a pixel 
 ## What it is
 
 Argus is a bare-metal macOS app that gives every Desktop Space its own live theme. Swipe from
-one Space to the next and you swipe from a black hole to a coral reef to a night beach.
+one Space to the next and you swipe from a black hole to a night beach to a marbling bath.
 
 A theme is a single source file in `themes/`:
 
@@ -31,9 +31,9 @@ The engine itself is Zig 0.17.0 talking straight to the macOS frameworks, with n
 It runs at 30 FPS, draws only the Spaces you can see, and does nothing at all while a
 full-screen app, the lock screen or a sleeping display covers them.
 
-## The black holes
+## The black hole
 
-Three quasars ship with the app, all of them real: Cygnus A, F2MS J0834+3506 and PG 1426+015.
+One quasar ships with the app, and it is real: Cygnus A.
 Every pixel's light is traced through the curved spacetime of a spinning black hole, the disk's
 glow comes from a physical model of a feeding quasar, and the approximations and artistic
 choices are named as such.
@@ -55,10 +55,10 @@ What you are looking at, how faithful each part is, how it was checked and how t
 **[docs/QUASARS.md](docs/QUASARS.md)**. The full model, derivations and open questions for
 physicists: [docs/QUASAR_MODEL.md](docs/QUASAR_MODEL.md).
 
-Want your own? The quasars are generated from one template (`make quasars`); give it a mass, a
+Want your own? Cygnus A is generated from a template (`make quasars`); give it a mass, a
 spin and a feeding rate and grow your own plump one.
 
-Beyond the black holes: [`Night_Tide`](themes/Night_Tide.metal), a beautiful night on the
+Beyond the black hole: [`Night_Tide`](themes/Night_Tide.metal), a beautiful night on the
 coast where the flashes in the surf follow published dinoflagellate research. And more in
 [`themes/`](themes/): drag any of them onto a Space.
 
@@ -83,7 +83,7 @@ make zig                                  # install the pinned Zig 0.17.0 into .
 make run                                  # build Argus.app and start it
 make stop                                 # quit it
 make test                                 # run the test suites
-make harness THEME=themes/Echo.zig        # verify and benchmark a theme headlessly
+make harness THEME=themes/Cygnus_A.zig    # verify and benchmark a theme headlessly
 make harness THEME=themes/Tutorial_Tides.metal   # same, on the GPU for Metal themes
 make check-themes                         # the harness on every theme
 make release                              # dist/Argus-v0.1.0-macos-arm64.zip for a GitHub Release
@@ -140,8 +140,10 @@ the skills.
 
 **CPU themes in Zig** use [`themes/argus_theme_sdk.zig`](themes/argus_theme_sdk.zig): a
 `State` struct with `init`, `step`, `draw` and `deinit`, one allocation at init and none
-after. Start from [`themes/Echo.zig`](themes/Echo.zig); the contract and the harness gates are
-spelled out in [BENCHMARK.md](BENCHMARK.md).
+after. This release ships no small Zig starter: the SDK's header shows the whole contract,
+[`themes/Cygnus_A.zig`](themes/Cygnus_A.zig) is a complete (and large) example, and the former
+reference theme is in the history (`git show f566e3a:themes/Echo.zig`). The contract and
+the harness gates are spelled out in [BENCHMARK.md](BENCHMARK.md).
 
 ### What it costs
 
@@ -152,7 +154,9 @@ pacing (the GPU clocks down between frames, so this is higher than the back-to-b
 | :--- | ---: |
 | `Tutorial_Tides.metal` | 1.0–1.5 ms |
 | `Tutorial_Reef.metal` | 2.1–2.2 ms |
+| `Ebru_Studio.metal` | 2.2–2.6 ms |
 | `Cygnus_A` on the GPU (HDR10, native 3024x1964, per-frame shade) | 3.2–3.4 ms |
+| `Orion_Nebula.metal` | 3.5–4.1 ms |
 | `Night_Tide.metal` | 5.3–6.2 ms |
 
 The full table, including the CPU themes, is in [BENCHMARK.md](BENCHMARK.md).
@@ -168,8 +172,8 @@ one allocation, survives a 320x200 watchdog, respects the row stride, opaque pix
 visible motion, under 16.7 ms a frame on one CPU core). A submission that passes is, at the
 same moment, a wallpaper you can drop on a Space.
 
-Several of the themes here started as answers to it, and the table in BENCHMARK.md records who
-wrote each one.
+Several earlier themes, now in the git history, started as answers to it, and the table in
+BENCHMARK.md records who wrote each one.
 
 ## How it was made
 

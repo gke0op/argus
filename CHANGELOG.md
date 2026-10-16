@@ -35,21 +35,16 @@ First public release, as source. Built with Zig 0.17.0 for macOS on Apple Silico
 
 ### Themes
 
-- **Quasar family**, one engine generated from `tools/quasar_template.zig` by
-  `tools/gen_quasars.py`: `Cygnus_A` (the flagship), `J0834` (F2MS J0834+3506) and `PG1426`
-  (PG 1426+015). Exact Kerr null geodesics; a computed general-relativistic thin disk with gas
+- `Cygnus_A`, the flagship quasar, generated from the quasar engine
+  `tools/quasar_template.zig` by `tools/gen_quasars.py`. Exact Kerr null geodesics; a computed general-relativistic thin disk with gas
   and radiation pressure, electron scattering and Kramers opacity; colour-corrected,
   limb-darkened emission through CIE 1931; MRI-like turbulence statistics; shearing hot spots;
   supersampled photon rings. The colour correction follows hotter gas in turbulence and spots.
-- `Gargantua`: the same gravity with a disk chosen for the Interstellar look.
 - `Night_Tide` (Metal): bioluminescent surf on a moonless night.
 - `Orion_Nebula` (Metal): the Orion Nebula from VLT/MUSE line maps and a fitted 3D
   photoionisation model, with its baking tool in `tools/orion_bake/`.
-- `Lizard_Island` (Zig and Metal): a Great Barrier Reef lagoon at metre scale, from field
-  sources.
-- `Coral_Reef` (Zig and Metal), `Gemini_Aquarium` (Zig and Metal), `Gemini_Wormhole`
-  (Zig and Metal), `Argon_Black_Hole`, `Echo` (the reference CPU theme), `Fable_Chimera`,
-  `Claude_Textus`, `Textus_Puteus`, `Claude_Descensus`.
+- `Ebru_Studio` (Metal): a Turkish marbling bath worked by a random hand, as a viscous
+  Stokes flow.
 - Tutorials: `Tutorial_Tides.metal` (stateless) and `Tutorial_Reef.metal` (GPU state).
 
 ### Verification

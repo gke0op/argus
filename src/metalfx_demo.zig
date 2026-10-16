@@ -7,7 +7,7 @@
 // Same seed and frame count everywhere, so every run shows the same moment.
 // Prints the median GPU time per frame and writes one PNG per run.
 //
-//   make metalfx-demo THEME=themes/Coral_Reef.metal
+//   make metalfx-demo THEME=themes/Night_Tide.metal
 // ============================================================================
 
 const std = @import("std");
@@ -146,7 +146,7 @@ fn run(io: std.Io, src: []const u8, label: []const u8, s: f64, frames: usize, pn
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    var path: []const u8 = "themes/Coral_Reef.metal";
+    var path: []const u8 = "themes/Night_Tide.metal";
     var frames: usize = 300;
     var out_dir: []const u8 = "/tmp";
     var scales_arg: []const u8 = "1,0.75,0.667,0.5";

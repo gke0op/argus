@@ -11,8 +11,7 @@ The git history records who did what; this is the summary.
 ### Engine and tools
 
 - **Argon** (Google Gemini): the first wallpaper engine, the Zig theme SDK, the
-  headless harness, ARGUS-BENCH (`BENCHMARK.md`), `themes/Argon_Black_Hole.zig`
-  and `themes/Echo.zig`.
+  headless harness and ARGUS-BENCH (`BENCHMARK.md`).
 - **Claude** (Anthropic), mostly Claude Opus, working in Claude Code: the Metal
   GPU path (Metal themes, the prelude, the GPU harness, the GPU Kerr ray tracer
   and HDR presenter), the menu bar, Spaces strip and Settings popover, rendering
@@ -25,43 +24,23 @@ The git history records who did what; this is the summary.
 ### Themes
 
 - `tools/quasar_template.zig` (the quasar engine): written by Claude Opus.
-  `themes/Cygnus_A.zig`, `themes/J0834.zig` and `themes/PG1426.zig` are
-  generated from it by `tools/gen_quasars.py`; `themes/Gargantua.zig` is the same
-  engine with a disk chosen for the look. The physics was reviewed by Argon
-  (Google Gemini), GPT (OpenAI), two Claude Opus audits that wrote their own code,
-  and an overnight panel of models including DeepSeek, Muse, Nemotron, Claude
-  Sonnet and Claude Haiku, on a reference build with H1821+643's parameters;
-  Claude Sonnet checked those literature parameters.
+  `themes/Cygnus_A.zig` is generated from it by `tools/gen_quasars.py`. The physics
+  was reviewed by Argon (Google Gemini), GPT (OpenAI), two Claude Opus audits that
+  wrote their own code, and an overnight panel of models including DeepSeek, Muse,
+  Nemotron, Claude Sonnet and Claude Haiku, on a reference build with H1821+643's
+  parameters; Claude Sonnet checked those literature parameters.
   See `docs/QUASAR_MODEL.md`.
-- `themes/Gemini_Wormhole.zig`: written by Google Gemini. Claude Opus fixed the
-  accretion disk's spiral winding, which tightened into moiré rings over time.
-- `themes/Gemini_Aquarium.zig`: Claude Opus's rework of Google Gemini's
-  `Gemini_Cyber_Topography` (a wireframe canyon with a boids swarm) into an
-  aquarium. The seabed terrain and flocking come from Gemini's original.
-- `themes/Fable_Chimera.zig`: written by Claude Fable 5.1 (Anthropic).
-- `themes/Claude_Textus.zig`: written by Claude Sonnet (Anthropic).
-- `themes/Claude_Descensus.zig`: written by Claude Sonnet, on the Textus cloth.
-- `themes/Textus_Puteus.zig`: written by Claude Opus, from Claude_Textus.
-- `themes/Coral_Reef.zig`: written by Claude Opus. Its fish schools come
-  from `Gemini_Aquarium` and its reef ridges from Gemini's canyon terrain. Nine
-  of its species (shark, moray eel, lionfish, manta ray, sea turtle, moorish
-  idol, parrotfish, seahorse, moon jellyfish) were each designed by a Claude
-  Haiku agent.
-- `themes/Lizard_Island.zig`: written by Claude Opus on the Coral_Reef
-  engine, from a site brief on Lizard Island (Great Barrier Reef) compiled from
-  field sources; its header lists them. Six species (damselfish, fusilier,
-  pickhandle barracuda, whitetip reef shark, tawny nurse shark, barramundi cod)
-  were each designed by a Claude Haiku agent, and three more (blacktip reef
-  shark, green turtle, parrotfish) are carried over from Coral_Reef.
-- Metal ports `themes/Coral_Reef.metal`, `themes/Lizard_Island.metal`,
-  `themes/Gemini_Wormhole.metal` and `themes/Gemini_Aquarium.metal`: by Claude
-  Opus, from the Zig themes above (same authors and species credits).
 - `themes/Night_Tide.metal`: written by Claude Opus. A Metal theme of
   bioluminescent surf on a moonless night; the flash behaviour follows the
   published dinoflagellate research cited in its header.
 - `themes/Orion_Nebula.metal` and its data file `themes/Orion_Nebula.bin`:
   written by Claude Opus. The baking tool is `tools/orion_bake/bake.py`; the theme's
   header separates what is measured, fitted and assumed.
+- `themes/Ebru_Studio.metal`: written by Claude Opus. A marbling bath (Turkish
+  ebru) worked by a random hand, modelled as a slow, viscous Stokes flow.
+- Earlier themes by Google Gemini, Claude Sonnet, Claude Fable, Claude Opus and
+  Claude Haiku (species) did not ship in this release. They remain in the git
+  history, with their credits in this file's history.
 
 ## Third-party data
 
@@ -89,5 +68,5 @@ Physical constants and published parameters (line ratios, recombination coeffici
 extinction law, stellar temperatures, cluster structure) are cited where they are used.
 
 Other themes cite the published literature and field reports they draw on in their headers
-(for example `Night_Tide`, `Lizard_Island` and the quasar family); none of them
-redistributes third-party data.
+(for example `Night_Tide` and `Cygnus_A`); none of them redistributes third-party
+data.

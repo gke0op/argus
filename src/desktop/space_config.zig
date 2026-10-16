@@ -166,9 +166,9 @@ pub var gpu_ports = true;
 /// Set by the app: compiles a `.metal` theme source and reports whether it is loadable, so a
 /// broken edit never replaces a working theme. Null (tests, harness) accepts any source.
 pub var metal_validate: ?*const fn (src: []const u8, path: []const u8) bool = null;
-// Themes built on the Kerr-disk engine (src/gpu/bh_*), drawn by its GPU path: the shipped ones by
+// Themes built on the Kerr-disk engine (src/gpu/bh_*), drawn by its GPU path: the shipped one by
 // name, and any other (a locally generated quasar) by the marker in its first lines.
-const GPU_PORT_THEMES = [_][]const u8{ "Gargantua.zig", "Cygnus_A.zig", "J0834.zig", "PG1426.zig" };
+const GPU_PORT_THEMES = [_][]const u8{"Cygnus_A.zig"};
 const GPU_PORT_MARKER = "// @argus-engine: kerr-disk";
 
 fn isGpuPortTheme(path: []const u8) bool {
@@ -186,7 +186,7 @@ test "Kerr-disk themes are found by name or by the marker in their header" {
     g_io = std.testing.io;
     try std.testing.expect(isGpuPortTheme("themes/Cygnus_A.zig"));
     try std.testing.expect(isGpuPortTheme("tools/quasar_template.zig")); // unlisted: by its marker
-    try std.testing.expect(!isGpuPortTheme("themes/Echo.zig"));
+    try std.testing.expect(!isGpuPortTheme("tests/fixtures/Fixture_Stateful.zig"));
     try std.testing.expect(!isGpuPortTheme("themes/Night_Tide.metal"));
 }
 const GPU_PORT_ROOT = "-Mroot=src/gpu/bh_export.zig";
@@ -232,7 +232,7 @@ test "renamed themes: saved Spaces naming an old theme file load the new one fro
     try std.testing.expectEqualStrings("/a/b/themes/Cygnus_A.zig", renamedThemePath("/a/b/themes/Opus_Cygnus_A.zig", &buf));
     try std.testing.expectEqualStrings("/a/b/themes/Night_Tide.metal", renamedThemePath("/a/b/themes/Opus_Night_Tide.metal", &buf));
     try std.testing.expectEqualStrings("/a/b/themes/Orion_Nebula.metal", renamedThemePath("/a/b/themes/Opus_Orion_Nebula.metal", &buf));
-    try std.testing.expectEqualStrings("themes/Echo.zig", renamedThemePath("themes/Echo.zig", &buf));
+    try std.testing.expectEqualStrings("themes/Ebru_Studio.metal", renamedThemePath("themes/Ebru_Studio.metal", &buf));
 }
 
 /// The app's bundle identifier (Argus.app/Contents/Info.plist): also the LaunchAgent label and
