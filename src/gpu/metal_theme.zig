@@ -109,6 +109,10 @@ pub fn loadData(io: std.Io, alloc: std.mem.Allocator, theme_path: []const u8, sr
     const path = try std.Io.Dir.path.join(alloc, &.{ dir, name });
     defer alloc.free(path);
     const want = d.dataBytes();
+    // The file must be exactly the declared size: a larger one would otherwise load its
+    // first `want` bytes silently.
+    const st = try std.Io.Dir.cwd().statFile(io, path, .{});
+    if (st.size != want) return error.MetalDataSize;
     const buf = try alloc.alloc(u8, want);
     errdefer alloc.free(buf);
     const got = try std.Io.Dir.cwd().readFile(io, path, buf);
@@ -290,4 +294,21 @@ test "directives" {
     try std.testing.expect(parseDirectives("// @argus data ../x.bin 4x4\n").dataName() == null);
     try std.testing.expect(parseDirectives("// @argus data a/x.bin 4x4\n").dataName() == null);
     try std.testing.expect(parseDirectives("// @argus data x.bin 4x4 rgb9\n").dataName() == null);
+}
+
+test "loadData: the file must be exactly the declared size" {
+    const io = std.testing.io;
+    const alloc = std.testing.allocator;
+    const src = "// @argus data argus_test_data.bin 2x1 rgba8\n";
+    const theme = "/tmp/argus_test_theme.metal";
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = "/tmp/argus_test_data.bin", .data = "12345678" });
+    const ok = (try loadData(io, alloc, theme, src)).?;
+    defer alloc.free(ok);
+    try std.testing.expectEqualStrings("12345678", ok);
+    try cwd.writeFile(io, .{ .sub_path = "/tmp/argus_test_data.bin", .data = "123456789" });
+    try std.testing.expectError(error.MetalDataSize, loadData(io, alloc, theme, src));
+    try cwd.writeFile(io, .{ .sub_path = "/tmp/argus_test_data.bin", .data = "1234567" });
+    try std.testing.expectError(error.MetalDataSize, loadData(io, alloc, theme, src));
+    try std.testing.expect((try loadData(io, alloc, theme, "kernel void argus_draw() {}")) == null);
 }
