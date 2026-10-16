@@ -68,7 +68,9 @@ coast where the flashes in the surf follow published dinoflagellate research. An
 
 Download the release zip and open Argus.app. No Zig needed: every theme ships precompiled.
 The first time, macOS asks you to approve an app that isn't notarized;
-[docs/INSTALL.md](docs/INSTALL.md) has the steps.
+[docs/INSTALL.md](docs/INSTALL.md) has the steps. The download also carries the theme-writing
+guides: open `WRITING_THEMES.md` in the unzipped folder, or open Claude Code there and ask for a
+theme (it finds the skills in `.claude/skills/` on its own).
 
 **Themes are native code.** A Zig theme becomes a dynamic library inside Argus, and a Metal
 theme runs on your GPU. Only run themes you trust. See [SECURITY.md](SECURITY.md).
