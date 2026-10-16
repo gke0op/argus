@@ -18,6 +18,21 @@ pub const PREVIEW_H: usize = 300;
 pub const SpaceConfig = sc.SpaceConfig;
 pub const SpaceMode = sc.SpaceMode;
 
+/// Zeroes `buf` by mapping fresh zero pages over its whole pages (memset only the partial
+/// pages at the ends), so a reset buffer costs no memory until something draws into it.
+/// A 9 MB memset per theme load committed every Space's canvas, even for GPU-drawn Spaces.
+fn zeroRelease(buf: []u8) void {
+    const page = std.heap.page_size_min;
+    const base = @intFromPtr(buf.ptr);
+    const start = std.mem.alignForward(usize, base, page);
+    const end = std.mem.alignBackward(usize, base + buf.len, page);
+    if (end <= start) return @memset(buf, 0);
+    @memset(buf[0 .. start - base], 0);
+    @memset(buf[end - base ..], 0);
+    const got = std.c.mmap(@ptrFromInt(start), end - start, .{ .READ = true, .WRITE = true }, .{ .TYPE = .PRIVATE, .FIXED = true, .ANONYMOUS = true }, -1, 0);
+    if (got == std.c.MAP_FAILED) @memset(buf[start - base .. end - base], 0);
+}
+
 pub const Observatory = struct {
     paused: bool = false,
     spin_mult: f64 = 1.0,
@@ -67,7 +82,7 @@ pub const Observatory = struct {
     /// shader (re)load, instead of inheriting stale pixels from the previous theme.
     pub fn resetSpaceNativeBuffer(self: *Observatory, space_idx: usize) void {
         if (space_idx >= MAX_SPACES) return;
-        @memset(&self.space_native_pixels[space_idx], 0x00000000);
+        zeroRelease(std.mem.sliceAsBytes(&self.space_native_pixels[space_idx]));
     }
 
     /// Compile + load a `.zig` shader into a Space AND reset its isolated buffer on success.

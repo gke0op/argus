@@ -588,13 +588,15 @@ const MacBridge = struct {
             }
         }
 
-        if (sp.mode != .custom_shader or !sp.metal_theme) self.dropMetalTheme(idx);
-        if (sp.mode != .custom_shader or sp.metal_theme) self.dropGpu(idx);
+        // GPU presenters hand the Space's layer to each other (see renderSpaceMetal/Gpu); it is
+        // only retired when the Space stops being GPU-drawn.
         if (sp.mode == .custom_shader and sp.metal_theme) {
             _ = self.renderSpaceMetal(idx);
             return;
         }
         if (sp.mode == .custom_shader and self.gpu_enabled and self.renderSpaceGpu(idx)) return;
+        self.dropMetalTheme(idx);
+        self.dropGpu(idx);
 
         // A picture Space whose image failed to load shows the window's black background.
         if (sp.mode != .custom_shader) {
@@ -670,6 +672,7 @@ const MacBridge = struct {
     fn tickGpu(self: *MacBridge) void {
         gpu.pollEngines();
         gpu.reapEngines(self.frame_idx, false);
+        gpu.reapLayers(self.frame_idx);
         for (0..self.obs.n_spaces) |idx| {
             if (self.frame_idx -| self.gpu_drawn_tick[idx] < GPU_PARK_TICKS) continue;
             if (self.gpu[idx]) |*p| p.park();
@@ -677,8 +680,28 @@ const MacBridge = struct {
         }
     }
 
+    /// Hands over the Space's hybrid layer when a Metal-only theme replaces it (or null).
+    fn takeGpuLayer(self: *MacBridge, idx: usize) ?*anyopaque {
+        if (self.gpu[idx]) |*p| {
+            const l = p.release(self.frame_idx);
+            self.gpu[idx] = null;
+            return l;
+        }
+        return null;
+    }
+
+    /// Hands over the Space's Metal-only layer when a hybrid theme replaces it (or null).
+    fn takeMetalLayer(self: *MacBridge, idx: usize) ?*anyopaque {
+        if (self.mt[idx]) |*p| {
+            const l = p.release();
+            self.mt[idx] = null;
+            return l;
+        }
+        return null;
+    }
+
     fn dropMetalTheme(self: *MacBridge, idx: usize) void {
-        if (self.mt[idx]) |*p| p.destroy();
+        if (self.mt[idx]) |*p| p.destroy(self.frame_idx);
         self.mt[idx] = null;
     }
 
@@ -686,19 +709,24 @@ const MacBridge = struct {
     /// since the Space's last frame, so warm (10 FPS) neighbors animate at the right speed.
     fn renderSpaceMetal(self: *MacBridge, idx: usize) bool {
         const sp = &self.obs.spaces[idx];
+        // The Space's layer outlives theme changes: a new theme draws into the same layer.
+        var keep: ?*anyopaque = null;
         if (self.mt[idx]) |*p| {
-            const host = self.msg0(p.layer, self.sel_registerName("superlayer"));
             if (p.gen != sp.dylib_gen) {
-                self.dropMetalTheme(idx);
-            } else if (host != sp.desktop_layer and !p.rehost(sp.desktop_layer)) self.dropMetalTheme(idx);
+                keep = p.release();
+                self.mt[idx] = null;
+            } else _ = p.rehost(sp.desktop_layer);
         }
+        if (keep == null) keep = self.takeGpuLayer(idx);
+        defer if (keep) |k| gpu.retire(k, self.frame_idx);
         if (self.mt[idx] == null) {
             var buf: [131072]u8 = undefined;
             const src = std.Io.Dir.cwd().readFile(g_io, sp.getPath(), &buf) catch return false;
             const data = metal_theme.loadData(g_io, std.heap.page_allocator, sp.getPath(), src) catch return false;
             defer if (data) |d| std.heap.page_allocator.free(d);
             const seed: u32 = @truncate(std.hash.Wyhash.hash(sp.space_id, sp.getPath()));
-            self.mt[idx] = gpu.ThemePresenter.create(src, data, sp.getLabel(), sp.dylib_gen, seed, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H) orelse return false;
+            self.mt[idx] = gpu.ThemePresenter.create(src, data, sp.getLabel(), sp.dylib_gen, seed, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H, keep) orelse return false;
+            keep = null;
             self.mt_last_tick[idx] = self.frame_idx;
             self.snap_tick[idx] = 0;
         }
@@ -724,17 +752,22 @@ const MacBridge = struct {
     /// False when the theme has no GPU port (the caller falls back to the CPU path).
     fn renderSpaceGpu(self: *MacBridge, idx: usize) bool {
         const sp = &self.obs.spaces[idx];
+        // The Space's layer outlives theme changes: a new theme draws into the same layer.
+        var keep: ?*anyopaque = null;
         if (self.gpu[idx]) |*p| {
-            const host = self.msg0(p.layer, self.sel_registerName("superlayer"));
             if (p.handle != sp.dylib_handle) {
-                self.dropGpu(idx);
-            } else if (host != sp.desktop_layer and !p.rehost(sp.desktop_layer)) self.dropGpu(idx);
+                keep = p.release(self.frame_idx);
+                self.gpu[idx] = null;
+            } else _ = p.rehost(sp.desktop_layer);
         }
+        if (keep == null and self.gpu[idx] == null) keep = self.takeMetalLayer(idx);
+        defer if (keep) |k| gpu.retire(k, self.frame_idx);
         if (self.gpu[idx] == null) {
             if (self.gpu_tried[idx] == sp.dylib_handle) return false; // not a GPU build: don't retry every frame
             self.gpu_tried[idx] = sp.dylib_handle;
             const key = sc.themeSourceHash(sp.getPath(), true);
-            self.gpu[idx] = gpu.Presenter.create(sp.dylib_handle, sp.theme_state, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H, key, self.frame_idx) orelse return false;
+            self.gpu[idx] = gpu.Presenter.create(sp.dylib_handle, sp.theme_state, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H, key, self.frame_idx, keep) orelse return false;
+            keep = null;
             self.snap_tick[idx] = 0;
         }
         self.obs.stepSpace(idx);
@@ -2467,6 +2500,7 @@ pub fn main(init: std.process.Init) !void {
         .sel_occlusion_state = sel_registerName("occlusionState"),
         .perf_log = perf_log,
         .gpu_enabled = sc.gpu_ports,
+
         .screen_rect = screen_rect,
         .pboard_filenames_type = pboard_filenames_type,
         .CATransaction = objc_getClass("CATransaction"),
@@ -2484,6 +2518,7 @@ pub fn main(init: std.process.Init) !void {
         .max_frames = max_frames,
     };
     g_bridge = &bridge;
+    gpu.log_events = perf_log;
     bridge.snapshot_dir = snapshot_dir;
     obs.paused = !settings.getBool("animate", true);
     obs.spin_mult = pl.SPEEDS[pl.speedIndex(settings.getFloat("speed", 1.0, 0.25, 2.0))];

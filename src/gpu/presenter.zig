@@ -21,29 +21,51 @@ pub const CGRect = extern struct { x: f64, y: f64, w: f64, h: f64 };
 /// HDR output for hybrid themes on displays with EDR headroom. `--sdr` turns it off.
 pub var hdr_enabled = true;
 
+/// `--perf-log`: print layer and engine events (create, park, rehost, retire) to stderr.
+pub var log_events = false;
+fn ev(comptime fmt: []const u8, args: anytype) void {
+    if (log_events) std.debug.print("[gpu] " ++ fmt ++ "\n", args);
+}
+
 /// A CAMetalLayer covering `host_layer` with a w x h drawable the kernels write directly:
 /// BGRA8 in `color_space`, or with `hdr` HDR10 (10-bit PQ, BT.2020) as EDR content, at
 /// 4 bytes per pixel like SDR. `drawables` caps the swap chain (2 or 3).
-fn makeLayer(dev: mtl.Id, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize, hdr: bool, drawables: usize) mtl.Id {
-    const ml = mtl.msg(mtl.Id, mtl.cls("CAMetalLayer"), "layer", .{}) orelse return null;
-    _ = mtl.msg(mtl.Id, ml, "retain", .{});
+/// `reuse` is a layer this Space already had: it is reconfigured and moved instead of
+/// replaced, because a replaced layer's last drawable stays mapped (23 MB at native HDR).
+fn makeLayer(dev: mtl.Id, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize, hdr: bool, drawables: usize, reuse: mtl.Id) mtl.Id {
+    ev("layer {s} {d}x{d} hdr={}", .{ if (reuse != null) "reuse" else "new", w, h, hdr });
+    const ml = reuse orelse blk: {
+        const fresh = mtl.msg(mtl.Id, mtl.cls("CAMetalLayer"), "layer", .{}) orelse return null;
+        _ = mtl.msg(mtl.Id, fresh, "retain", .{});
+        break :blk fresh;
+    };
     mtl.msg(void, ml, "setDevice:", .{dev});
     mtl.msg(void, ml, "setPixelFormat:", .{if (hdr) mtl.PIXEL_BGR10A2 else mtl.PIXEL_BGRA8});
     mtl.msg(void, ml, "setFramebufferOnly:", .{false});
     mtl.msg(void, ml, "setMaximumDrawableCount:", .{drawables});
     mtl.msg(void, ml, "setDrawableSize:", .{mtl.CGSize{ .width = @floatFromInt(w), .height = @floatFromInt(h) }});
+    mtl.msg(void, ml, "setWantsExtendedDynamicRangeContent:", .{hdr});
+    if (!hdr) mtl.msg(void, ml, "setEDRMetadata:", .{@as(mtl.Id, null)});
     if (hdr) {
-        mtl.msg(void, ml, "setWantsExtendedDynamicRangeContent:", .{true});
         if (colorSpaceNamed("kCGColorSpaceITUR_2100_PQ")) |cs| mtl.msg(void, ml, "setColorspace:", .{cs});
         // PQ is absolute luminance: tell the compositor that 100 nits is display white (EDR 1.0).
         const md = mtl.msg(mtl.Id, mtl.cls("CAEDRMetadata"), "HDR10MetadataWithMinLuminance:maxLuminance:opticalOutputScale:", .{ @as(f32, 0.005), @as(f32, 1600.0), @as(f32, 100.0) });
         if (md != null) mtl.msg(void, ml, "setEDRMetadata:", .{md});
     } else if (color_space != null) mtl.msg(void, ml, "setColorspace:", .{color_space});
     mtl.msg(void, ml, "setOpaque:", .{true});
-    mtl.msg(void, ml, "setFrame:", .{mtl.msg(CGRect, host_layer, "bounds", .{})});
     mtl.msg(void, ml, "setAutoresizingMask:", .{@as(u32, 2 | 16)}); // width | height sizable
-    mtl.msg(void, host_layer, "addSublayer:", .{ml});
+    moveLayer(ml, host_layer);
     return ml;
+}
+
+/// Puts `layer` on `host_layer` (no-op when it is already there), covering it.
+fn moveLayer(layer: mtl.Id, host_layer: mtl.Id) void {
+    if (mtl.msg(mtl.Id, layer, "superlayer", .{}) != host_layer) {
+        ev("layer move", .{});
+        mtl.msg(void, layer, "removeFromSuperlayer", .{});
+        mtl.msg(void, host_layer, "addSublayer:", .{layer});
+    }
+    mtl.msg(void, layer, "setFrame:", .{mtl.msg(CGRect, host_layer, "bounds", .{})});
 }
 
 /// Copies a w x h RGBA8 frame out of the GPU into `dst` (packRGBA layout), for menu previews.
@@ -64,34 +86,59 @@ fn snapshotInto(dev: mtl.Id, queue: mtl.Id, tex: *mtl.Id, w: usize, h: usize, ds
     return true;
 }
 
-/// Removes a CAMetalLayer and frees its drawables. Releasing the layer alone leaves its
-/// swap chain alive (measured: 2 x 23 MB per native HDR layer stay mapped), so the
-/// drawables are shrunk first and two tiny frames cycled through to retire the old ones.
-fn detachLayer(layer: mtl.Id, queue: mtl.Id) void {
+/// A layer that is going away for good (its Space changed to a non-GPU theme). Releasing a
+/// CAMetalLayer leaves its swap chain mapped (measured: 2 x 23 MB per native HDR layer), so
+/// it is shrunk and cycled through tiny frames first, and only taken out of the window a
+/// second later, once the render server has let go of the old drawables.
+const Retiring = struct { layer: mtl.Id, since: usize };
+var retiring: [16]?Retiring = @splat(null);
+var retire_queue: mtl.Id = null;
+const RETIRE_TICKS: usize = 30;
+
+fn retireLayer(layer: mtl.Id, tick: usize) void {
     if (layer == null) return;
+    ev("layer retire t={d}", .{tick});
     shrinkDrawables(layer);
-    if (queue != null) {
+    if (retire_queue == null) retire_queue = mtl.msg(mtl.Id, mtl.device() catch null, "newCommandQueue", .{});
+    if (retire_queue != null) {
         for (0..2) |_| {
             const pool = mtl.poolPush();
             defer mtl.poolPop(pool);
             const d = mtl.msg(mtl.Id, layer, "nextDrawable", .{}) orelse break;
-            const cb = mtl.msg(mtl.Id, queue, "commandBuffer", .{});
+            const cb = mtl.msg(mtl.Id, retire_queue, "commandBuffer", .{});
             mtl.msg(void, cb, "presentDrawable:", .{d});
             mtl.msg(void, cb, "commit", .{});
-            mtl.msg(void, cb, "waitUntilCompleted", .{});
         }
     }
+    for (&retiring) |*r| if (r.* == null) {
+        r.* = .{ .layer = layer, .since = tick };
+        return;
+    };
+    removeLayer(layer); // no slot: remove now
+}
+
+fn removeLayer(layer: mtl.Id) void {
     mtl.msg(void, layer, "removeFromSuperlayer", .{});
     mtl.release(layer);
+}
+
+/// Takes retired layers out of their windows once their drawables are gone.
+pub fn reapLayers(tick: usize) void {
+    for (&retiring) |*r| if (r.*) |x| if (tick -| x.since >= RETIRE_TICKS) {
+        removeLayer(x.layer);
+        r.* = null;
+    };
 }
 
 /// Parks a hidden layer: shrinking the drawable size frees every drawable except the one on
 /// screen, which keeps showing the last frame unchanged until the next render resizes it back.
 fn shrinkDrawables(layer: mtl.Id) void {
+    ev("layer park", .{});
     mtl.msg(void, layer, "setDrawableSize:", .{mtl.CGSize{ .width = 16, .height = 16 }});
 }
 
 fn setDrawables(layer: mtl.Id, w: usize, h: usize) void {
+    ev("layer unpark", .{});
     mtl.msg(void, layer, "setDrawableSize:", .{mtl.CGSize{ .width = @floatFromInt(w), .height = @floatFromInt(h) }});
 }
 
@@ -103,13 +150,14 @@ pub const ThemePresenter = struct {
     color_space: ?*anyopaque,
     parked: bool = false,
 
-    pub fn create(src: []const u8, data: ?[]const u8, label: []const u8, gen: u32, seed: u32, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize) ?ThemePresenter {
+    /// `reuse`: the layer the Space's previous theme drew into (kept, see makeLayer), or null.
+    pub fn create(src: []const u8, data: ?[]const u8, label: []const u8, gen: u32, seed: u32, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize, reuse: mtl.Id) ?ThemePresenter {
         var err_buf: [2048]u8 = undefined;
         var theme = metal_theme.Theme.compile(src, label, data, @intCast(w), @intCast(h), seed, &err_buf) catch {
             std.debug.print("argus: {s}: {s}\n", .{ label, std.mem.sliceTo(&err_buf, 0) });
             return null;
         };
-        const layer = makeLayer(theme.dev, host_layer, color_space, w, h, false, 3) orelse {
+        const layer = makeLayer(theme.dev, host_layer, color_space, w, h, false, 3, reuse) orelse {
             theme.deinit();
             return null;
         };
@@ -126,10 +174,8 @@ pub const ThemePresenter = struct {
     /// Moves the theme to another window layer (Spaces reordered) without recompiling it or
     /// losing its state.
     pub fn rehost(self: *ThemePresenter, host_layer: mtl.Id) bool {
-        detachLayer(self.layer, self.theme.queue);
-        self.layer = makeLayer(self.theme.dev, host_layer, self.color_space, self.theme.frame.width, self.theme.frame.height, false, 3);
-        self.parked = false;
-        return self.layer != null;
+        moveLayer(self.layer, host_layer);
+        return true;
     }
 
     pub fn render(self: *ThemePresenter, dt: f32) bool {
@@ -168,10 +214,16 @@ pub const ThemePresenter = struct {
         return snapshotInto(self.theme.dev, self.theme.queue, &tex, w, h, dst, &self.theme, encode);
     }
 
-    pub fn destroy(self: *ThemePresenter) void {
-        detachLayer(self.layer, self.theme.queue);
+    /// Frees the theme and hands back its layer for the Space's next GPU theme.
+    pub fn release(self: *ThemePresenter) mtl.Id {
+        const layer = self.layer;
         self.theme.deinit();
         self.* = undefined;
+        return layer;
+    }
+
+    pub fn destroy(self: *ThemePresenter, tick: usize) void {
+        retireLayer(self.release(), tick);
     }
 };
 /// A named CoreGraphics colour space (e.g. kCGColorSpaceITUR_2100_PQ), created once.
@@ -214,6 +266,7 @@ fn acquireEngine(key: u64, w: u32, h: u32) ?*bh_gpu.Engine {
     if (key == 0) return null;
     for (&engines) |*slot| if (slot.*) |*e| if (e.key == key and e.w == w and e.h == h and !e.engine.failed) {
         e.refs += 1;
+        ev("engine shared {x} refs={d}", .{ key, e.refs });
         return &e.engine;
     };
     return null;
@@ -222,6 +275,7 @@ fn acquireEngine(key: u64, w: u32, h: u32) ?*bh_gpu.Engine {
 fn storeEngine(key: u64, w: u32, h: u32, engine: bh_gpu.Engine, tick: usize) ?*bh_gpu.Engine {
     reapEngines(tick, true);
     for (&engines) |*slot| if (slot.* == null) {
+        ev("engine new {x} {d}x{d}", .{ key, w, h });
         slot.* = .{ .key = key, .w = w, .h = h, .engine = engine, .refs = 1, .idle_since = 0 };
         return &slot.*.?.engine;
     };
@@ -237,6 +291,10 @@ fn releaseEngine(engine: *bh_gpu.Engine, tick: usize) void {
 }
 
 /// Frees traced images nobody has used for ENGINE_IDLE_TICKS (all idle ones with `all`).
+pub fn retire(layer: mtl.Id, tick: usize) void {
+    retireLayer(layer, tick);
+}
+
 pub fn reapEngines(tick: usize, all: bool) void {
     for (&engines) |*slot| if (slot.*) |*e| if (e.refs == 0 and (all or tick -| e.idle_since >= ENGINE_IDLE_TICKS)) {
         e.engine.deinit();
@@ -272,7 +330,7 @@ pub const Presenter = struct {
     /// Returns null when the dylib isn't a GPU build or Metal is unavailable.
     /// `w` x `h` is the fallback size; the GPU traces at the window's native pixel size.
     /// `key` identifies the theme source (0 = don't share); `tick` is the app's frame counter.
-    pub fn create(handle: ?*anyopaque, state_ptr: ?*anyopaque, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize, key: u64, tick: usize) ?Presenter {
+    pub fn create(handle: ?*anyopaque, state_ptr: ?*anyopaque, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize, key: u64, tick: usize, reuse: mtl.Id) ?Presenter {
         const h_lib = handle orelse return null;
         const st = state_ptr orelse return null;
         const fill_frame: FrameFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_frame") orelse return null));
@@ -296,7 +354,7 @@ pub const Presenter = struct {
         const hdr = hdr_enabled;
         // Two drawables: the image changes slowly and Argus draws at <= 30 FPS, so a third
         // window-sized buffer would only cost memory.
-        const layer = makeLayer(engine.k.dev, host_layer, color_space, size[0], size[1], hdr, 2) orelse {
+        const layer = makeLayer(engine.k.dev, host_layer, color_space, size[0], size[1], hdr, 2, reuse) orelse {
             releaseEngine(engine, tick);
             return null;
         };
@@ -339,11 +397,8 @@ pub const Presenter = struct {
 
     /// Moves to another window layer (Spaces reordered) keeping the traced image.
     pub fn rehost(self: *Presenter, host_layer: mtl.Id) bool {
-        detachLayer(self.layer, self.queue);
-        const p = self.engine.params;
-        self.layer = makeLayer(self.engine.k.dev, host_layer, self.color_space, p.width, p.height, self.hdr, 2);
-        self.parked = false;
-        return self.layer != null;
+        moveLayer(self.layer, host_layer);
+        return true;
     }
 
     /// Shades one frame from the theme's current step state and presents it. Rows the trace
@@ -387,10 +442,16 @@ pub const Presenter = struct {
 
     /// Detaches the layer and lets go of the traced image (kept a while for reuse). Call
     /// before the theme's state is freed.
-    pub fn destroy(self: *Presenter, tick: usize) void {
-        detachLayer(self.layer, self.queue);
+    /// Lets go of the traced image and hands back the layer for the Space's next GPU theme.
+    pub fn release(self: *Presenter, tick: usize) mtl.Id {
+        const layer = self.layer;
         mtl.release(self.queue);
         releaseEngine(self.engine, tick);
         self.* = undefined;
+        return layer;
+    }
+
+    pub fn destroy(self: *Presenter, tick: usize) void {
+        retireLayer(self.release(tick), tick);
     }
 };
