@@ -179,6 +179,12 @@ pub const ThemePresenter = struct {
     }
 
     pub fn render(self: *ThemePresenter, dt: f32) bool {
+        return self.renderTimes(dt, dt);
+    }
+
+    /// One frame: the clock advances `clock_dt`; `argus_step` runs with `step_dt`, or not at all
+    /// when null (a draw-only frame between 30 Hz logic ticks, see desktop/frame_rate.zig).
+    pub fn renderTimes(self: *ThemePresenter, clock_dt: f32, step_dt: ?f32) bool {
         const pool = mtl.poolPush();
         defer mtl.poolPop(pool);
         if (self.parked) {
@@ -187,7 +193,7 @@ pub const ThemePresenter = struct {
         }
         const drawable = mtl.msg(mtl.Id, self.layer, "nextDrawable", .{}) orelse return false;
         const cb = mtl.msg(mtl.Id, self.theme.queue, "commandBuffer", .{});
-        self.theme.encode(cb, mtl.msg(mtl.Id, drawable, "texture", .{}), dt);
+        self.theme.encodeTimes(cb, mtl.msg(mtl.Id, drawable, "texture", .{}), clock_dt, step_dt);
         mtl.msg(void, cb, "presentDrawable:", .{drawable});
         mtl.msg(void, cb, "commit", .{});
         return true;

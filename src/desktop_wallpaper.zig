@@ -9,6 +9,7 @@ const desktop_picture = @import("desktop/desktop_picture.zig");
 const settings = @import("desktop/settings.zig");
 const login_item = @import("desktop/login_item.zig");
 const pl = @import("desktop/popover_layout.zig");
+const frame_rate = @import("desktop/frame_rate.zig");
 
 pub const NATIVE_W = sc.NATIVE_W;
 pub const NATIVE_H = sc.NATIVE_H;
@@ -233,7 +234,16 @@ const MacBridge = struct {
     gpu_tried: [MAX_SPACES]?*anyopaque = @splat(null),
     // Metal-only themes (themes/*.metal), one presenter per Space.
     mt: [MAX_SPACES]?gpu.ThemePresenter = @splat(null),
-    mt_last_tick: [MAX_SPACES]usize = @splat(0),
+    // Frame rate (desktop/frame_rate.zig): the display link or timer that drives frames, the rate
+    // chosen in Settings, the fastest rate the display shows, and the pacer behind both clocks.
+    pacer: frame_rate.Pacer = .{},
+    fps: u32 = frame_rate.DEFAULT_FPS,
+    display_max_fps: u32 = 60,
+    display_link: ?*anyopaque = null,
+    frame_timer: ?*anyopaque = null,
+    frame_units: u64 = 4, // how far the current display frame moved time (1/120 s units)
+    msg_raw: *align(4) const anyopaque = undefined,
+    ctrl_instance: ?*anyopaque = null,
     // GPU Spaces have no CPU frame; they publish a snapshot as sp.cg_image for the menu previews.
     snap_tick: [MAX_SPACES]usize = @splat(0), // frame_idx + 1 of the last snapshot, 0 = none yet
     // frame_idx of each GPU Space's last frame; hidden ones are parked after GPU_PARK_TICKS.
@@ -621,7 +631,7 @@ const MacBridge = struct {
 
         // Every animated Space presents ONLY from a buffer it owns; never fall back to a shared one.
         if (self.native_data_providers[idx] == null) return;
-        _ = self.obs.renderNativeShaderForSpaceIsolated(idx, self.obs.phase_accum);
+        _ = self.obs.renderSpaceStepping(idx, self.obs.phase_accum, self.pacer.spaceTimes(idx, self.obs.spin_mult).zig_dt);
 
         const cg_img_opt = self.CGImageCreate(
             NATIVE_W,
@@ -738,14 +748,13 @@ const MacBridge = struct {
             const seed: u32 = @truncate(std.hash.Wyhash.hash(sp.space_id, sp.getPath()));
             self.mt[idx] = gpu.ThemePresenter.create(src, data, sp.getLabel(), sp.dylib_gen, seed, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H, keep) orelse return false;
             keep = null;
-            self.mt_last_tick[idx] = self.frame_idx;
+            self.pacer.forget(idx);
             self.snap_tick[idx] = 0;
         }
-        const ticks = self.frame_idx -| self.mt_last_tick[idx];
-        self.mt_last_tick[idx] = self.frame_idx;
-        const dt = std.math.clamp(@as(f32, @floatFromInt(ticks)) / 30.0, 1.0 / 30.0, 0.5) * @as(f32, @floatCast(self.obs.spin_mult));
+        // The clock moves by the frame interval; argus_step runs only once per 30 Hz logic tick.
+        const times = self.pacer.spaceTimes(idx, self.obs.spin_mult);
         const p = &self.mt[idx].?;
-        if (!p.render(dt)) return false;
+        if (!p.renderTimes(times.clock_dt, times.step_dt)) return false;
         self.gpu_drawn_tick[idx] = self.frame_idx;
         if (self.snapshotDue(idx)) {
             const t = self.previewTarget(idx);
@@ -781,7 +790,7 @@ const MacBridge = struct {
             keep = null;
             self.snap_tick[idx] = 0;
         }
-        self.obs.stepSpace(idx);
+        self.obs.stepSpaceBy(idx, self.pacer.spaceTimes(idx, self.obs.spin_mult).zig_dt);
         const p = &self.gpu[idx].?;
         if (!p.render()) return false;
         self.gpu_drawn_tick[idx] = self.frame_idx;
@@ -1103,6 +1112,7 @@ const MacBridge = struct {
         self.switchCell(ctx, H, pl.cell(0, 0), "Smooth swipes", self.warm_neighbors);
         self.switchCell(ctx, H, pl.cell(1, 0), "Live reload", self.hot_reload);
         self.switchCell(ctx, H, pl.cell(0, 1), "Open at login", self.launch_at_login);
+        self.drawFpsControl(ctx, H);
     }
 
     /// `text` shortened with an ellipsis (copied into `buf`) until it fits `max_w` points.
@@ -1119,6 +1129,25 @@ const MacBridge = struct {
             if (self.textWidth(s, dict) <= max_w) return s;
         }
         return text[0..0];
+    }
+
+    /// "FPS  30 | 60 | 120": one segment per rate this display offers, the chosen one lit.
+    fn drawFpsControl(self: *MacBridge, ctx: ?*anyopaque, H: f64) void {
+        const r = pl.fps_ctl;
+        self.drawLabel(ctx, H, r.x - 32.0, pl.ROW_B_Y + 5.0, "FPS", self.dict_small, C_MUTED, .left);
+        self.fillR(ctx, H, r, 6.0, .{ 0.118, 0.118, 0.137, 1.0 });
+        self.strokeR(ctx, H, r, 6.0, 1.0, .{ 1.0, 1.0, 1.0, 0.08 });
+        const n = frame_rate.offeredCount(self.display_max_fps);
+        const seg_w = r.w / @as(f64, @floatFromInt(n));
+        for (0..n) |i| {
+            const hz = frame_rate.RATES[i];
+            const sx = r.x + seg_w * @as(f64, @floatFromInt(i));
+            const on = hz == self.fps;
+            if (on) self.fillR(ctx, H, .{ .x = sx + 1.5, .y = r.y + 1.5, .w = seg_w - 3.0, .h = r.h - 3.0 }, 4.5, C_ACCENT);
+            var buf: [4]u8 = undefined;
+            const txt = std.fmt.bufPrint(&buf, "{d}", .{hz}) catch "";
+            self.drawLabel(ctx, H, sx + seg_w * 0.5, r.y + 3.5, txt, self.dict_small, if (on) .{ 1.0, 1.0, 1.0, 1.0 } else C_MUTED, .center);
+        }
     }
 
     fn switchCell(self: *MacBridge, ctx: ?*anyopaque, H: f64, r: pl.Rect, text: []const u8, on: bool) void {
@@ -1310,6 +1339,75 @@ const MacBridge = struct {
     pub fn setHotReload(self: *MacBridge, on: bool) void {
         self.hot_reload = on;
         settings.setBool("reload_on_edit", on);
+    }
+
+    fn respondsTo(self: *MacBridge, obj: ?*anyopaque, sel: ?*anyopaque) bool {
+        const f: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) bool = @ptrCast(self.msg_raw);
+        return f(obj, self.sel_registerName("respondsToSelector:"), sel);
+    }
+
+    /// The fastest refresh the main display offers (120 on ProMotion, usually 60 elsewhere).
+    pub fn displayMaxFps(self: *MacBridge) u32 {
+        const NSScreen = self.objc_getClass("NSScreen") orelse return 60;
+        const screen = self.msg0(NSScreen, self.sel_registerName("mainScreen")) orelse return 60;
+        const sel = self.sel_registerName("maximumFramesPerSecond");
+        if (!self.respondsTo(screen, sel)) return 60;
+        const n = self.msgRetInt(screen, sel);
+        return if (n > 0) @intCast(@min(n, 1000)) else 60;
+    }
+
+    /// Starts (or retunes) what drives frames: the display's vsync through a CVDisplayLink, every
+    /// (refresh / fps)-th vsync posted to the main thread; a plain timer at `fps` without one.
+    /// (NSScreen's CADisplayLink never fired inside this dlopen-built app.)
+    pub fn startFrameSource(self: *MacBridge) void {
+        self.pacer.setRate(self.fps);
+        if (self.display_link == null and self.frame_timer == null) self.display_link = self.startVsync();
+        if (self.display_link) |link| {
+            g_vsync_every.store(@max(1, (vsyncHz(link) + self.fps / 2) / self.fps), .monotonic);
+            return;
+        }
+        if (self.frame_timer) |t| self.msgVoid(t, self.sel_registerName("invalidate"));
+        const NSTimer = self.objc_getClass("NSTimer") orelse return;
+        const MsgTimer2 = *const fn (?*anyopaque, ?*anyopaque, f64, ?*anyopaque, ?*anyopaque, ?*anyopaque, bool) callconv(.c) ?*anyopaque;
+        const make_timer: MsgTimer2 = @ptrCast(self.msg_raw);
+        const t = make_timer(NSTimer, self.sel_registerName("scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:"), 1.0 / @as(f64, @floatFromInt(self.fps)), self.ctrl_instance, self.sel_registerName("onFrame:"), null, true);
+        const NSRunLoop = self.objc_getClass("NSRunLoop");
+        const run_loop = if (NSRunLoop) |c| self.msg0(c, self.sel_registerName("currentRunLoop")) else null;
+        const common = self.msgUTF8(self.NSString, self.sel_str_utf8, "kCFRunLoopCommonModes");
+        if (t != null) self.msgId2(run_loop, self.sel_registerName("addTimer:forMode:"), t, common);
+        self.frame_timer = t;
+    }
+
+    fn startVsync(self: *MacBridge) ?*anyopaque {
+        const cv = std.c.dlopen("/System/Library/Frameworks/CoreVideo.framework/CoreVideo", .{ .LAZY = true }) orelse return null;
+        const create: *const fn (u32, *?*anyopaque) callconv(.c) i32 = @ptrCast(@alignCast(std.c.dlsym(cv, "CVDisplayLinkCreateWithCGDisplay") orelse return null));
+        const set_cb: *const fn (?*anyopaque, *const anyopaque, ?*anyopaque) callconv(.c) i32 = @ptrCast(@alignCast(std.c.dlsym(cv, "CVDisplayLinkSetOutputCallback") orelse return null));
+        const start: *const fn (?*anyopaque) callconv(.c) i32 = @ptrCast(@alignCast(std.c.dlsym(cv, "CVDisplayLinkStart") orelse return null));
+        g_cv_period = @ptrCast(@alignCast(std.c.dlsym(cv, "CVDisplayLinkGetNominalOutputVideoRefreshPeriod") orelse return null));
+        g_frame_target = self.ctrl_instance;
+        g_post_frame = @ptrCast(self.msg_raw);
+        g_sel_post = self.sel_registerName("performSelectorOnMainThread:withObject:waitUntilDone:");
+        g_sel_frame = self.sel_registerName("onFrame:");
+        var link: ?*anyopaque = null;
+        if (create(self.display_id, &link) != 0 or link == null) return null;
+        if (set_cb(link, @ptrCast(&onVsync), null) != 0 or start(link) != 0) return null;
+        return link;
+    }
+
+    /// Settings' frame-rate control. Motion stays the same at every rate; cost scales with it.
+    pub fn setFps(self: *MacBridge, want: u32) void {
+        const hz = frame_rate.clampToDisplay(want, self.display_max_fps);
+        if (hz == self.fps) return;
+        self.fps = hz;
+        var vbuf: [8]u8 = undefined;
+        settings.set("fps", std.fmt.bufPrint(&vbuf, "{d}", .{hz}) catch "30");
+        self.startFrameSource();
+        if (hz > frame_rate.DEFAULT_FPS) {
+            self.setNote(false, "{d} fps: smoother, uses more battery and GPU", .{hz});
+        } else {
+            self.setNote(false, "30 fps: the lightest on battery", .{});
+        }
+        self.note_until = self.frame_idx + 120; // a 4 s hint
     }
 
     pub fn setLaunchAtLogin(self: *MacBridge, on: bool) void {
@@ -1988,6 +2086,7 @@ fn handlePopoverHit(b: *MacBridge, hit: pl.Hit) void {
         .smooth_swipes => b.setWarmNeighbors(!b.warm_neighbors),
         .reload_on_edit => b.setHotReload(!b.hot_reload),
         .launch_at_login => b.setLaunchAtLogin(!b.launch_at_login),
+        .fps => |x| b.setFps(frame_rate.RATES[pl.fpsSegment(x, frame_rate.offeredCount(b.display_max_fps))]),
     }
 }
 
@@ -2067,6 +2166,106 @@ fn isAnimatedSpaceMode(m: SpaceMode) bool {
     return m == .custom_shader;
 }
 
+/// Draws what can be seen this frame. On a logic tick (`logic`) that includes warm neighbours on
+/// their 10 FPS cadence and the first second's unconditional frames; on the display frames in
+/// between (60 / 120 FPS) only Spaces whose window is on screen draw. Returns true if any drew.
+fn renderSpacesForFrame(b: *MacBridge, logic: bool) bool {
+    const active_idx = b.bench_space orelse b.obs.active_space_idx;
+    const active_is_ours = active_idx < b.obs.n_spaces and
+        (b.bench_space != null or b.obs.spaces[active_idx].space_id == b.obs.active_space_id);
+    var rendered_any = false;
+    if (!b.obs.paused and active_is_ours and !b.screen_locked) {
+        b.obs.phase_accum += frame_rate.Pacer.phaseStep(b.frame_units, b.obs.spin_mult);
+
+        if (isAnimatedSpaceMode(b.obs.spaces[active_idx].mode)) {
+            const t0 = std.Io.Clock.awake.now(g_io);
+            // First second: render unconditionally while AppKit settles window visibility.
+            if (b.renderIfDue(active_idx, if (logic and b.frame_idx < 30) 1 else 0)) {
+                const elapsed_ns: u64 = @intCast(@max(@as(i96, 0), t0.durationTo(std.Io.Clock.awake.now(g_io)).nanoseconds));
+                b.obs.last_compute_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
+                rendered_any = true;
+            }
+        }
+
+        var scan_l: usize = active_idx;
+        while (scan_l > 0) {
+            scan_l -= 1;
+            if (isAnimatedSpaceMode(b.obs.spaces[scan_l].mode)) {
+                if (b.renderIfDue(scan_l, if (logic) b.neighborWarmTicks() else 0)) rendered_any = true;
+                break;
+            }
+        }
+
+        var scan_r: usize = active_idx + 1;
+        while (scan_r < b.obs.n_spaces) : (scan_r += 1) {
+            if (isAnimatedSpaceMode(b.obs.spaces[scan_r].mode)) {
+                if (b.renderIfDue(scan_r, if (logic) b.neighborWarmTicks() else 0)) rendered_any = true;
+                break;
+            }
+        }
+    } else if (!b.obs.paused and !b.screen_locked) {
+        // A fullscreen app's Space is active. Our windows are normally all hidden, but Mission Control
+        // opened from there shows a desktop Space behind its thumbnails: keep whatever is on screen live.
+        for (0..b.obs.n_spaces) |idx| {
+            if (isAnimatedSpaceMode(b.obs.spaces[idx].mode) and b.renderIfDue(idx, 0)) rendered_any = true;
+        }
+    }
+
+    return rendered_any;
+}
+
+/// A display frame between two 30 Hz logic ticks (only at 60 / 120 FPS): draw visible Spaces.
+fn drawOnlyFrame(b: *MacBridge) void {
+    if (b.frame_idx > 5 and b.CGDisplayIsAsleep(b.display_id) != 0) return;
+    if (renderSpacesForFrame(b, false)) b.msgVoid(b.CATransaction, b.sel_flush);
+}
+
+/// Every display frame at the chosen rate (display link, or the fallback timer): a logic tick
+/// every 1/30 s, draw-only frames in between.
+/// Set by the CVDisplayLink thread when it has posted a frame to the main thread, cleared when
+/// that frame runs: at most one frame is ever queued, so a busy main thread never builds a backlog.
+var g_frame_posted = std.atomic.Value(bool).init(false);
+
+/// Every display frame at the chosen rate (posted from the display's vsync, or the fallback
+/// timer): a logic tick every 1/30 s, draw-only frames in between.
+fn onFrame(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+    g_frame_posted.store(false, .release);
+    const b = g_bridge orelse return;
+    const now = @as(f64, @floatFromInt(std.Io.Clock.awake.now(g_io).nanoseconds)) / 1e9;
+    const adv = b.pacer.advance(now) orelse return;
+    b.frame_units = adv.units;
+    if (adv.logic) onTick(null, null, null) else drawOnlyFrame(b);
+}
+
+/// CVDisplayLink output callback, on CoreVideo's thread at the display's refresh: every
+/// `g_vsync_every`-th vsync, posts one frame to the main thread (never more than one queued).
+var g_vsync_count = std.atomic.Value(u64).init(0);
+var g_vsync_every = std.atomic.Value(u64).init(4);
+var g_frame_target: ?*anyopaque = null;
+var g_post_frame: ?*const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, bool) callconv(.c) void = null;
+var g_sel_post: ?*anyopaque = null;
+var g_sel_frame: ?*anyopaque = null;
+
+const CVTime = extern struct { time_value: i64, time_scale: i32, flags: i32 };
+var g_cv_period: ?*const fn (?*anyopaque) callconv(.c) CVTime = null;
+
+/// The display link's refresh rate (60 / 120 ...), from its nominal vsync period.
+fn vsyncHz(link: ?*anyopaque) u32 {
+    const period = (g_cv_period orelse return 60)(link);
+    if (period.time_value <= 0 or period.time_scale <= 0) return 60;
+    const hz = @divTrunc(@as(i64, period.time_scale) + @divTrunc(period.time_value, 2), period.time_value);
+    return @intCast(std.math.clamp(hz, 24, 480));
+}
+
+fn onVsync(_: ?*anyopaque, _: ?*const anyopaque, _: ?*const anyopaque, _: u64, _: ?*u64, _: ?*anyopaque) callconv(.c) i32 {
+    const n = g_vsync_count.fetchAdd(1, .monotonic);
+    if (n % g_vsync_every.load(.monotonic) != 0) return 0;
+    if (g_frame_posted.swap(true, .acq_rel)) return 0; // the last one hasn't run yet
+    const post = g_post_frame orelse return 0;
+    post(g_frame_target, g_sel_post, g_sel_frame, null, false);
+    return 0;
+}
+
 fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     const b = g_bridge orelse return;
     if (g_quit_requested.load(.acquire) or (b.max_frames != 0 and b.frame_idx >= b.max_frames)) {
@@ -2116,43 +2315,7 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     const active_idx = b.bench_space orelse b.obs.active_space_idx;
     const active_is_ours = active_idx < b.obs.n_spaces and
         (b.bench_space != null or b.obs.spaces[active_idx].space_id == b.obs.active_space_id);
-    var rendered_any = false;
-    if (!b.obs.paused and active_is_ours and !b.screen_locked) {
-        b.obs.phase_accum += (1.0 / 150.0) * b.obs.spin_mult;
-
-        if (isAnimatedSpaceMode(b.obs.spaces[active_idx].mode)) {
-            const t0 = std.Io.Clock.awake.now(g_io);
-            // First second: render unconditionally while AppKit settles window visibility.
-            if (b.renderIfDue(active_idx, if (b.frame_idx < 30) 1 else 0)) {
-                const elapsed_ns: u64 = @intCast(@max(@as(i96, 0), t0.durationTo(std.Io.Clock.awake.now(g_io)).nanoseconds));
-                b.obs.last_compute_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
-                rendered_any = true;
-            }
-        }
-
-        var scan_l: usize = active_idx;
-        while (scan_l > 0) {
-            scan_l -= 1;
-            if (isAnimatedSpaceMode(b.obs.spaces[scan_l].mode)) {
-                if (b.renderIfDue(scan_l, b.neighborWarmTicks())) rendered_any = true;
-                break;
-            }
-        }
-
-        var scan_r: usize = active_idx + 1;
-        while (scan_r < b.obs.n_spaces) : (scan_r += 1) {
-            if (isAnimatedSpaceMode(b.obs.spaces[scan_r].mode)) {
-                if (b.renderIfDue(scan_r, b.neighborWarmTicks())) rendered_any = true;
-                break;
-            }
-        }
-    } else if (!b.obs.paused and !b.screen_locked) {
-        // A fullscreen app's Space is active. Our windows are normally all hidden, but Mission Control
-        // opened from there shows a desktop Space behind its thumbnails: keep whatever is on screen live.
-        for (0..b.obs.n_spaces) |idx| {
-            if (isAnimatedSpaceMode(b.obs.spaces[idx].mode) and b.renderIfDue(idx, 0)) rendered_any = true;
-        }
-    }
+    const rendered_any = renderSpacesForFrame(b, true);
 
     if (b.perf_log and (b.frame_idx % 30) == 29) {
         std.debug.print("[perf] t={d} active={d} ours={} locked={} visible=0x{x:0>2} renders/s:", .{
@@ -2491,6 +2654,7 @@ pub fn main(init: std.process.Init) !void {
     const NSObject = objc_getClass("NSObject") orelse return error.NoNSObject;
     const ctrl_cls = objc_allocateClassPair(NSObject, "ArgusStudioController", 0) orelse return error.ClassAllocFailed;
     _ = class_addMethod(ctrl_cls, sel_registerName("onTick:"), @ptrCast(&onTick), "v@:@");
+    _ = class_addMethod(ctrl_cls, sel_registerName("onFrame:"), @ptrCast(&onFrame), "v@:@");
     _ = class_addMethod(ctrl_cls, sel_registerName("onStatusItemClick:"), @ptrCast(&onStatusItemClick), "v@:@");
     _ = class_addMethod(ctrl_cls, sel_registerName("onAppResignActive:"), @ptrCast(&onAppResignActive), "v@:@");
     objc_registerClassPair(ctrl_cls);
@@ -2644,6 +2808,8 @@ pub fn main(init: std.process.Init) !void {
         .msgInitWin = msgInitWin,
         .msgSetFrame = msgSetFrame,
         .msgRetF64 = msgRetF64,
+        .msg_raw = msgSend_raw,
+        .ctrl_instance = ctrl_instance,
         .msgUTF8 = msgUTF8,
         .msgRetPoint = msgRetPoint,
         .msgRetRect = msgRetRect,
@@ -2753,6 +2919,8 @@ pub fn main(init: std.process.Init) !void {
     bridge.warm_neighbors = settings.getBool("smooth_swipes", true);
     bridge.hot_reload = settings.getBool("reload_on_edit", true);
     bridge.launch_at_login = settings.getBool("launch_at_login", false);
+    bridge.display_max_fps = bridge.displayMaxFps();
+    bridge.fps = frame_rate.clampToDisplay(@intFromFloat(settings.getFloat("fps", 30.0, 30.0, 120.0)), bridge.display_max_fps);
     // A LaunchAgent from before the bundle ID change gives way to the current one.
     _ = login_item.removeLegacy();
     sc.pruneDylibCache();
@@ -2789,22 +2957,9 @@ pub fn main(init: std.process.Init) !void {
         _ = signal(1, onQuitSignal); // SIGHUP
     }
 
-    // Schedule 30 FPS NSTimer in NSRunLoopCommonModes
-    const NSTimer = objc_getClass("NSTimer") orelse return error.NoNSTimer;
-    const ns_timer = msgTimer(
-        NSTimer,
-        sel_registerName("scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:"),
-        1.0 / 30.0,
-        ctrl_instance,
-        sel_registerName("onTick:"),
-        null,
-        true,
-    );
-    const NSRunLoop = objc_getClass("NSRunLoop") orelse return error.NoRunLoop;
-    const cur_loop = msg0(NSRunLoop, sel_registerName("currentRunLoop"));
-    if (msgUTF8(NSString, sel_registerName("stringWithUTF8String:"), "kCFRunLoopCommonModes")) |common_modes| {
-        msgId2(cur_loop, sel_registerName("addTimer:forMode:"), ns_timer, common_modes);
-    }
+    // Frames come from the display's vsync at the chosen rate (a timer where that is unavailable).
+    _ = msgTimer;
+    bridge.startFrameSource();
 
     onTick(null, null, null);
     msgVoid(ns_app, sel_registerName("run"));
@@ -3040,6 +3195,7 @@ test {
     _ = @import("desktop/settings.zig");
     _ = @import("desktop/login_item.zig");
     _ = @import("desktop/popover_layout.zig");
+    _ = @import("desktop/frame_rate.zig");
 }
 
 test "Metal-only themes load into a Space and render on the GPU" {

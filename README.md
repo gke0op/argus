@@ -98,8 +98,9 @@ make release                              # dist/Argus-v<version>-macos-arm64.zi
 Then click the eye in the menu bar. The Spaces strip shows one thumbnail per Desktop Space:
 drop a theme (or a picture) on any of them, and double-click one (or tap it with two fingers)
 to eject its theme and give that Space back to macOS. Pause with ⏸ (the eye closes while paused). The
-gear opens Settings: step a Space's theme (or go back to the macOS default), speed, smooth
-swipes, live reload and open at login. Settings live in `.argus_settings.conf` next to
+gear opens Settings: step a Space's theme (or go back to the macOS default), speed, frame rate
+(30 by default; 60, or 120 on ProMotion displays: smoother, but the cost grows with the rate),
+smooth swipes, live reload and open at login. Settings live in `.argus_settings.conf` next to
 Argus.app, one `key=value` per line.
 
 <p align="center">
