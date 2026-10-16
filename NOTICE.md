@@ -24,7 +24,8 @@ The git history records who did what; this is the summary.
 
 ### Themes
 
-- `themes/H1821.zig`: written by Claude Opus. `themes/Cygnus_A.zig`,
+- `themes/Majestic_Glutton.zig`: the owner's artwork, modelled on H1821+643; written by
+  Claude Opus. `themes/Cygnus_A.zig`,
   `themes/J0834.zig` and `themes/PG1426.zig` are generated from it by
   `tools/gen_quasars.py`; `themes/Gargantua.zig` is the same engine with a
   disk chosen for the look. The physics was reviewed by Argon (Google Gemini),

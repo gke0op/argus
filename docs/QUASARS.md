@@ -1,6 +1,6 @@
 # The Quasars
 
-*Five black holes on your desktop: four of them real, all of them computed.*
+*Five black holes on your desktop: three real quasars, one artwork, one film star. All of them computed.*
 
 A quasar is a supermassive black hole caught in the middle of a meal. Gas spirals in, rubs
 against itself, heats past 30,000 degrees and outshines its whole galaxy. No telescope can
@@ -40,15 +40,16 @@ falls out of Einstein's equations, solved for every pixel of your screen.
 
 | Theme | Modelled on | What is real | What is chosen |
 |---|---|---|---|
-| **H1821** | H1821+643, the quasar at the heart of a galaxy cluster | Spin 0.62 (X-ray), mass ~4 billion Suns, feeding at ~20% of its limit | The 88° camera; the disk drawn thin |
 | **Cygnus A** | Cygnus A, the hidden quasar inside the most famous radio galaxy | Mass 2.5 billion Suns (gas dynamics), feeding at ~1% | Spin 0.9 (never measured: dust hides it) |
 | **J0834** | F2MS J0834+3506, a young, dust-reddened "red quasar" | Mass 3.2 billion Suns, feeding at 4% | Spin 0.99 from published models, not a direct measurement |
 | **PG1426** | PG 1426+015, the heaviest black hole weighed by light echoes | Mass 1.0 billion Suns, spin above 0.7 (X-ray) | Spin set to 0.9 inside that range |
 | **Gargantua** | The black hole from *Interstellar* | The same computed light paths and spin physics | Its disk is tuned to a cinematic 6,500 K glow |
+| **Majestic Glutton** | An artwork, modelled on H1821+643, the quasar at the heart of a galaxy cluster | Built from H1821+643's measured spin (0.62, X-ray), mass (~4 billion Suns) and feeding rate (~20% of its limit) | It is the owner's artwork, not a portrait of H1821+643: the name, the 88° camera, the framing and the look are chosen, and its disk is drawn thin |
 
-Each theme's header lists its sources. Three of the real quasars feed slowly enough
-(1–4% of their limit) that their disks are genuinely razor-thin, which is what makes the
-edge-on view honest. H1821+643 eats faster; see "Known approximations" below.
+Each theme's header lists its sources. The three real quasars feed slowly enough (1–4% of
+their limit) that their disks are genuinely razor-thin, which is what makes the edge-on view
+honest. Majestic Glutton's model, H1821+643, eats faster, so its thin disk is part of the
+artwork; see "Known approximations" below.
 
 ---
 
@@ -80,8 +81,9 @@ Not everything here is equally exact, and we say which is which.
 - **The disk is a moment in time.** It is a ring of gas caught while still spreading, not the
   steady disk a real quasar keeps for millions of years. This is what gives the outer fade and
   the dark band. A steady disk would fill the frame with glowing gas.
-- **The disk is drawn infinitely thin.** True for the slow eaters (Cygnus A, PG 1426). H1821+643
-  and J0834 would really be somewhat puffier, enough to change the edge-on view.
+- **The disk is drawn infinitely thin.** True for the slow eaters (Cygnus A, PG 1426). J0834 and
+  Majestic Glutton (at H1821+643's feeding rate) would really be somewhat puffier, enough to
+  change the edge-on view.
 - **The colour correction is a fit** to the peak of real disk spectra, applied across visible
   light. It slightly overstates how bright one ring of the disk looks.
 - **Not drawn:** the hot corona above the disk, the jets, light the disk shines back onto
@@ -90,7 +92,7 @@ Not everything here is equally exact, and we say which is which.
 ### 4. Chosen, for the picture
 - The camera: 88° from the spin axis (nearly edge-on), 1000 mass units away, the zoom.
 - Time is sped up so the motion is visible: each second on screen is 10 light-crossing times
-  of the hole: about a day and a half for Cygnus A, two days for H1821+643 (~100,000–200,000×
+  of the hole: about a day and a half for Cygnus A, two days for Majestic Glutton (~100,000–200,000×
   real time).
 - The hot spots' number, size and brightness (their motion is computed).
 - Exposure and tone mapping, so a disk at tens of thousands of degrees fits on a screen.
@@ -100,7 +102,7 @@ Not everything here is equally exact, and we say which is which.
 ## How it was checked
 
 - **A test ledger.** Every physics claim the code makes is a test with a reference and a
-  tolerance, written to [`h1821_ledger.json`](h1821_ledger.json): 56 records,
+  tolerance, written to [`majestic_glutton_ledger.json`](majestic_glutton_ledger.json): 56 records,
   49 pass, 0 fail, 7 reported values. Regenerate it with `make ledger`.
 - **Two independent renderers.** A double-precision CPU path and a single-precision GPU path
   trace the same scene; they agree on 97% of pixels to within 8 levels, and on the shadow edge
@@ -114,13 +116,13 @@ Not everything here is equally exact, and we say which is which.
 
 ```sh
 make test                                   # unit tests + generated-theme check
-./.toolchain/zig test themes/H1821.zig  # the physics claims, printed as ledger records
-make ledger                                 # rebuild docs/h1821_ledger.json
-make gpu-bench BH_THEME=themes/H1821.zig  # GPU vs CPU, shadow contour, timings
-make quasars                                # regenerate the quasar family from H1821.zig
+./.toolchain/zig test themes/Majestic_Glutton.zig  # the physics claims, printed as ledger records
+make ledger                                 # rebuild docs/majestic_glutton_ledger.json
+make gpu-bench BH_THEME=themes/Majestic_Glutton.zig  # GPU vs CPU, shadow contour, timings
+make quasars                                # regenerate the quasar family from Majestic_Glutton.zig
 ```
 
-The four real quasars share one engine: `themes/H1821.zig`. The others are generated
+The quasars share one engine, `themes/Majestic_Glutton.zig`; the three real ones are generated
 from it by `tools/gen_quasars.py` with their own mass, spin, feeding rate and sources. Adding a
 quasar is one entry in that table.
 
@@ -130,8 +132,8 @@ quasar is one entry in that table.
 
 As close as the physics in the hierarchy above allows, and no closer. The light paths are
 exact. The disk is a physically consistent model with its approximations on the table. The
-camera is a choice: from Earth we see H1821+643 at about 45°, not edge-on, and no instrument
-could resolve it.
+camera is a choice: from Earth we see Cygnus A's disk hidden by dust and H1821+643's at about
+45°, never as these views, and no instrument could resolve them.
 
 It is not the Event Horizon Telescope's picture of M87* or Sgr A*. Those black holes are
 starving: their gas is hot, thin and see-through. A quasar is the opposite, a feeding black

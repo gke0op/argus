@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Generate the quasar family from themes/H1821.zig.
+"""Generate the quasar family from themes/Majestic_Glutton.zig.
 
-H1821.zig (H1821+643) is the one source of the engine. Each other quasar is the same
+Majestic_Glutton.zig (the owner's artwork, modelled on H1821+643) is the one source of the engine.
+Each real quasar is the same
 file with its own object paragraph, spin, mass and Eddington ratio, test bounds and ledger ids.
 Edit the source, then run `make quasars`; `make test` runs `--check` and fails on a stale file.
 
@@ -15,11 +16,12 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The source theme's name (file stem). Renaming it (e.g. to "Quasar") also needs a `git mv` of the
 # file and the same rename inside it: its header title, LEDGER_PREFIX and claim ids (lower case).
-SOURCE_NAME = "H1821"
+SOURCE_NAME = "Majestic_Glutton"
 SRC = os.path.join(ROOT, "themes", SOURCE_NAME + ".zig")
 SOURCE_ID = SOURCE_NAME.lower() + "."  # its ledger id prefix
+SOURCE_TITLE = SOURCE_NAME.replace("_", " ").upper()  # its header title
 
-# Each entry: the object's paragraph (replaces H1821+643's), the parameters, and the bounds of
+# Each entry: the object's paragraph (replaces Majestic Glutton's), the parameters, and the bounds of
 # its own disk claims. `edd` is the snapshot's ISCO inflow (Mdot_Edd units); the snapshot
 # radiates ~0.54 of a steady disk at that inflow, so edd ~ lambda / 0.54 (tuned so the test's
 # absolute L/L_Edd lands on lambda).
@@ -101,7 +103,7 @@ QUASARS = [
     },
 ]
 
-PARA_START = "// Modelled on H1821+643,"
+PARA_START = "// Majestic Glutton is an artwork:"
 PARA_END = "// Audited independently"
 
 
@@ -169,7 +171,7 @@ def generate(src, q):
     i = src.index(PARA_START)
     j = src.index(PARA_END)
     s = src[:i] + q["para"] + src[j:]
-    s = rep(s, f"// {SOURCE_NAME.upper()} // themes/{SOURCE_NAME}.zig",
+    s = rep(s, f"// {SOURCE_TITLE} // themes/{SOURCE_NAME}.zig",
             f"// {q['title']} // themes/{q['file']}\n"
             f"// GENERATED from themes/{SOURCE_NAME}.zig by tools/gen_quasars.py: edit the source, then\n"
             "// `make quasars`. Same engine; this object's paragraph, spin, mass and Eddington ratio.")

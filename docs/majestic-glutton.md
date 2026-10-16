@@ -1,10 +1,12 @@
-# Majestic Glutton: a physical model of the quasar H1821+643
+# Majestic Glutton: an artwork modelled on the quasar H1821+643
 
-*Working title of the Argus wallpaper `themes/H1821.zig` (name may change). This document
+*Majestic Glutton (`themes/Majestic_Glutton.zig`) is the owner's artwork: a quasar modelled on
+H1821+643's measured mass, spin and feeding rate, with its inclination, framing and look chosen.
+It is not presented as the real H1821+643. This document
 states what the renderer computes, from which equations and numbers, how it was checked, and
 what is chosen rather than computed. It is meant for review: please check the physics, not
 the code style. Numbers are from the code and its tests at commit `dd1cbf6`; §3 and §9 are from
-the test ledger [`docs/h1821_ledger.json`](h1821_ledger.json), which names its own
+the test ledger [`docs/majestic_glutton_ledger.json`](majestic_glutton_ledger.json), which names its own
 commit.*
 
 Units: G = c = M = 1 unless stated. M = mass of the black hole. For M = 4e9 Msun:
@@ -54,7 +56,7 @@ black hole fed by a thin, hot accretion disk.
   - Each edge is bisected along the ray from the shadow's centre (the shadow is convex), 32
     times, to 2e-10 M. The error is the radial offset along that ray, an upper bound on the
     distance to the curve.
-  - The same samples run on the CPU (f64, `zig test themes/H1821.zig`) and the GPU
+  - The same samples run on the CPU (f64, `zig test themes/Majestic_Glutton.zig`) and the GPU
     (f32, the Metal probe kernel, `make gpu-bench`). Tolerances were set before measuring.
 
   | Path | max, all points | max off-axis | RMS, curve sweep | RMS off-axis | max, polar band |
@@ -270,7 +272,7 @@ tests or audits below.
   (null condition, Carter constant); Page-Thorne limits; blackbody colours; the redshift sign;
   the disk solution's mass budget, Page-Thorne limit, temperature and luminosity;
   colour-correction continuity and limb-darkening flux conservation.
-- **Test ledger:** `make ledger` writes [`docs/h1821_ledger.json`](h1821_ledger.json),
+- **Test ledger:** `make ledger` writes [`docs/majestic_glutton_ledger.json`](majestic_glutton_ledger.json),
   one record per checked claim, from the theme's tests, `make claims` and `make gpu-bench`.
   - Each record holds: the claim, the reference and its source, the test conditions, the
     measured quantity and its units, the bounds, pass/fail, and the command that produced it.

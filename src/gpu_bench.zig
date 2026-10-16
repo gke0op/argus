@@ -1,9 +1,9 @@
 // ============================================================================
 // ARGUS GPU // src/gpu_bench.zig
 //
-// Headless check of H1821's GPU path against the theme's own CPU path:
+// Headless check of Majestic Glutton's GPU path against the theme's own CPU path:
 //   1. Shadow edge: the GPU's f32 geodesics bisected against Bardeen's analytic
-//      critical curve. Themes exporting shadowContour (H1821) get the full-contour
+//      critical curve. Themes exporting shadowContour (Majestic Glutton) get the full-contour
 //      sweep, GPU f32 and CPU f64 on the same samples, max and RMS each; others the
 //      11-point check.
 //   2. 1920x1200: CPU trace + draw() vs GPU meter + trace + shade, same step() state;
@@ -18,7 +18,7 @@
 const std = @import("std");
 const theme = @import("theme");
 // Ledger id prefix and camera inclination of the theme under test (generated quasars carry their own).
-const ID = if (@hasDecl(theme, "LEDGER_PREFIX")) theme.LEDGER_PREFIX else "h1821.";
+const ID = if (@hasDecl(theme, "LEDGER_PREFIX")) theme.LEDGER_PREFIX else "majestic_glutton.";
 const INCL_DEG: f64 = if (@hasDecl(theme, "INCL")) theme.INCL * 180.0 / std.math.pi else 88.0;
 const mtl = @import("gpu/metal.zig");
 const bt = @import("gpu/bh_tables.zig");

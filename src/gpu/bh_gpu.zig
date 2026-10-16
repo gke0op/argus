@@ -1,7 +1,7 @@
 // ============================================================================
 // ARGUS GPU // src/gpu/bh_gpu.zig
 //
-// H1821's GPU engine (kernels in opus_black_hole.metal), shared by the app's
+// Majestic Glutton's GPU engine (kernels in opus_black_hole.metal), shared by the app's
 // presenter and `make gpu-bench`:
 //   init   upload the theme's tables, allocate the traced image (12 B/pixel, GPU-private,
 //          plus 2 B/pixel freed when the trace is done)

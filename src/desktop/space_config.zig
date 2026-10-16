@@ -167,7 +167,7 @@ pub var gpu_ports = true;
 /// broken edit never replaces a working theme. Null (tests, harness) accepts any source.
 pub var metal_validate: ?*const fn (src: []const u8, path: []const u8) bool = null;
 // Themes built on the Kerr-disk engine (src/gpu/bh_*), drawn by its GPU path.
-const GPU_PORT_THEMES = [_][]const u8{ "H1821.zig", "Gargantua.zig", "Cygnus_A.zig", "J0834.zig", "PG1426.zig" };
+const GPU_PORT_THEMES = [_][]const u8{ "Majestic_Glutton.zig", "Gargantua.zig", "Cygnus_A.zig", "J0834.zig", "PG1426.zig" };
 
 fn isGpuPortTheme(path: []const u8) bool {
     const base = std.Io.Dir.path.basename(path);
@@ -179,9 +179,10 @@ const GPU_PORT_ROOT = "-Mroot=src/gpu/bh_export.zig";
 /// Themes that were renamed: a saved Space that names the old file loads the new one from the
 /// same folder (and is saved under the new name).
 const RENAMED_THEMES = [_][2][]const u8{
-    .{ "Opus_Black_Hole.zig", "H1821.zig" }, // it is a quasar: a luminous thin disk
+    .{ "Opus_Black_Hole.zig", "Majestic_Glutton.zig" }, // the owner's quasar artwork
     // Model names left the theme names (credits stay in NOTICE.md and the headers).
-    .{ "Opus_Quasar.zig", "H1821.zig" },
+    .{ "Opus_Quasar.zig", "Majestic_Glutton.zig" },
+    .{ "H1821.zig", "Majestic_Glutton.zig" }, // the real name stays with the real quasars
     .{ "Opus_Cygnus_A.zig", "Cygnus_A.zig" },
     .{ "Opus_J0834.zig", "J0834.zig" },
     .{ "Opus_PG1426.zig", "PG1426.zig" },
@@ -208,9 +209,10 @@ pub fn renamedThemePath(path: []const u8, buf: []u8) []const u8 {
 
 test "renamed themes: saved Spaces naming an old theme file load the new one from the same folder" {
     var buf: [512]u8 = undefined;
-    try std.testing.expectEqualStrings("/a/b/themes/H1821.zig", renamedThemePath("/a/b/themes/Opus_Black_Hole.zig", &buf));
-    try std.testing.expectEqualStrings("themes/H1821.zig", renamedThemePath("themes/Opus_Black_Hole.zig", &buf));
-    try std.testing.expectEqualStrings("/a/b/themes/H1821.zig", renamedThemePath("/a/b/themes/Opus_Quasar.zig", &buf));
+    try std.testing.expectEqualStrings("/a/b/themes/Majestic_Glutton.zig", renamedThemePath("/a/b/themes/Opus_Black_Hole.zig", &buf));
+    try std.testing.expectEqualStrings("themes/Majestic_Glutton.zig", renamedThemePath("themes/Opus_Black_Hole.zig", &buf));
+    try std.testing.expectEqualStrings("/a/b/themes/Majestic_Glutton.zig", renamedThemePath("/a/b/themes/Opus_Quasar.zig", &buf));
+    try std.testing.expectEqualStrings("/a/b/themes/Majestic_Glutton.zig", renamedThemePath("/a/b/themes/H1821.zig", &buf));
     try std.testing.expectEqualStrings("/a/b/themes/Cygnus_A.zig", renamedThemePath("/a/b/themes/Opus_Cygnus_A.zig", &buf));
     try std.testing.expectEqualStrings("/a/b/themes/Night_Tide.metal", renamedThemePath("/a/b/themes/Opus_Night_Tide.metal", &buf));
     try std.testing.expectEqualStrings("/a/b/themes/Orion_Nebula.metal", renamedThemePath("/a/b/themes/Opus_Orion_Nebula.metal", &buf));
