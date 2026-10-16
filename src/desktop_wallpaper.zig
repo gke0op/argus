@@ -222,6 +222,8 @@ const MacBridge = struct {
     mt_last_tick: [MAX_SPACES]usize = @splat(0),
     // GPU Spaces have no CPU frame; they publish a snapshot as sp.cg_image for the menu previews.
     snap_tick: [MAX_SPACES]usize = @splat(0), // frame_idx + 1 of the last snapshot, 0 = none yet
+    // frame_idx of each GPU Space's last frame; hidden ones are parked after GPU_PARK_TICKS.
+    gpu_drawn_tick: [MAX_SPACES]usize = @splat(0),
     perf_renders: [MAX_SPACES]u16 = @splat(0),
     perf_visible: u16 = 0,
     screen_rect: CGRect,
@@ -634,13 +636,40 @@ const MacBridge = struct {
         return last == 0 or (self.popover_visible and self.frame_idx + 1 >= last + 15);
     }
 
-    /// Wraps the snapshot now in the Space's own pixel buffer as its preview image.
+    /// A GPU Space's preview: full canvas size while Mission Control stills use it (they write
+    /// it to disk as the Space's picture), otherwise a small image just for the menu.
+    fn previewTarget(self: *MacBridge, idx: usize) struct { px: []u32, w: usize, h: usize } {
+        if (g_pictures.enabled) return .{ .px = &self.obs.space_native_pixels[idx], .w = NATIVE_W, .h = NATIVE_H };
+        return .{ .px = &self.obs.preview_pixels[idx], .w = obs_mod.PREVIEW_W, .h = obs_mod.PREVIEW_H };
+    }
+
+    /// Wraps the snapshot now in the Space's preview buffer as its preview image.
     fn publishSnapshot(self: *MacBridge, idx: usize) void {
         self.snap_tick[idx] = self.frame_idx + 1;
-        const img = self.CGImageCreate(NATIVE_W, NATIVE_H, 8, 32, NATIVE_W * 4, self.color_space, 5 | (4 << 12), self.native_data_providers[idx], null, false, 0) orelse return;
+        const t = self.previewTarget(idx);
+        const img = if (t.w == NATIVE_W)
+            self.CGImageCreate(NATIVE_W, NATIVE_H, 8, 32, NATIVE_W * 4, self.color_space, 5 | (4 << 12), self.native_data_providers[idx], null, false, 0)
+        else blk: {
+            const prov = self.CGDataProviderCreateWithData(null, @ptrCast(t.px.ptr), t.w * t.h * 4, null) orelse return;
+            defer self.CFRelease(prov);
+            break :blk self.CGImageCreate(t.w, t.h, 8, 32, t.w * 4, self.color_space, 5 | (4 << 12), prov, null, false, 0);
+        };
         const sp = &self.obs.spaces[idx];
         if (sp.cg_image) |old| self.CGImageRelease(old);
-        sp.cg_image = img;
+        sp.cg_image = img orelse return;
+    }
+
+    /// Once a tick: finished traces drop their temporary buffers, unused traced images are
+    /// freed after a while, and GPU Spaces that haven't drawn for GPU_PARK_TICKS give back
+    /// their spare drawables (the one on screen stays, so the window is unchanged).
+    fn tickGpu(self: *MacBridge) void {
+        gpu.pollEngines();
+        gpu.reapEngines(self.frame_idx, false);
+        for (0..self.obs.n_spaces) |idx| {
+            if (self.frame_idx -| self.gpu_drawn_tick[idx] < GPU_PARK_TICKS) continue;
+            if (self.gpu[idx]) |*p| p.park();
+            if (self.mt[idx]) |*p| p.park();
+        }
     }
 
     fn dropMetalTheme(self: *MacBridge, idx: usize) void {
@@ -654,7 +683,9 @@ const MacBridge = struct {
         const sp = &self.obs.spaces[idx];
         if (self.mt[idx]) |*p| {
             const host = self.msg0(p.layer, self.sel_registerName("superlayer"));
-            if (p.gen != sp.dylib_gen or host != sp.desktop_layer) self.dropMetalTheme(idx);
+            if (p.gen != sp.dylib_gen) {
+                self.dropMetalTheme(idx);
+            } else if (host != sp.desktop_layer and !p.rehost(sp.desktop_layer)) self.dropMetalTheme(idx);
         }
         if (self.mt[idx] == null) {
             var buf: [131072]u8 = undefined;
@@ -671,12 +702,16 @@ const MacBridge = struct {
         const dt = std.math.clamp(@as(f32, @floatFromInt(ticks)) / 30.0, 1.0 / 30.0, 0.5) * @as(f32, @floatCast(self.obs.spin_mult));
         const p = &self.mt[idx].?;
         if (!p.render(dt)) return false;
-        if (self.snapshotDue(idx) and p.snapshot(&self.obs.space_native_pixels[idx])) self.publishSnapshot(idx);
+        self.gpu_drawn_tick[idx] = self.frame_idx;
+        if (self.snapshotDue(idx)) {
+            const t = self.previewTarget(idx);
+            if (p.snapshot(t.px, t.w, t.h)) self.publishSnapshot(idx);
+        }
         return true;
     }
 
     fn dropGpu(self: *MacBridge, idx: usize) void {
-        if (self.gpu[idx]) |*p| p.destroy();
+        if (self.gpu[idx]) |*p| p.destroy(self.frame_idx);
         self.gpu[idx] = null;
     }
 
@@ -686,18 +721,25 @@ const MacBridge = struct {
         const sp = &self.obs.spaces[idx];
         if (self.gpu[idx]) |*p| {
             const host = self.msg0(p.layer, self.sel_registerName("superlayer"));
-            if (p.handle != sp.dylib_handle or host != sp.desktop_layer) self.dropGpu(idx);
+            if (p.handle != sp.dylib_handle) {
+                self.dropGpu(idx);
+            } else if (host != sp.desktop_layer and !p.rehost(sp.desktop_layer)) self.dropGpu(idx);
         }
         if (self.gpu[idx] == null) {
             if (self.gpu_tried[idx] == sp.dylib_handle) return false; // not a GPU build: don't retry every frame
             self.gpu_tried[idx] = sp.dylib_handle;
-            self.gpu[idx] = gpu.Presenter.create(sp.dylib_handle, sp.theme_state, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H) orelse return false;
+            const key = sc.themeSourceHash(sp.getPath(), true);
+            self.gpu[idx] = gpu.Presenter.create(sp.dylib_handle, sp.theme_state, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H, key, self.frame_idx) orelse return false;
             self.snap_tick[idx] = 0;
         }
         self.obs.stepSpace(idx);
         const p = &self.gpu[idx].?;
         if (!p.render()) return false;
-        if (self.snapshotDue(idx) and p.snapshot(&self.obs.space_native_pixels[idx])) self.publishSnapshot(idx);
+        self.gpu_drawn_tick[idx] = self.frame_idx;
+        if (self.snapshotDue(idx)) {
+            const t = self.previewTarget(idx);
+            if (p.snapshot(t.px, t.w, t.h)) self.publishSnapshot(idx);
+        }
         return true;
     }
 
@@ -1759,6 +1801,8 @@ fn onPopoverMouseUp(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c)
 
 /// Off-screen neighbors re-render every 3rd 30 Hz tick (~10 FPS).
 const NEIGHBOR_WARM_TICKS: usize = 3;
+/// A GPU Space not drawn for this long (2 s) parks its layer (frees its spare drawables).
+const GPU_PARK_TICKS: usize = 60;
 
 /// Compiles a `.metal` theme to check it before it replaces a Space's current theme.
 fn validateMetalTheme(src: []const u8, path: []const u8) bool {
@@ -1826,6 +1870,7 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     // at ~10 FPS so a swipe never reveals a stale frame, and jump to 30 FPS the moment their window
     // turns visible mid-swipe. Nothing renders while a fullscreen app's Space is active (it is not one
     // of ours, so active_space_id no longer matches the active slot), or while the screen is locked.
+    b.tickGpu();
     const active_idx = b.obs.active_space_idx;
     const active_is_ours = active_idx < b.obs.n_spaces and
         b.obs.spaces[active_idx].space_id == b.obs.active_space_id;

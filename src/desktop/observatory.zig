@@ -13,6 +13,8 @@ pub const NATIVE_H = sc.NATIVE_H;
 pub const NATIVE_PIXELS = sc.NATIVE_PIXELS;
 pub const POPOVER_PIXELS = sc.POPOVER_PIXELS;
 pub const MAX_SPACES = sc.MAX_SPACES;
+pub const PREVIEW_W: usize = 480;
+pub const PREVIEW_H: usize = 300;
 pub const SpaceConfig = sc.SpaceConfig;
 pub const SpaceMode = sc.SpaceMode;
 
@@ -33,6 +35,9 @@ pub const Observatory = struct {
     drag_mouse_y: f64 = 0.0,
 
     space_native_pixels: [MAX_SPACES][NATIVE_PIXELS]u32,
+    /// Menu previews of GPU-drawn Spaces (PREVIEW_W x PREVIEW_H): the menu draws them ~200 px
+    /// wide, so they don't need a 9 MB canvas each. Untouched until a GPU Space previews.
+    preview_pixels: [MAX_SPACES][PREVIEW_W * PREVIEW_H]u32,
     popover_pixels: [POPOVER_PIXELS]u32,
 
     pub fn init(allocator: std.mem.Allocator) !*Observatory {

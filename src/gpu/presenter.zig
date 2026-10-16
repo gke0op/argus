@@ -64,10 +64,35 @@ fn snapshotInto(dev: mtl.Id, queue: mtl.Id, tex: *mtl.Id, w: usize, h: usize, ds
     return true;
 }
 
-fn detachLayer(layer: mtl.Id) void {
+/// Removes a CAMetalLayer and frees its drawables. Releasing the layer alone leaves its
+/// swap chain alive (measured: 2 x 23 MB per native HDR layer stay mapped), so the
+/// drawables are shrunk first and two tiny frames cycled through to retire the old ones.
+fn detachLayer(layer: mtl.Id, queue: mtl.Id) void {
     if (layer == null) return;
+    shrinkDrawables(layer);
+    if (queue != null) {
+        for (0..2) |_| {
+            const pool = mtl.poolPush();
+            defer mtl.poolPop(pool);
+            const d = mtl.msg(mtl.Id, layer, "nextDrawable", .{}) orelse break;
+            const cb = mtl.msg(mtl.Id, queue, "commandBuffer", .{});
+            mtl.msg(void, cb, "presentDrawable:", .{d});
+            mtl.msg(void, cb, "commit", .{});
+            mtl.msg(void, cb, "waitUntilCompleted", .{});
+        }
+    }
     mtl.msg(void, layer, "removeFromSuperlayer", .{});
     mtl.release(layer);
+}
+
+/// Parks a hidden layer: shrinking the drawable size frees every drawable except the one on
+/// screen, which keeps showing the last frame unchanged until the next render resizes it back.
+fn shrinkDrawables(layer: mtl.Id) void {
+    mtl.msg(void, layer, "setDrawableSize:", .{mtl.CGSize{ .width = 16, .height = 16 }});
+}
+
+fn setDrawables(layer: mtl.Id, w: usize, h: usize) void {
+    mtl.msg(void, layer, "setDrawableSize:", .{mtl.CGSize{ .width = @floatFromInt(w), .height = @floatFromInt(h) }});
 }
 
 /// A Metal-only theme on a Space window.
@@ -75,7 +100,8 @@ pub const ThemePresenter = struct {
     theme: metal_theme.Theme,
     layer: mtl.Id,
     gen: u32, // SpaceConfig.dylib_gen of the load this was built for
-    snap_tex: mtl.Id = null,
+    color_space: ?*anyopaque,
+    parked: bool = false,
 
     pub fn create(src: []const u8, data: ?[]const u8, label: []const u8, gen: u32, seed: u32, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize) ?ThemePresenter {
         var err_buf: [2048]u8 = undefined;
@@ -87,12 +113,32 @@ pub const ThemePresenter = struct {
             theme.deinit();
             return null;
         };
-        return .{ .theme = theme, .layer = layer, .gen = gen };
+        return .{ .theme = theme, .layer = layer, .gen = gen, .color_space = color_space };
+    }
+
+    /// Frees the hidden layer's spare drawables (see shrinkDrawables).
+    pub fn park(self: *ThemePresenter) void {
+        if (self.parked) return;
+        shrinkDrawables(self.layer);
+        self.parked = true;
+    }
+
+    /// Moves the theme to another window layer (Spaces reordered) without recompiling it or
+    /// losing its state.
+    pub fn rehost(self: *ThemePresenter, host_layer: mtl.Id) bool {
+        detachLayer(self.layer, self.theme.queue);
+        self.layer = makeLayer(self.theme.dev, host_layer, self.color_space, self.theme.frame.width, self.theme.frame.height, false, 3);
+        self.parked = false;
+        return self.layer != null;
     }
 
     pub fn render(self: *ThemePresenter, dt: f32) bool {
         const pool = mtl.poolPush();
         defer mtl.poolPop(pool);
+        if (self.parked) {
+            setDrawables(self.layer, self.theme.frame.width, self.theme.frame.height);
+            self.parked = false;
+        }
         const drawable = mtl.msg(mtl.Id, self.layer, "nextDrawable", .{}) orelse return false;
         const cb = mtl.msg(mtl.Id, self.theme.queue, "commandBuffer", .{});
         self.theme.encode(cb, mtl.msg(mtl.Id, drawable, "texture", .{}), dt);
@@ -102,18 +148,28 @@ pub const ThemePresenter = struct {
     }
 
     /// Draws the current state once more into `dst` (packRGBA, w x h) for the menu preview.
-    pub fn snapshot(self: *ThemePresenter, dst: []u32) bool {
+    /// The kernel draws at the preview size directly; the texture lives only for the call.
+    pub fn snapshot(self: *ThemePresenter, dst: []u32, w: usize, h: usize) bool {
         const encode = struct {
             fn f(t: *metal_theme.Theme, cb: mtl.Id, out: mtl.Id) void {
                 t.encodeDrawOnly(cb, out);
             }
         }.f;
-        return snapshotInto(self.theme.dev, self.theme.queue, &self.snap_tex, self.theme.frame.width, self.theme.frame.height, dst, &self.theme, encode);
+        const fw = self.theme.frame.width;
+        const fh = self.theme.frame.height;
+        self.theme.frame.width = @intCast(w);
+        self.theme.frame.height = @intCast(h);
+        defer {
+            self.theme.frame.width = fw;
+            self.theme.frame.height = fh;
+        }
+        var tex: mtl.Id = null;
+        defer mtl.release(tex);
+        return snapshotInto(self.theme.dev, self.theme.queue, &tex, w, h, dst, &self.theme, encode);
     }
 
     pub fn destroy(self: *ThemePresenter) void {
-        mtl.release(self.snap_tex);
-        detachLayer(self.layer);
+        detachLayer(self.layer, self.theme.queue);
         self.theme.deinit();
         self.* = undefined;
     }
@@ -147,6 +203,55 @@ fn nativeSize(host_layer: mtl.Id, fallback_w: usize, fallback_h: usize) [2]u32 {
     return .{ @intFromFloat(w), @intFromFloat(h) };
 }
 
+/// Traced images, shared by every Space showing the same theme at the same size (the trace
+/// depends only on the theme source and the size). An image nobody uses is kept for
+/// ENGINE_IDLE_TICKS so a theme reload or a Space reorder doesn't trace it again.
+const EngineSlot = struct { key: u64, w: u32, h: u32, engine: bh_gpu.Engine, refs: u32, idle_since: usize };
+var engines: [16]?EngineSlot = @splat(null);
+const ENGINE_IDLE_TICKS: usize = 900; // 30 s at the app's 30 Hz tick
+
+fn acquireEngine(key: u64, w: u32, h: u32) ?*bh_gpu.Engine {
+    if (key == 0) return null;
+    for (&engines) |*slot| if (slot.*) |*e| if (e.key == key and e.w == w and e.h == h and !e.engine.failed) {
+        e.refs += 1;
+        return &e.engine;
+    };
+    return null;
+}
+
+fn storeEngine(key: u64, w: u32, h: u32, engine: bh_gpu.Engine, tick: usize) ?*bh_gpu.Engine {
+    reapEngines(tick, true);
+    for (&engines) |*slot| if (slot.* == null) {
+        slot.* = .{ .key = key, .w = w, .h = h, .engine = engine, .refs = 1, .idle_since = 0 };
+        return &slot.*.?.engine;
+    };
+    return null;
+}
+
+fn releaseEngine(engine: *bh_gpu.Engine, tick: usize) void {
+    for (&engines) |*slot| if (slot.*) |*e| if (&e.engine == engine) {
+        e.refs -|= 1;
+        if (e.refs == 0) e.idle_since = tick;
+        return;
+    };
+}
+
+/// Frees traced images nobody has used for ENGINE_IDLE_TICKS (all idle ones with `all`).
+pub fn reapEngines(tick: usize, all: bool) void {
+    for (&engines) |*slot| if (slot.*) |*e| if (e.refs == 0 and (all or tick -| e.idle_since >= ENGINE_IDLE_TICKS)) {
+        e.engine.deinit();
+        slot.* = null;
+    };
+}
+
+/// Advances every running trace. A Space that isn't drawn never polled its engine, so its
+/// finished trace kept the temporary light-travel buffer and ~120 tile command buffers alive.
+pub fn pollEngines() void {
+    for (&engines) |*slot| if (slot.*) |*e| {
+        _ = e.engine.poll();
+    };
+}
+
 const StaticFn = *const fn (*anyopaque, *bt.Static) callconv(.c) void;
 const FrameFn = *const fn (*anyopaque, *bt.Frame) callconv(.c) void;
 const TraceFn = *const fn (*anyopaque, u32, u32, *bt.TraceParams) callconv(.c) void;
@@ -157,17 +262,17 @@ pub const Presenter = struct {
     state: *anyopaque,
     layer: mtl.Id, // CAMetalLayer, a sublayer of the Space window's host layer
     queue: mtl.Id,
-    engine: bh_gpu.Engine,
+    engine: *bh_gpu.Engine, // shared with other Spaces showing the same theme (see engines)
     fill_frame: FrameFn,
     frame: bt.Frame = undefined,
     hdr: bool,
-    preview_w: usize, // the app's menu-preview size (the CPU canvas size)
-    preview_h: usize,
+    color_space: ?*anyopaque,
+    parked: bool = false,
 
     /// Returns null when the dylib isn't a GPU build or Metal is unavailable.
-    /// `w` x `h` is the app's canvas size, used for menu previews; the GPU traces at the
-    /// window's native pixel size.
-    pub fn create(handle: ?*anyopaque, state_ptr: ?*anyopaque, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize) ?Presenter {
+    /// `w` x `h` is the fallback size; the GPU traces at the window's native pixel size.
+    /// `key` identifies the theme source (0 = don't share); `tick` is the app's frame counter.
+    pub fn create(handle: ?*anyopaque, state_ptr: ?*anyopaque, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize, key: u64, tick: usize) ?Presenter {
         const h_lib = handle orelse return null;
         const st = state_ptr orelse return null;
         const fill_frame: FrameFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_frame") orelse return null));
@@ -177,6 +282,38 @@ pub const Presenter = struct {
         mtl.load() catch return null; // nativeSize messages AppKit before the engine loads Metal
 
         const size = nativeSize(host_layer, w, h);
+        const engine = acquireEngine(key, size[0], size[1]) orelse blk: {
+            var e = traceEngine(st, fill_static, fill_trace, tables, size) orelse return null;
+            if (key == 0) {
+                e.deinit(); // unshared engines aren't supported: every hybrid has a source key
+                return null;
+            }
+            break :blk storeEngine(key, size[0], size[1], e, tick) orelse {
+                e.deinit();
+                return null;
+            };
+        };
+        const hdr = hdr_enabled;
+        // Two drawables: the image changes slowly and Argus draws at <= 30 FPS, so a third
+        // window-sized buffer would only cost memory.
+        const layer = makeLayer(engine.k.dev, host_layer, color_space, size[0], size[1], hdr, 2) orelse {
+            releaseEngine(engine, tick);
+            return null;
+        };
+        return .{
+            .handle = handle,
+            .state = st,
+            .layer = layer,
+            .queue = mtl.msg(mtl.Id, engine.k.dev, "newCommandQueue", .{}),
+            .engine = engine,
+            .fill_frame = fill_frame,
+            .hdr = hdr,
+            .color_space = color_space,
+        };
+    }
+
+    /// A new traced image for this theme at `size` (meter, then the trace queued on the GPU).
+    fn traceEngine(st: *anyopaque, fill_static: StaticFn, fill_trace: TraceFn, tables: TablesFn, size: [2]u32) ?bh_gpu.Engine {
         var stat: bt.Static = undefined;
         fill_static(st, &stat);
         var params: bt.TraceParams = undefined;
@@ -189,25 +326,24 @@ pub const Presenter = struct {
 
         var engine = bh_gpu.Engine.init(&stat, params, noise, ttab) catch return null;
         _ = engine.meter();
-        engine.startTrace(16); // ~0.8 s of GPU work at 3024x1964, in ~120 short submissions
-        const hdr = hdr_enabled;
-        // Two drawables: the image changes slowly and Argus draws at <= 30 FPS, so a third
-        // window-sized buffer would only cost memory.
-        const layer = makeLayer(engine.k.dev, host_layer, color_space, size[0], size[1], hdr, 2) orelse {
-            engine.deinit();
-            return null;
-        };
-        return .{
-            .handle = handle,
-            .state = st,
-            .layer = layer,
-            .queue = mtl.msg(mtl.Id, engine.k.dev, "newCommandQueue", .{}),
-            .engine = engine,
-            .fill_frame = fill_frame,
-            .hdr = hdr,
-            .preview_w = w,
-            .preview_h = h,
-        };
+        engine.startTrace(16); // seconds of GPU work at 3024x1964, in ~120 short submissions
+        return engine;
+    }
+
+    /// Frees the hidden layer's spare drawable (see shrinkDrawables).
+    pub fn park(self: *Presenter) void {
+        if (self.parked) return;
+        shrinkDrawables(self.layer);
+        self.parked = true;
+    }
+
+    /// Moves to another window layer (Spaces reordered) keeping the traced image.
+    pub fn rehost(self: *Presenter, host_layer: mtl.Id) bool {
+        detachLayer(self.layer, self.queue);
+        const p = self.engine.params;
+        self.layer = makeLayer(self.engine.k.dev, host_layer, self.color_space, p.width, p.height, self.hdr, 2);
+        self.parked = false;
+        return self.layer != null;
     }
 
     /// Shades one frame from the theme's current step state and presents it. Rows the trace
@@ -217,6 +353,10 @@ pub const Presenter = struct {
         const pool = mtl.poolPush();
         defer mtl.poolPop(pool);
         _ = self.engine.poll();
+        if (self.parked) {
+            setDrawables(self.layer, self.engine.params.width, self.engine.params.height);
+            self.parked = false;
+        }
         self.fill_frame(self.state, &self.frame);
         const drawable = mtl.msg(mtl.Id, self.layer, "nextDrawable", .{}) orelse return true;
         const cb = mtl.msg(mtl.Id, self.queue, "commandBuffer", .{});
@@ -227,27 +367,30 @@ pub const Presenter = struct {
         return true;
     }
 
-    /// The current frame, again, into `dst` (packRGBA at the app's canvas size, SDR) for the
-    /// menu preview. The 9 MB texture lives only for the call: previews are occasional.
-    pub fn snapshot(self: *Presenter, dst: []u32) bool {
+    /// The current frame, again, into `dst` (packRGBA, w x h, SDR) for the menu preview.
+    /// The texture lives only for the call: previews are occasional.
+    pub fn snapshot(self: *Presenter, dst: []u32, w: usize, h: usize) bool {
         // The preview waits for the GPU; while the trace is running that means waiting behind
         // it on the main thread. The app retries a failed preview, so take it once the trace is done.
         if (!self.engine.poll()) return false;
+        const Ctx = struct { pr: *Presenter, w: usize, h: usize };
         const encode = struct {
-            fn f(pr: *Presenter, cb: mtl.Id, out: mtl.Id) void {
-                pr.engine.encodeShade(cb, &pr.frame, out, pr.preview_w, pr.preview_h, 1.0, .srgb);
+            fn f(c: *const Ctx, cb: mtl.Id, out: mtl.Id) void {
+                c.pr.engine.encodeShade(cb, &c.pr.frame, out, c.w, c.h, 1.0, .srgb);
             }
         }.f;
+        const ctx: Ctx = .{ .pr = self, .w = w, .h = h };
         var tex: mtl.Id = null;
         defer mtl.release(tex);
-        return snapshotInto(self.engine.k.dev, self.queue, &tex, self.preview_w, self.preview_h, dst, self, encode);
+        return snapshotInto(self.engine.k.dev, self.queue, &tex, w, h, dst, &ctx, encode);
     }
 
-    /// Detaches the layer and releases GPU objects. Call before the theme's state is freed.
-    pub fn destroy(self: *Presenter) void {
-        detachLayer(self.layer);
+    /// Detaches the layer and lets go of the traced image (kept a while for reuse). Call
+    /// before the theme's state is freed.
+    pub fn destroy(self: *Presenter, tick: usize) void {
+        detachLayer(self.layer, self.queue);
         mtl.release(self.queue);
-        self.engine.deinit();
+        releaseEngine(self.engine, tick);
         self.* = undefined;
     }
 };
