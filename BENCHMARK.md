@@ -59,7 +59,7 @@ they stay in the git history (`git log --all -- themes/<name>`) as reference sub
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`themes/Cygnus_A.zig`** | Claude Opus | The quasar engine (generated from `tools/quasar_template.zig`) modelled on Cygnus A, the hidden quasar in the archetypal radio galaxy: $2.5\times10^9\,M_\odot$, $0.012\,L_{\rm Edd}$, an honestly thin disk; spin unmeasured, $a/M=0.9$ chosen (CPU path shown; the app draws it on the GPU by default) | `61,368,016 B` (`58.52 MiB`) | **`5,278–5,316 µs`** | **`188–189 FPS`** | Bronze |
 
-### The six shipped themes: measured cost
+### The seven shipped themes: measured cost
 
 Apple GPUs stay at low clocks when Argus paces frames at 30 FPS, so a theme's live cost is higher than its back-to-back cost. Judge GPU themes on the **paced** column (`make harness THEME=themes/X.metal` prints it as "Paced 30 FPS"). Measured on an M3 with 8 GB, 3 runs per theme; GPU busy, CPU and memory come from `Argus --offscreen --bench-space 0 --perf-log` with the theme on one Space (and on four, for the last column). An empty Argus costs 13 MB, 0.2% CPU and no GPU.
 
@@ -70,8 +70,10 @@ Apple GPUs stay at low clocks when Argus paces frames at 30 FPS, so a theme's li
 | `themes/Tutorial_Reef.metal` | 1.11–1.17 ms | 1.69–2.06 ms | 15.2% (10.2–15.4) | 1.6–2.2% | 91–100 MB | 139 MB |
 | `themes/Orion_Nebula.metal` | 1.69–1.71 ms | 2.02–2.75 ms | 14.3% (14.3–18.4) | 1.5–2.2% | 93 MB | 152 MB |
 | `themes/Night_Tide.metal` | 2.52 ms | 2.73–2.90 ms | 25.3% (17.9–36.8) | 1.6–1.9% | 89–98 MB | 143 MB |
+| `themes/Lizard_Island.metal` | 2.98–3.05 ms | 3.9–4.2 ms | ~32% (21–55)\* | 1.7–2.8% | 186–195 MB | 414–506 MB |
 | `themes/Cygnus_A.zig` on the GPU (HDR10, native 3024×1964) | 1.57–1.60 ms | 2.58–2.78 ms | 12.0% (11.9–12.3) | 12.5–12.6% | 278–301 MB | 387 MB |
 
+- \*Lizard_Island was measured later with the live app running alongside (itself showing Lizard Island), which inflates its GPU busy figure. Its memory is higher because each Space keeps its own 2048×2082 float16 state texture pair (~68 MB).
 - Metal themes render at 1920×1200; Cygnus_A traces and shades at the display's native size.
 - Cygnus_A also runs a one-time GPU ray trace per load (3.9 s at 3024×1964), shared by every Space
   showing it; its CPU column is the theme's step() plus frame setup on the main thread.
