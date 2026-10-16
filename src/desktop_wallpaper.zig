@@ -1790,8 +1790,126 @@ fn onStatusItemClick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c
         b.msgId(b.popover_win, b.sel_registerName("makeKeyAndOrderFront:"), null);
         b.msgId(b.popover_win, b.sel_registerName("orderFrontRegardless"), null);
     } else {
-        b.msgId(b.popover_win, b.sel_registerName("orderOut:"), null);
+        closePopover(b);
     }
+}
+
+fn closePopover(b: *MacBridge) void {
+    b.popover_visible = false;
+    b.pending_thumb = null;
+    b.slider_drag = false;
+    b.msgId(b.popover_win, b.sel_registerName("orderOut:"), null);
+}
+
+// ============================================================================
+// POPOVER DISMISSAL: a click anywhere outside, Esc, or switching apps closes it
+// ============================================================================
+
+/// An Objective-C block with no captures (a "global" block), built by hand: AppKit's event
+/// monitors take their handler as a block.
+const BlockDescriptor = extern struct { reserved: c_ulong = 0, size: c_ulong };
+fn GlobalBlock(comptime Invoke: type) type {
+    return extern struct {
+        isa: ?*anyopaque,
+        flags: c_int = 1 << 28, // BLOCK_IS_GLOBAL: never copied, never freed
+        reserved: c_int = 0,
+        invoke: Invoke,
+        descriptor: *const BlockDescriptor,
+    };
+}
+const MonitorBlock = GlobalBlock(*const fn (?*anyopaque, ?*anyopaque) callconv(.c) void);
+const LocalMonitorBlock = GlobalBlock(*const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque);
+const monitor_desc = BlockDescriptor{ .size = @sizeOf(MonitorBlock) };
+const local_monitor_desc = BlockDescriptor{ .size = @sizeOf(LocalMonitorBlock) };
+var g_outside_block: MonitorBlock = .{ .isa = null, .invoke = &onOutsideEvent, .descriptor = &monitor_desc };
+var g_key_block: LocalMonitorBlock = .{ .isa = null, .invoke = &onLocalKeyDown, .descriptor = &local_monitor_desc };
+
+// NSEventType / NSEventMask bits
+const EV_LEFT_DOWN: usize = 1;
+const EV_LEFT_UP: usize = 2;
+const EV_RIGHT_DOWN: usize = 3;
+const EV_LEFT_DRAGGED: usize = 6;
+const EV_KEY_DOWN: usize = 10;
+const KEY_ESCAPE: usize = 53;
+
+/// A press outside the popover closes it on release, unless the press became a drag: dragging a
+/// theme out of Finder onto the strip starts with a click outside and must keep it open.
+var g_outside_press = false;
+var g_outside_dragged = false;
+
+fn mouseInsidePopover(b: *MacBridge) bool {
+    const m = b.msgRetPoint(b.NSEvent, b.sel_registerName("mouseLocation"));
+    const f = b.msgRetRect(b.popover_win, b.sel_registerName("frame"));
+    return m.x >= f.origin.x and m.x < f.origin.x + f.size.width and m.y >= f.origin.y and m.y < f.origin.y + f.size.height;
+}
+
+/// Global monitor: mouse events delivered to other apps (or the desktop, or other menu extras).
+fn onOutsideEvent(_: ?*anyopaque, event: ?*anyopaque) callconv(.c) void {
+    const b = g_bridge orelse return;
+    if (!b.popover_visible) return;
+    const t: usize = @bitCast(b.msgRetInt(event, b.sel_registerName("type")));
+    switch (t) {
+        EV_LEFT_DOWN => {
+            g_outside_press = !mouseInsidePopover(b);
+            g_outside_dragged = false;
+        },
+        EV_LEFT_DRAGGED => g_outside_dragged = true,
+        EV_LEFT_UP => {
+            if (g_outside_press and !g_outside_dragged and !mouseInsidePopover(b)) closePopover(b);
+            g_outside_press = false;
+        },
+        EV_RIGHT_DOWN => if (!mouseInsidePopover(b)) closePopover(b),
+        else => {},
+    }
+}
+
+/// Local monitor: Esc while the popover is open closes it (and is not passed on).
+fn onLocalKeyDown(_: ?*anyopaque, event: ?*anyopaque) callconv(.c) ?*anyopaque {
+    const b = g_bridge orelse return event;
+    const code: usize = @as(usize, @bitCast(b.msgRetInt(event, b.sel_registerName("keyCode")))) & 0xffff;
+    if (b.popover_visible and code == KEY_ESCAPE) {
+        closePopover(b);
+        return null;
+    }
+    return event;
+}
+
+/// Argus stopped being the active app (Cmd-Tab, Mission Control, a click elsewhere). A click
+/// elsewhere still has the button down here and is settled by the global monitor on release.
+fn onAppResignActive(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+    const b = g_bridge orelse return;
+    if (!b.popover_visible) return;
+    const buttons: usize = @bitCast(b.msgRetInt(b.NSEvent, b.sel_registerName("pressedMouseButtons")));
+    if (buttons & 1 == 0 and !mouseInsidePopover(b)) closePopover(b);
+}
+
+fn installPopoverDismissal(b: *MacBridge, msg_send: *align(4) const anyopaque, ctrl: ?*anyopaque) void {
+    const libsys = std.c.dlopen("/usr/lib/libSystem.B.dylib", .{ .LAZY = true }) orelse return;
+    const isa = std.c.dlsym(libsys, "_NSConcreteGlobalBlock") orelse return;
+    g_outside_block.isa = isa;
+    g_key_block.isa = isa;
+
+    const MsgMonitor = *const fn (?*anyopaque, ?*anyopaque, u64, *anyopaque) callconv(.c) ?*anyopaque;
+    const add_monitor: MsgMonitor = @ptrCast(msg_send);
+    const bit = struct {
+        fn of(t: usize) u64 {
+            return @as(u64, 1) << @intCast(t);
+        }
+    }.of;
+    const outside_mask = bit(EV_LEFT_DOWN) | bit(EV_LEFT_UP) | bit(EV_RIGHT_DOWN) | bit(EV_LEFT_DRAGGED);
+    if (add_monitor(b.NSEvent, b.sel_registerName("addGlobalMonitorForEventsMatchingMask:handler:"), outside_mask, @ptrCast(&g_outside_block))) |m| {
+        _ = b.msg0(m, b.sel_registerName("retain"));
+    }
+    if (add_monitor(b.NSEvent, b.sel_registerName("addLocalMonitorForEventsMatchingMask:handler:"), bit(EV_KEY_DOWN), @ptrCast(&g_key_block))) |m| {
+        _ = b.msg0(m, b.sel_registerName("retain"));
+    }
+
+    const NSNotificationCenter = b.objc_getClass("NSNotificationCenter") orelse return;
+    const center = b.msg0(NSNotificationCenter, b.sel_registerName("defaultCenter")) orelse return;
+    const name = b.msgUTF8(b.NSString, b.sel_str_utf8, "NSApplicationDidResignActiveNotification");
+    const MsgObserve = *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void;
+    const observe: MsgObserve = @ptrCast(msg_send);
+    observe(center, b.sel_registerName("addObserver:selector:name:object:"), ctrl, b.sel_registerName("onAppResignActive:"), name, null);
 }
 
 /// Popover point (top-left origin) of a mouse event.
@@ -2367,6 +2485,7 @@ pub fn main(init: std.process.Init) !void {
     const ctrl_cls = objc_allocateClassPair(NSObject, "ArgusStudioController", 0) orelse return error.ClassAllocFailed;
     _ = class_addMethod(ctrl_cls, sel_registerName("onTick:"), @ptrCast(&onTick), "v@:@");
     _ = class_addMethod(ctrl_cls, sel_registerName("onStatusItemClick:"), @ptrCast(&onStatusItemClick), "v@:@");
+    _ = class_addMethod(ctrl_cls, sel_registerName("onAppResignActive:"), @ptrCast(&onAppResignActive), "v@:@");
     objc_registerClassPair(ctrl_cls);
     const ctrl_instance = msg0(msg0(ctrl_cls, sel_registerName("alloc")), sel_registerName("init"));
 
@@ -2645,6 +2764,7 @@ pub fn main(init: std.process.Init) !void {
     // Discover all user Desktop Spaces from SkyLight and bind a dedicated NSWindow to each Space!
     bridge.syncSpacesFromSkyLight(true);
     bridge.updateStatusGlyph();
+    installPopoverDismissal(&bridge, msgSend_raw, ctrl_instance);
     if (!normal_window) {
         g_pictures.init();
         _ = signal(15, onQuitSignal); // SIGTERM
@@ -2671,6 +2791,18 @@ pub fn main(init: std.process.Init) !void {
 
     onTick(null, null, null);
     msgVoid(ns_app, sel_registerName("run"));
+}
+
+test "popover dismissal: hand-built global blocks match the Blocks ABI layout" {
+    // struct Block_literal { void *isa; int flags; int reserved; void (*invoke)(...); descriptor * }
+    inline for (.{ MonitorBlock, LocalMonitorBlock }) |B| {
+        try std.testing.expectEqual(@as(usize, 32), @sizeOf(B));
+        try std.testing.expectEqual(@as(usize, 8), @offsetOf(B, "flags"));
+        try std.testing.expectEqual(@as(usize, 16), @offsetOf(B, "invoke"));
+        try std.testing.expectEqual(@as(usize, 24), @offsetOf(B, "descriptor"));
+    }
+    try std.testing.expectEqual(@as(c_int, 1 << 28), g_outside_block.flags);
+    try std.testing.expectEqual(@as(c_ulong, 32), monitor_desc.size);
 }
 
 test "eject: a theme Space goes back to macOS Default and saves as passthrough" {
