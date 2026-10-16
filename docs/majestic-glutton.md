@@ -133,7 +133,7 @@ The disk is **computed**, not shaped by hand:
 5. **Local structure, at each radius:**
    - Σ comes from the flux and the stress.
    - Scale height comes from hydrostatic balance with gas + radiation pressure.
-   - Midplane temperature comes from radiative diffusion, uniform heating: T_c⁴ = (3/8 τ_½ + 1) T_eff⁴.
+   - Midplane temperature comes from radiative diffusion, uniform heating: T_c⁴ = (3/8 τ_½ + ½) T_eff⁴ (Eddington surface, T⁴(0) = T_eff⁴/2).
    - Opacity: electron scattering κ_es = 0.34 plus Kramers κ_ff = 6.4e22 ρ T^−3.5 (cgs).
    - At the flux peak: H/r ≈ 0.05 (radiation-pressure supported), τ_es ≈ 350, Σ ≈ 2e3 g cm⁻².
 6. **Emission:** a grey isothermal slab whose energy-conserving source temperature satisfies
@@ -197,7 +197,8 @@ Armitage & Simon 2011; Hirose et al. 2009):
   - Eddies are born leading ~31° and swung to trailing by the Kerr shear. Birth cells are
     2 × (0.294, 0.556) H.
   - The fit was made against the rendered field with an exact numpy port of the shader.
-- **Spectrum:** two octaves with amplitudes 2^{−5j/6}, i.e. a k^{−11/3} per-mode spectrum.
+- **Spectrum:** two octaves with amplitudes 2^{−5j/6}, i.e. a k^{−11/3} per-mode spectrum of the
+  projected (vertically integrated) 2D field.
   A third octave would be finer than a Retina pixel's footprint and is omitted.
 - **Lifetimes:** P(r) · 2^{−2j/3}, on phase-locked bands L₀ 2ⁿ (L₀ = 4 M, 12 bands) blended
   across radius. Each band holds two staggered, independent generations with variance-preserving
@@ -206,6 +207,13 @@ Armitage & Simon 2011; Hirose et al. 2009):
   - The measured Lagrangian correlation time is 0.43–0.56 of an orbit.
 - **Dissipation:** log-normal, ε = exp(σ G − σ² var/2) with σ = 0.2. Temperature follows it,
   T ∝ ε^{1/4}, so the ripple is ~5% in temperature.
+  - σ = 0.2 is applied unfiltered at the photosphere, an upper bound: the vertical diffusion time
+    τH/c ≈ 350 × 0.29 ≈ 100 M exceeds an orbit at the peak (87 M), so sub-orbit fluctuations
+    would be partly smoothed before they escape.
+  - The colour correction f_col and the dilution stay at the unperturbed disk's values; the
+    ripple scales only the temperature. With f_col ∝ T^0.82 applied locally, a hotter patch above
+    ~30 kK would harden and look dimmer at 550 nm (d ln Y/d ln ε ≈ −0.29 at 50 kK, where the code
+    gives +0.30). Below ~30 kK the two agree.
 - **Filtering:**
   - Variance-preserving interpolation between table cells, using fitted neighbour correlations.
   - Footprint filter (1 + (f/c)²)^{−1/4} per axis, fitted to box averaging (max error 0.045).
@@ -216,6 +224,9 @@ Armitage & Simon 2011; Hirose et al. 2009):
   living 90 M.
 - Each spot shears as it ages: every radius keeps its own Ω(r).
 - Emissivity × (1 + boost), so T rises as (1 + boost)^{1/4}.
+- f_col and the dilution stay at the unperturbed values (as in §6). A full spot (1 + boost = 7)
+  at the 50 kK peak renders at 1.74× the base 550 nm luminance; with f_col re-evaluated at the
+  spot's temperature it would be 0.54× and bluer (colour temperature ~185 kK, not ~124 kK).
 - Count, size and brightness are choices; the motion is computed.
 
 ## 8. The sky is black
@@ -276,8 +287,13 @@ tests or audits below.
   but its exact radius and colour are not.
 - **Fits, not computations:** the colour correction and the limb darkening are fits to
   disk-atmosphere models. Full calculations give a limb slope nearer 2.6, with up to 15% deviation.
-- **Not modelled:** returning radiation (disk self-irradiation), finite disk thickness (the disk
-  is drawn as a surface), gas inside the ISCO, polarisation, the corona and broad-line region
+- **Finite thickness (largest geometric approximation at 88°):** rays hit the midplane θ = π/2.
+  The line of sight is 2° above the plane and H ≈ 0.29 M at the peak, so a photosphere at 2–3 H
+  would move near-side crossings 17–25 M outward (1/tan 2° = 28.6) and up by 0.6–0.9 M. The
+  near-side band at r 6–15 M is drawn 0.31 M tall (9 M · cos 88°), against ~0.9–1.2 M for the
+  photosphere; thickness over projected width is ~4–5 here, ~0.15 at 45°. The lensed far-side
+  image is shifted, not hidden. A fix intersects rays with z = ±z_phot(r) from the τ profile.
+- **Not modelled:** returning radiation (disk self-irradiation), gas inside the ISCO, polarisation, the corona and broad-line region
   (X-ray only or outside the view), the recoil.
 - **Opacity mean:** the Rosseland-mean Kramers law is used where a Planck mean might suit
   emission better.
@@ -291,6 +307,17 @@ tests or audits below.
   stated. All verified and fixed here. It then asked for a dense full-contour shadow sweep and a
   machine-readable test ledger. Both are done (§3, §9). The sweep found a near-axis error the
   11-point test had missed; it is fixed (§3).
+- **Mixed-model fleet (2026-10-16, overnight):** DeepSeek, Muse, Nemotron, cat-jam, space-bunny,
+  Sonnet and Haiku, each finding checked by a second family and recomputed before acting.
+  - Fixed: the blackbody table cap (80 → 200 kK) and colour-temperature storage, an over-emitting
+    slab/atmosphere blend, Done's exponent (0.82), the midplane boundary constant (+½, not +1:
+    the faint outskirts beyond ~75 M were ~1 kK too hot), and an unused 12th lifetime band
+    (lifetimes stopped tracking P(r) beyond ~75 M).
+  - Disclosed: f_col held fixed under turbulence and spots (§6, §7), finite thickness (§10),
+    radiative smoothing of the turbulence (§6).
+  - Open for the owner: a steady Novikov-Thorne disk in place of the spreading-ring snapshot
+    (three families raised it). A preview fills the frame with a hot opaque outer disk and loses
+    the dark lane and the lower lensed image.
 
 ## 12. Questions for reviewers
 

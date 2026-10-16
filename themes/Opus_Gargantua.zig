@@ -465,7 +465,7 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
     const Local = struct { sigma: f64, tes: f64, ta: f64, tc: f64, cs2: f64, rho: f64 };
     // Local structure: Sigma from the flux and the closure's stress; scale height from vertical
     // hydrostatic balance with the local gas + radiation pressure; midplane temperature from
-    // radiative diffusion (uniform heating: T_c^4 = (3/8 tau_half + 1) T_eff^4). Iterated jointly.
+    // radiative diffusion (uniform heating: T_c^4 = (3/8 tau_half + 1/2) T_eff^4, Eddington surface T^4(0) = T_eff^4 / 2). Iterated jointly.
     const local = struct {
         fn f(aa: f64, rr: f64, fphys: f64, wphys: f64, rgc: f64, tgc: f64) Local {
             const teff4 = fphys / SIGMA_SB;
@@ -481,7 +481,7 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
                 rho = sg * om / (2.0 * @sqrt(cs2)); // Sigma / 2H, H = c_s / Omega
                 tes = KAPPA_ES * sg / 2.0;
                 ta = KAPPA_KRAMERS * rho * math.pow(f64, @max(tc, 1.0), -3.5) * sg / 2.0;
-                const tn = @sqrt(@sqrt(0.375 * (tes + ta) * teff4 + teff4));
+                const tn = @sqrt(@sqrt(0.375 * (tes + ta) * teff4 + 0.5 * teff4));
                 const cn = K_BOLTZ * tn / (0.6 * M_PROTON) + A_RAD * math.pow(f64, tn, 4) / (3.0 * rho);
                 if (@abs(tn - tc) < 1e-9 * tc and @abs(cn - cs2) < 1e-9 * cs2) break;
                 tc = 0.5 * (tc + tn);
@@ -1124,7 +1124,7 @@ pub const State = struct {
             const period = 2.0 * math.pi * (r * @sqrt(r) + self.geo.a);
             for (0..N_OCT) |oct| {
                 const life = GARG_LIFE * period * math.pow(f64, 2.0, -2.0 * @as(f64, @floatFromInt(oct)) / 3.0);
-                self.sband[oct][b] = @floatCast(math.clamp(std.math.log2(life / BAND_L0), 0.0, @as(f64, NBAND - 2) - 1e-3));
+                self.sband[oct][b] = @floatCast(math.clamp(std.math.log2(life / BAND_L0), 0.0, @as(f64, NBAND - 1) - 1e-3));
             }
             const sb = self.sband[0][b];
             const n0 = @floor(sb);
