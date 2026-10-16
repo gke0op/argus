@@ -21,10 +21,10 @@ black hole fed by a thin, hot accretion disk.
 | Parameter | Value used | Literature | Source | Status |
 |---|---|---|---|---|
 | Spin a* | 0.62 | 0.62 (+0.22 / −0.37, 90%) | Sisk-Reynés, Reynolds, Matthews & Smith 2022, MNRAS 514, 2568 (Chandra X-ray reflection) | measured |
-| Mass | 4e9 Msun | ~3–6e9 (Hβ virial, UV disk fit, X-ray); outliers 1e9 and 3e10; 2026 reverberation lag in tension | Reynolds 2014 (arXiv 1408.4803); Fukuchi, Ichikawa et al. 2022 (arXiv 2209.09255) | centre of consistent estimates |
+| Mass | 4e9 Msun | ~3–6e9 (Hβ virial, UV disk fit, X-ray); outliers 1e9 and 3e10. A 2026 Hβ reverberation lag of 83 d is 5.6× short of the R–L relation but driven by the line's tail; the line core gives 267 d, close to R–L | Reynolds 2014 (arXiv 1408.4803); Fukuchi, Ichikawa et al. 2022 (arXiv 2209.09255); Li et al. 2026 (arXiv 2601.18269) | centre of consistent estimates |
 | Luminosity | 0.20 L_Edd (computed, see §4) | λ_Edd = 0.18 (full SED fit), 0.59 (X-ray bolometric) | Fukuchi, Ichikawa et al. 2022 | matches |
 | Inner-disk inclination from Earth | (camera at 88°, a choice) | 44.6 ± 3.3° (90%); older fit ~57° | Sisk-Reynés 2022; Reynolds 2014 | our camera is not on Earth's line of sight |
-| Radio | no jet drawn | radio-quiet by luminosity; weak FR I-type jet, lobes ~280 kpc | Blundell & Rawlings 2001 (astro-ph/0110157) | invisible in optical; outside the view |
+| Radio | no jet drawn | radio-quiet by luminosity; a weak ~300 kpc-scale FR I radio structure | Blundell & Rawlings 2001 (astro-ph/0110157) | invisible in optical; outside the view |
 | Recoil | not modelled | broad lines offset ~1000–2100 km/s; nucleus offset from host centre: candidate recoiling black hole | Robinson et al. 2010; Jadhav et al. 2021, MNRAS 507, 484 | unsettled; would look the same up close |
 
 ## 2. Camera
@@ -40,8 +40,11 @@ black hole fed by a thin, hot accretion disk.
 ## 3. Light paths
 
 - **Geodesics:** exact Kerr null geodesics in Boyer–Lindquist coordinates, Hamiltonian form,
-  integrated with RK4. p_r is re-solved from the null condition at every step; rays are traced
-  backward from the camera.
+  integrated with RK4. p_r is re-solved from the null condition at every step, except near its
+  turning points (where the integrated value is kept); rays are traced backward from the camera.
+- **Camera model:** screen coordinates (α, β) are the photons' asymptotic impact parameters; the
+  camera distance (1000 M) sets where rays start. A true static pinhole at 1000 M would differ in
+  image scale by ~0.1%.
 - **Shadow test (full contour):** the traced shadow edge is compared with Bardeen's analytic
   critical curve at 766 points, at the theme's spin (0.62), inclination (88°) and camera
   distance (1000 M).
@@ -112,11 +115,13 @@ The disk is **computed**, not shaped by hand:
    - Boundary: zero stress at the ISCO.
    - Numerics: backward Euler with a Thomas solve.
 2. **Initial ring and snapshot:** a ring of gas at 4 r_isco (width 0.8 r_isco), evolved until the
-   radius where the mass flux reverses reaches 5 r_isco. The recipe (initial ring and snapshot
+   radius where the mass flux reverses reaches 5 r_isco. The source temperature is capped at
+   70,000 K (T_MAX_SOURCE; reached only by the sub-pixel, zero-stress sliver at the ISCO edge). The recipe (initial ring and snapshot
    criterion) scales with the ISCO, so it applies unchanged at any spin. The solution does not:
    the equation's Kerr coefficients depend on spin, so it is recomputed for each spin.
 3. **Flux:** F = −(U⁰)² ζ Ω′ / (2r).
-   - Near the ISCO it is steady inflow: F/F_Page-Thorne = 0.99 at 1.5 r_isco.
+   - Near the ISCO it is steady inflow: F/F_Page-Thorne = 0.99 at 1.5 r_isco (the test bounds
+     the spread inside 1.25 r_isco).
    - It falls below Page-Thorne outward: 0.89 at 9 M, 0.55 at 19 M, 0.28 at 28 M.
    - Mass budget closes to 0.998.
 4. **Physical scaling:** the ISCO inflow is set to 0.36 Ṁ_Edd for 4e9 Msun, α = 0.1.
@@ -125,10 +130,12 @@ The disk is **computed**, not shaped by hand:
    - The snapshot radiates 0.544 of a steady Page-Thorne disk at that inflow.
    - So L = 0.36 × 0.544 = 0.196 L_Edd, matching the measured 0.18. (With a fixed 10% efficiency
      convention the same inflow would read 0.182.)
+   - Integrating the renderer's physical flux directly (cgs, both faces, flat area weight) gives
+     0.187 L_Edd; this is the ledger's test of the flux scale.
 5. **Local structure, at each radius:**
    - Σ comes from the flux and the stress.
    - Scale height comes from hydrostatic balance with gas + radiation pressure.
-   - Midplane temperature comes from radiative diffusion, uniform heating: T_c⁴ = (3/8 τ_½ + 1) T_eff⁴.
+   - Midplane temperature comes from radiative diffusion, uniform heating: T_c⁴ = (3/8 τ_½ + ½) T_eff⁴ (Eddington surface, T⁴(0) = T_eff⁴/2).
    - Opacity: electron scattering κ_es = 0.34 plus Kramers κ_ff = 6.4e22 ρ T^−3.5 (cgs).
    - At the flux peak: H/r ≈ 0.05 (radiation-pressure supported), τ_es ≈ 350, Σ ≈ 2e3 g cm⁻².
 6. **Emission:** a grey isothermal slab whose energy-conserving source temperature satisfies
@@ -165,8 +172,18 @@ The disk ends at R_out = 48 r_isco = 180 M, where τ ≈ 1e-4, so the gas fades 
     functions.
   - Beaming is on.
 - **Colour correction** (Done, Davis, Jin, Blaes & Ward 2012): f_col⁻⁴ B(f_col T).
-  - f = 1 below 3e4 K, (T/3e4 K)^0.83 up to 1e5 K, and (72 keV/kT)^{1/9} above that.
-  - The branches are continuous to 0.3%; f ≈ 1.5 at the 50,000 K peak.
+  - f = 1 below 3e4 K, (T/3e4 K)^0.82 up to 1e5 K (their eq. 2), and (72 keV/kT)^{1/9} above.
+  - The published branches meet to 1.6% at 1e5 K, a temperature this disk never reaches;
+    f ≈ 1.5 at the 50,000 K peak.
+  - The table of observed colours reaches 200 kK, above the hottest observed colour
+    temperature (g f T_s ≈ 105 kK on the approaching inner disk).
+  - In the visible band, f⁻⁴ B(f T) goes as f⁻³ T (Rayleigh-Jeans), so above the 3e4 K knee a
+    hotter ring looks dimmer: T^−1.46 instead of T. The brightest visible ring therefore sits
+    where T_s crosses 30 kK (~15 M, 1.59× the 550 nm intensity of the 5.6 M flux peak, face-on and
+    unbeamed), not at the flux peak. A smoothed knee lowers this to ~1.3× but keeps it.
+    This comes from applying a fit to the spectral peak across the whole visible band: real
+    atmospheres thermalise optical light deeper, where it is less diluted, so the visible
+    suppression of the hot inner disk is overstated.
 - **Limb darkening:** I(μ) ∝ 1 + 2.06 μ (Chandrasekhar H-function, linear fit as in Laor 1991),
   normalised to an isotropic emitter's flux (tested to 1e-6).
   - μ is measured in the gas frame: μ = g |p_θ| / r.
@@ -189,7 +206,8 @@ Armitage & Simon 2011; Hirose et al. 2009):
   - Eddies are born leading ~31° and swung to trailing by the Kerr shear. Birth cells are
     2 × (0.294, 0.556) H.
   - The fit was made against the rendered field with an exact numpy port of the shader.
-- **Spectrum:** two octaves with amplitudes 2^{−5j/6}, i.e. a k^{−11/3} per-mode spectrum.
+- **Spectrum:** two octaves with amplitudes 2^{−5j/6}, i.e. a k^{−11/3} per-mode spectrum of the
+  projected (vertically integrated) 2D field.
   A third octave would be finer than a Retina pixel's footprint and is omitted.
 - **Lifetimes:** P(r) · 2^{−2j/3}, on phase-locked bands L₀ 2ⁿ (L₀ = 4 M, 12 bands) blended
   across radius. Each band holds two staggered, independent generations with variance-preserving
@@ -198,6 +216,13 @@ Armitage & Simon 2011; Hirose et al. 2009):
   - The measured Lagrangian correlation time is 0.43–0.56 of an orbit.
 - **Dissipation:** log-normal, ε = exp(σ G − σ² var/2) with σ = 0.2. Temperature follows it,
   T ∝ ε^{1/4}, so the ripple is ~5% in temperature.
+  - σ = 0.2 is applied unfiltered at the photosphere, an upper bound: the vertical diffusion time
+    τH/c ≈ 350 × 0.29 ≈ 100 M exceeds an orbit at the peak (87 M), so sub-orbit fluctuations
+    would be partly smoothed before they escape.
+  - The colour correction f_col and the dilution stay at the unperturbed disk's values; the
+    ripple scales only the temperature. With f_col ∝ T^0.82 applied locally, a hotter patch above
+    ~30 kK would harden and look dimmer at 550 nm (d ln Y/d ln ε ≈ −0.29 at 50 kK, where the code
+    gives +0.30). Below ~30 kK the two agree.
 - **Filtering:**
   - Variance-preserving interpolation between table cells, using fitted neighbour correlations.
   - Footprint filter (1 + (f/c)²)^{−1/4} per axis, fitted to box averaging (max error 0.045).
@@ -208,6 +233,9 @@ Armitage & Simon 2011; Hirose et al. 2009):
   living 90 M.
 - Each spot shears as it ages: every radius keeps its own Ω(r).
 - Emissivity × (1 + boost), so T rises as (1 + boost)^{1/4}.
+- f_col and the dilution stay at the unperturbed values (as in §6). A full spot (1 + boost = 7)
+  at the 50 kK peak renders at 1.74× the base 550 nm luminance; with f_col re-evaluated at the
+  spot's temperature it would be 0.54× and bluer (colour temperature ~185 kK, not ~124 kK).
 - Count, size and brightness are choices; the motion is computed.
 
 ## 8. The sky is black
@@ -221,9 +249,10 @@ The camera sits inside the core of the cluster's giant central galaxy.
 - **Why it is black:**
   - The Sun's surface brightness is −26.74 mag spread over π (959.6″)² = 2.89e6 arcsec²:
     −26.74 + 2.5 log₁₀(2.89e6) = −10.6 mag arcsec⁻².
-  - At 550 nm a 50,000 K blackbody is ~133× brighter per area than the Sun's 5,772 K
-    (−2.5 log₁₀ 133 = −5.3 mag), so the disk is ≈ −15.9 mag arcsec⁻².
-  - Against the host's +14.5 to +16, the disk is ~30–32 magnitudes (~10¹²) brighter. At any
+  - At 550 nm a 50,000 K blackbody is ~133× brighter per area than the Sun's 5,772 K; with the
+    colour correction the render uses, f⁻⁴ B(f T) at f ≈ 1.5, it is ~41× (−2.5 log₁₀ 41 =
+    −4.0 mag), so the disk is ≈ −14.6 mag arcsec⁻².
+  - Against the host's +14.5 to +16, the disk is ~29–31 magnitudes (~10¹²) brighter. At any
     exposure that shows the disk, the sky is black.
 - Renders that show a sky expose it separately; this one does not.
 
@@ -267,8 +296,13 @@ tests or audits below.
   but its exact radius and colour are not.
 - **Fits, not computations:** the colour correction and the limb darkening are fits to
   disk-atmosphere models. Full calculations give a limb slope nearer 2.6, with up to 15% deviation.
-- **Not modelled:** returning radiation (disk self-irradiation), finite disk thickness (the disk
-  is drawn as a surface), gas inside the ISCO, polarisation, the corona and broad-line region
+- **Finite thickness (largest geometric approximation at 88°):** rays hit the midplane θ = π/2.
+  The line of sight is 2° above the plane and H ≈ 0.29 M at the peak, so a photosphere at 2–3 H
+  would move near-side crossings 17–25 M outward (1/tan 2° = 28.6) and up by 0.6–0.9 M. The
+  near-side band at r 6–15 M is drawn 0.31 M tall (9 M · cos 88°), against ~0.9–1.2 M for the
+  photosphere; thickness over projected width is ~4–5 here, ~0.15 at 45°. The lensed far-side
+  image is shifted, not hidden. A fix intersects rays with z = ±z_phot(r) from the τ profile.
+- **Not modelled:** returning radiation (disk self-irradiation), gas inside the ISCO, polarisation, the corona and broad-line region
   (X-ray only or outside the view), the recoil.
 - **Opacity mean:** the Rosseland-mean Kramers law is used where a Planck mean might suit
   emission better.
@@ -282,6 +316,20 @@ tests or audits below.
   stated. All verified and fixed here. It then asked for a dense full-contour shadow sweep and a
   machine-readable test ledger. Both are done (§3, §9). The sweep found a near-axis error the
   11-point test had missed; it is fixed (§3).
+- **Mixed-model fleet (2026-10-16, overnight):** DeepSeek, Muse, Nemotron, cat-jam, space-bunny,
+  Sonnet and Haiku, each finding checked by a second family and recomputed before acting.
+  - Fixed: the blackbody table cap (80 → 200 kK) and colour-temperature storage, an over-emitting
+    slab/atmosphere blend, Done's exponent (0.82), the midplane boundary constant (+½, not +1:
+    the faint outskirts beyond ~75 M were ~1 kK too hot), and an unused 12th lifetime band
+    (lifetimes stopped tracking P(r) beyond ~75 M).
+  - Disclosed: f_col held fixed under turbulence and spots (§6, §7), finite thickness (§10),
+    radiative smoothing of the turbulence (§6), the visible ring at the f_col knee (§5).
+  - The ledger's Eddington-ratio claim now integrates the physical flux the renderer uses (cgs,
+    both faces): L = 0.187 L_Edd, against 0.196 from the inputs (the flat area weight omits
+    relativistic factors).
+  - Open for the owner: a steady Novikov-Thorne disk in place of the spreading-ring snapshot
+    (three families raised it). A preview fills the frame with a hot opaque outer disk and loses
+    the dark lane and the lower lensed image.
 
 ## 12. Questions for reviewers
 

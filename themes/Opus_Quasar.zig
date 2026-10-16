@@ -8,11 +8,12 @@
 // microlensing); this is what that physics predicts. The Event Horizon Telescope's images
 // (M87*, Sgr A*) are a different, starving kind of black hole: hot, faint, see-through flows.
 // Modelled on H1821+643, the quasar at the centre of the galaxy cluster CL1821+643 (radio-quiet
-// by luminosity, though it drives a weak FR I-type jet with 280 kpc lobes, Blundell & Rawlings
+// by luminosity, though it drives a weak ~300 kpc-scale FR I radio structure, Blundell & Rawlings
 // 2001: invisible in optical light and far outside this view). Its measured spin, a* = 0.62
 // (+0.22 / -0.37, 90%; Sisk-Reynes, Reynolds, Matthews & Smith 2022, MNRAS 514, 2568, Chandra
 // X-ray reflection); its mass, 4e9 Msun (the centre of the consistent estimates, ~3-6e9; the
-// 2026 reverberation lag is in tension, unresolved); its luminosity, ~0.2 of Eddington's
+// 2026 H-beta reverberation lag, 83 d, is 5.6x short of R-L but tail-driven, the line core gives
+// 267 d: Li et al., arXiv:2601.18269); its luminosity, ~0.2 of Eddington's
 // (Fukuchi, Ichikawa et al. 2022: lambda = 0.18 from the full SED, 0.59 from X-rays): a
 // radiatively efficient thin disk. From Earth we see its inner disk at 44.6 +- 3.3 deg (90%);
 // this camera sits elsewhere around it, at 88 deg (a choice). It may also be a recoiling black
@@ -38,8 +39,8 @@
 //    in steady inflow and has the Page-Thorne flux shape (within 1% at 1.5 ISCO radii; mass
 //    budget closes to 0.3%); further out the inflow falls to zero at the radius where its mass
 //    flux reverses (5 ISCO radii, 19 M), so the flux drops below Page-Thorne (0.89 at 9 M, 0.55
-//    at 19 M). Its radii scale with the ISCO (3.75 M at this spin), so it is the same solution
-//    at any spin. Beyond
+//    at 19 M). Its recipe (ring and snapshot) scales with the ISCO (3.75 M at this spin); the
+//    solution itself is recomputed per spin (the Kerr coefficients depend on it). Beyond
 //    it the disk spreads outward, and its dissipation, temperature and opacity fall off
 //    together, so it thins out with no edge. The stress follows the closure, not the local
 //    pressure: W = 1.5 alpha (P/rho) r holds only at the flux peak, where it is set (further
@@ -137,7 +138,7 @@ pub const INCL: f64 = 88.0 * math.pi / 180.0;
 /// Checked by `make claims` through probeEquatorialRay (equatorial light paths).
 pub const claims = sdk.Claims{ .metric = .kerr, .spin = SPIN, .inclination_deg = 88.0 };
 pub const R_OUT: f64 = 48.0 * R_ISCO; // geometry only: the computed disk has faded to nothing here
-/// The disk solution's radii scale with the ISCO, so it is the same solution at any spin.
+/// The disk recipe's radii scale with the ISCO (the solution is recomputed per spin).
 pub const R_ISCO: f64 = isco(SPIN);
 // Gas denser than this (line of sight) is drawn opaque: e^-40 of what lies behind leaks, under
 // 1e-3 of display white even behind the brightest disk (light is composited before tone mapping).
@@ -340,6 +341,7 @@ pub const DiskProfile = struct {
     pt_ratio_spread: f64, // max/min of F / F_PageThorne inside SNAP_RREV / 4
     pt_ratio_at: [5]f64, // F / F_PageThorne (normalised at the ISCO) at PT_CHECK_R
     lum_ratio: f64, // snapshot luminosity / a steady Page-Thorne disk's at the same ISCO inflow
+    l_edd_abs: f64, // both faces' integral of the physical (cgs) flux, flat area weight, / L_Edd
 };
 
 /// Solves the disk. `pt` is the Page-Thorne flux on the same grid (shape only), used to set the
@@ -480,6 +482,15 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
     const eff = 1.0 - orbit(a, r_in).E;
     const mdot = EDD_RATIO * L_EDD_PER_MSUN * BH_MASS_SUN / (eff * C_CGS * C_CGS);
     const fscale = mdot * math.pow(f64, C_CGS, 6) / (G_CGS * G_CGS * m_g * m_g) / (4.0 * math.pi) / norm;
+    {
+        // Absolute check of fscale: the flux the renderer uses, integrated in cgs over both faces.
+        var l_abs: f64 = 0.0;
+        for (1..PT_N) |k| {
+            const rk = r_in * @exp(dl * @as(f64, @floatFromInt(k)));
+            l_abs += 2.0 * 2.0 * math.pi * fgAt(&r, &fg, rk) * fscale * rk * rk * dl * rg * rg;
+        }
+        out.l_edd_abs = l_abs / (L_EDD_PER_MSUN * BH_MASS_SUN);
+    }
     // Peak of the flux, then the stress there from the alpha closure (gas + radiation pressure).
     var ipk: usize = 1;
     for (1..N) |i| {
@@ -488,7 +499,7 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
     const Local = struct { sigma: f64, tes: f64, ta: f64, tc: f64, cs2: f64, rho: f64 };
     // Local structure: Sigma from the flux and the closure's stress; scale height from vertical
     // hydrostatic balance with the local gas + radiation pressure; midplane temperature from
-    // radiative diffusion (uniform heating: T_c^4 = (3/8 tau_half + 1) T_eff^4). Iterated jointly.
+    // radiative diffusion (uniform heating: T_c^4 = (3/8 tau_half + 1/2) T_eff^4, Eddington surface T^4(0) = T_eff^4 / 2). Iterated jointly.
     const local = struct {
         fn f(aa: f64, rr: f64, fphys: f64, wphys: f64, rgc: f64, tgc: f64) Local {
             const teff4 = fphys / SIGMA_SB;
@@ -504,7 +515,7 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
                 rho = sg * om / (2.0 * @sqrt(cs2)); // Sigma / 2H, H = c_s / Omega
                 tes = KAPPA_ES * sg / 2.0;
                 ta = KAPPA_KRAMERS * rho * math.pow(f64, @max(tc, 1.0), -3.5) * sg / 2.0;
-                const tn = @sqrt(@sqrt(0.375 * (tes + ta) * teff4 + teff4));
+                const tn = @sqrt(@sqrt(0.375 * (tes + ta) * teff4 + 0.5 * teff4));
                 const cn = K_BOLTZ * tn / (0.6 * M_PROTON) + A_RAD * math.pow(f64, tn, 4) / (3.0 * rho);
                 if (@abs(tn - tc) < 1e-9 * tc and @abs(cn - cs2) < 1e-9 * cs2) break;
                 tc = 0.5 * (tc + tn);
@@ -550,8 +561,6 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
         // the sign that neither Kramers nor electron scattering applies there (see header).
         const ta_f = 2.0 * lk.ta;
         const tem_slab = @min(ta_f * (1.0 + tes_f), @sqrt(ta_f * (ta_f + tes_f)));
-        const emiss = 1.0 - 2.0 * expE3(tem_slab); // grey isothermal slab: flux out = sigma T_s^4 (1 - 2 E3)
-        const ts_slab = @min(@sqrt(@sqrt(fphys / (SIGMA_SB * @max(emiss, 1e-300)))), T_MAX_SOURCE);
         // Where the gas is thick to scattering (tau_ext >~ 10) it is a scattering atmosphere: its
         // spectrum harder than T_eff is what the colour correction f (buildTables) describes, at
         // T_eff and with full emission. The slab's own boost of T_s (energy through a thin
@@ -559,9 +568,11 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
         // thin overall; blended in log tau_ext between 1 and 10.
         const tau_ext = tes_f + ta_f;
         const w_atm = math.clamp(@log10(@max(tau_ext, 1e-30)), 0.0, 1.0);
-        const t_eff = @sqrt(@sqrt(fphys / SIGMA_SB));
-        const ts = @exp((1.0 - w_atm) * @log(ts_slab) + w_atm * @log(t_eff));
+        // The emission depth is blended; the source temperature then follows from energy
+        // conservation with it (a grey isothermal slab: flux out = sigma T_s^4 (1 - 2 E3(tau_em)) = F), so the band neither over- nor
+        // under-emits (T_eff where thick, the slab's T_s where thin).
         const tem = @exp((1.0 - w_atm) * @log(@max(tem_slab, 1e-30)) + w_atm * @log(@max(tem_slab, tau_ext)));
+        const ts = @min(@sqrt(@sqrt(fphys / (SIGMA_SB * @max(1.0 - 2.0 * expE3(tem), 1e-300)))), T_MAX_SOURCE);
         out.T[k] = @floatCast(ts);
         out.lt_ext[k] = @floatCast(@max(@log(tau_ext), -60.0));
         out.lt_em[k] = @floatCast(@max(@log(tem), -60.0));
@@ -791,7 +802,7 @@ pub fn redshift(a: f64, r: f64, L: f64) f64 {
 
 pub const BB_N: usize = 1024;
 pub const BB_TMIN: f64 = 300.0;
-pub const BB_TMAX: f64 = 80_000.0;
+pub const BB_TMAX: f64 = 200_000.0; // above the hottest observed colour temperature (~105 kK: g f T on the approaching inner disk)
 
 fn lobe(l: f64, mu: f64, s1: f64, s2: f64) f64 {
     const t = (l - mu) / (if (l < mu) s1 else s2);
@@ -891,7 +902,7 @@ const Rec = extern struct {
     phi: u16, // emission azimuth + Omega * travel time, Q16 of 2 pi
     cov: u8, // disk coverage 0..255
     fr: u8 = 0, // pixel footprint on the disk: radial extent in quarter r-bins (saturating)
-    tobs: f16 = 0, // observed blackbody temperature g*T, for re-coloring hotter gas
+    tobs: f16 = 0, // observed colour temperature g*f*T in kK, for re-coloring hotter gas
     fp: u8 = 0, // pixel footprint: azimuthal extent in units of 64/65536 turn (saturating)
     bf: u8 = 0, // share of bg (luminance, /255) that lies behind this pixel's translucent gas
     resp: u8 = 0, // CPU turbulence: d ln(luminance) / d ln(eps) at tobs (T ~ eps^(1/4)), * RESP_SCALE
@@ -1133,7 +1144,7 @@ pub const State = struct {
             const period = 2.0 * math.pi * (r * @sqrt(r) + self.geo.a);
             for (0..N_OCT) |oct| {
                 const life = period * math.pow(f64, 2.0, -2.0 * @as(f64, @floatFromInt(oct)) / 3.0);
-                self.sband[oct][b] = @floatCast(math.clamp(std.math.log2(life / BAND_L0), 0.0, @as(f64, NBAND - 2) - 1e-3));
+                self.sband[oct][b] = @floatCast(math.clamp(std.math.log2(life / BAND_L0), 0.0, @as(f64, NBAND - 1) - 1e-3));
             }
             const sb = self.sband[0][b];
             const n0 = @floor(sb);
@@ -1740,7 +1751,7 @@ pub const State = struct {
                                 .rbin = first.rbin,
                                 .phi = first.phi,
                                 .cov = @intCast(nd * 255 / nsamp),
-                                .tobs = @floatCast(@min(first.tobs, 60000.0)),
+                                .tobs = @floatCast(first.tobs / 1000.0), // kK: f16 tops out at 65504
                                 .tq = first.tq,
                                 .bf = bf,
                                 .resp = self.respByte(first.tobs),
@@ -2143,7 +2154,7 @@ pub const State = struct {
                     if (boost > 1e-3 and rc.tobs > 0) {
                         // Hotter gas is a hotter blackbody (T ~ emission^(1/4)): Planck gives its
                         // new color and brightness; ratio carries this pixel's coverage/normalisation.
-                        const t0: f64 = @floatCast(@as(f32, rc.tobs));
+                        const t0: f64 = @as(f64, @floatCast(@as(f32, rc.tobs))) * 1000.0; // stored in kK
                         const hot = self.bbLookup(t0 * @sqrt(@sqrt(1.0 + @as(f64, boost))));
                         const lum0 = luma(.{ rc.rgb[0], rc.rgb[1], rc.rgb[2] });
                         spot_scale = @floatCast(lum0 / @max(luma(self.bbLookup(t0)), 1e-12));
@@ -2207,10 +2218,11 @@ pub fn turbSeed(j: u32, n: u32, k: u32) u32 {
 
 /// Colour-correction factor of an accretion-disk atmosphere at effective temperature T (Done,
 /// Davis, Jin, Blaes & Ward 2012, MNRAS 420, 1848): 1 below 3e4 K (hydrogen neutral, absorption
-/// thermalises), (T / 3e4 K)^0.83 to 1e5 K, (72 keV / kT)^(1/9) above (electron scattering).
+/// thermalises), (T / 3e4 K)^0.82 to 1e5 K (their eq. 2), (72 keV / kT)^(1/9) above (electron
+/// scattering). The published branches meet to 1.6% at 1e5 K; this disk never reaches it.
 pub fn colourFactor(T: f64) f64 {
     if (!(T > 3.0e4)) return 1.0;
-    if (T < 1.0e5) return math.pow(f64, T / 3.0e4, 0.83);
+    if (T < 1.0e5) return math.pow(f64, T / 3.0e4, 0.82);
     return math.pow(f64, 72.0 / (T * 8.617333e-8), 1.0 / 9.0);
 }
 
@@ -2528,7 +2540,7 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
             return .{ dd.T[k], @exp(@as(f64, dd.lt_ext[k])), @exp(@as(f64, dd.lt_em[k])) };
         }
     }.f;
-    std.debug.print("\n  disk: T_peak {d:.0} K at r={d:.2}, tau_es {d:.0}, Sigma {e:.2}, H/r {d:.4}, mass budget {d:.4}, F/F_PT spread {d:.3}, L/L_PT {d:.3}\n", .{ d.t_peak, d.r_peak, d.tau_es_peak, d.sigma_peak, d.h_over_r_peak, d.mass_budget, d.pt_ratio_spread, d.lum_ratio });
+    std.debug.print("\n  disk: T_peak {d:.0} K at r={d:.2}, tau_es {d:.0}, Sigma {e:.2}, H/r {d:.4}, mass budget {d:.4}, F/F_PT spread {d:.3}, L/L_PT {d:.3}, L/L_Edd {d:.4} (inputs: {d:.4})\n", .{ d.t_peak, d.r_peak, d.tau_es_peak, d.sigma_peak, d.h_over_r_peak, d.mass_budget, d.pt_ratio_spread, d.lum_ratio, d.l_edd_abs, EDD_RATIO * d.lum_ratio });
     for (PT_CHECK_R, d.pt_ratio_at) |rr, q| std.debug.print("  F/F_PT at r {d}: {d:.3}\n", .{ rr, q });
     for ([_]f64{ 1.5, 5, 10, 15, 20, 25, 30, 40 }) |ri| {
         const rr = ri * R_ISCO;
@@ -2538,20 +2550,20 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
     const cond = "a = 0.62, 4e9 Msun, alpha = 0.1, ISCO inflow 0.36 Mdot_Edd, ring at 4 r_isco evolved to flux reversal at 5 r_isco";
     const mb = "Mummery & Balbus 2019 GR thin-disk equation";
     try claim("opus_quasar.disk.mass_budget", "The evolved disk conserves mass (accreted + remaining = initial)", mb, cond, "mass budget", d.mass_budget, 0.99, 1.01);
-    try claim("opus_quasar.disk.page_thorne_inner", "Near the ISCO the snapshot is steady inflow (Page-Thorne)", "Page & Thorne 1974, at the snapshot's ISCO inflow", cond, "F/F_PT spread inside 1.5 r_isco", d.pt_ratio_spread, null, 1.15);
+    try claim("opus_quasar.disk.page_thorne_inner", "Near the ISCO the snapshot is steady inflow (Page-Thorne)", "Page & Thorne 1974, at the snapshot's ISCO inflow", cond, "F/F_PT spread inside 1.25 r_isco (SNAP_RREV / 4)", d.pt_ratio_spread, null, 1.15);
     try claim("opus_quasar.disk.t_peak", "Peak disk temperature is quasar-like", "H1821+643: L ~ 0.2 L_Edd at 4e9 Msun (Fukuchi, Ichikawa et al. 2022)", cond, "T_peak (K)", d.t_peak, 40_000.0, 60_000.0);
-    try claim("opus_quasar.disk.eddington", "The snapshot shines at H1821+643's measured Eddington ratio", "lambda_Edd = 0.18 (full SED; Fukuchi, Ichikawa et al. 2022)", cond, "L / L_Edd", EDD_RATIO * d.lum_ratio, 0.17, 0.23);
+    try claim("opus_quasar.disk.eddington", "The snapshot shines at H1821+643's measured Eddington ratio", "lambda_Edd = 0.18 (full SED; Fukuchi, Ichikawa et al. 2022)", cond, "L / L_Edd: cgs flux integrated over both faces (flat area)", d.l_edd_abs, 0.17, 0.23);
     try claim("opus_quasar.disk.opaque_10", "The disk is opaque at 10 ISCO radii", "electron scattering + Kramers opacity", cond, "tau_ext at 10 r_isco", at(&d, r_in, dl, 10.0 * R_ISCO)[1], 10.0, null);
     try claim("opus_quasar.disk.thin_45", "The disk has faded to nothing by 45 ISCO radii (no edge)", "electron scattering + Kramers opacity", cond, "tau_ext at 45 r_isco", at(&d, r_in, dl, 45.0 * R_ISCO)[1], null, 1e-2);
 }
 
 test "colour correction and limb darkening: continuity, flux conservation, thin limit" {
-    // Done et al. 2012: f = 1 below 3e4 K and continuous at 1e5 K (the 0.83 exponent joins the
-    // Compton branch to 0.3%).
+    // Done et al. 2012: f = 1 below 3e4 K; their published branches meet to 1.6% at 1e5 K
+    // (the 0.82 exponent of their eq. 2 against the (72 keV/kT)^(1/9) Compton branch).
     const done = "Done, Davis, Jin, Blaes & Ward 2012 colour correction";
     try claim("opus_quasar.fcol.cold", "No colour correction below 3e4 K", done, "T = 2.9e4 K", "f_col", colourFactor(2.9e4), 1.0, 1.0);
-    try claim("opus_quasar.fcol.continuous", "Colour correction is continuous at 1e5 K", done, "T = 1e5 K +- 0.01%", "f(0.9999e5) / f(1.0001e5) - 1", colourFactor(0.9999e5) / colourFactor(1.0001e5) - 1.0, -5e-3, 5e-3);
-    try claim("opus_quasar.fcol.mid", "Colour correction on the (T/3e4)^0.83 branch", done, "T = 3.7e4 K", "f_col", colourFactor(3.7e4), 1.15, 1.2);
+    try claim("opus_quasar.fcol.continuous", "Colour-correction branches meet within 2% at 1e5 K (published fits: 1.6%)", done, "T = 1e5 K +- 0.01%", "f(0.9999e5) / f(1.0001e5) - 1", colourFactor(0.9999e5) / colourFactor(1.0001e5) - 1.0, -2e-2, 2e-2);
+    try claim("opus_quasar.fcol.mid", "Colour correction on the (T/3e4)^0.82 branch", done, "T = 3.7e4 K", "f_col", colourFactor(3.7e4), 1.15, 1.2);
     // Limb darkening on a thick atmosphere conserves the flux of an isotropic emitter:
     // 2 int_0^1 I(mu) mu dmu = 1; and it switches off where the gas is thin.
     var flux: f64 = 0.0;
