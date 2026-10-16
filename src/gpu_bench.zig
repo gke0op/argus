@@ -145,7 +145,8 @@ fn probeEngine(st: *theme.State) !bg.Engine {
 
 /// Full-contour sweep: the theme's Bardeen samples, each edge bisected along the ray from the
 /// shadow centre on the GPU (f32, the engine's probe kernel) and on the CPU (f64, the theme's
-/// traceRay). Prints max and RMS per path and their ledger records; true if all pass.
+/// traceRay). Prints max and RMS per path, and the GPU's ledger records (the theme's test
+/// records the CPU's); true if the GPU's pass.
 fn contourSweep(st: *theme.State) !bool {
     var e = try probeEngine(st);
     defer e.deinit();
@@ -201,8 +202,9 @@ fn contourSweep(st: *theme.State) !bool {
         std.debug.print(" shadow contour ({s} {s})      : {d} points, max {e:.2} M (off-axis {e:.2}, polar band {e:.2}), rms {e:.2} M (off-axis {e:.2}), {d} bracket failures\n", .{
             if (path[0] == 'g') "GPU" else "CPU", if (path[0] == 'g') "f32" else "f64", N, s.max, s.max_off_axis, s.max_polar, s.rms, s.rms_off_axis, s.bad,
         });
+        if (path[0] == 'c') continue; // the theme's test records the CPU path (same samples)
         const cond = try std.fmt.bufPrint(cb, "a = {d}, i = 88 deg, r_obs = 1000 M; {d} points on the full critical curve (both halves, clustered toward the equatorial ends) + {d} in the polar band |alpha| < {d} M; {s}; {d} bisections along rays from the shadow centre", .{
-            theme.SPIN, 2 * theme.CONTOUR_N - 2, 2 * theme.POLAR_N, theme.POLAR_BAND, if (path[0] == 'g') "GPU f32 (bh_gpu probe kernel)" else "CPU f64 (theme traceRay, ReleaseFast)", theme.CONTOUR_ITERS,
+            theme.SPIN, 2 * theme.CONTOUR_N - 2, 2 * theme.POLAR_N, theme.POLAR_BAND, "GPU f32 (bh_gpu probe kernel)", theme.CONTOUR_ITERS,
         });
         const text = "Traced shadow edge lies on the Kerr critical curve over the whole contour";
         const ref = "Bardeen 1973 analytic critical curve";

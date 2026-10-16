@@ -3,7 +3,9 @@
 *Working title of the Argus wallpaper `themes/Opus_Quasar.zig` (name may change). This document
 states what the renderer computes, from which equations and numbers, how it was checked, and
 what is chosen rather than computed. It is meant for review: please check the physics, not
-the code style. Numbers are from the code and its tests at commit `dd1cbf6`.*
+the code style. Numbers are from the code and its tests at commit `dd1cbf6`; §3 and §9 are from
+the test ledger [`docs/opus_quasar_ledger.json`](opus_quasar_ledger.json), which names its own
+commit.*
 
 Units: G = c = M = 1 unless stated. M = mass of the black hole. For M = 4e9 Msun:
 1 M of length = 5.91e12 m (39.5 AU), 1 M of time = 19,700 s.
@@ -40,12 +42,42 @@ black hole fed by a thin, hot accretion disk.
 - **Geodesics:** exact Kerr null geodesics in Boyer–Lindquist coordinates, Hamiltonian form,
   integrated with RK4. p_r is re-solved from the null condition at every step; rays are traced
   backward from the camera.
-- **Shadow test:** at 11 sampled points the traced shadow edge matches Bardeen's analytic
-  critical curve to 7.5e-6 M, on both the CPU (f64) and the GPU (f32).
-  - This validates the ray solver at those points. It does not prove the maximum error over the
-    whole contour (a dense sweep with max and RMS per path would).
-  - It is also far finer than the display: one pixel is ~0.04 M (48 M over 1,200 pixels), so this
-    is not a claim about the drawn silhouette's pixel accuracy.
+- **Shadow test (full contour):** the traced shadow edge is compared with Bardeen's analytic
+  critical curve at 766 points, at the theme's spin (0.62), inclination (88°) and camera
+  distance (1000 M).
+  - Samples: 510 over the whole curve (both halves; photon-orbit radius from the prograde to
+    the retrograde end, spaced as (1 − cos πu)/2 so they are dense where the curve meets the
+    equator), plus 256 in the polar band |α| < 0.004 M (see below).
+  - Each edge is bisected along the ray from the shadow's centre (the shadow is convex), 32
+    times, to 2e-10 M. The error is the radial offset along that ray, an upper bound on the
+    distance to the curve.
+  - The same samples run on the CPU (f64, `zig test themes/Opus_Quasar.zig`) and the GPU
+    (f32, the Metal probe kernel, `make gpu-bench`). Tolerances were set before measuring.
+
+  | Path | max, all points | max off-axis | RMS, curve sweep | RMS off-axis | max, polar band |
+  |---|---|---|---|---|---|
+  | CPU f64 | 8.2e-3 M | 7.6e-6 M | 1.5e-4 M | 2.7e-6 M | 8.2e-3 M |
+  | GPU f32 | **1.7e-2 M (fails)** | 7.8e-5 M | 1.3e-4 M | 7.3e-6 M | 1.7e-2 M |
+  | Tolerance | 1e-2 M (¼ pixel) | 1e-4 M | 1e-3 M | 1e-4 M | reported |
+
+  - **Off the spin axis** the ray solver matches the critical curve to < 1e-5 M on the CPU and
+    < 1e-4 M on the GPU, over the whole contour.
+  - **On it (found by the sweep):** rays with angular momentum L ≈ 0 (|α| ≲ 0.002 M) pass close
+    to the spin axis, where Boyer–Lindquist coordinates are singular and the step control is too
+    coarse. The edge there is off by up to 8.2e-3 M (CPU) and 1.7e-2 M (GPU, 0.4 pixel). The
+    band is ~1/20 of a pixel wide, at the top and bottom of the shadow.
+  - The GPU's polar maximum fails the ¼-pixel tolerance: the one failing record in the ledger.
+    It was always there. The old 11-point test (worst 7.5e-6 M) never sampled the band.
+  - In a trial, a finer near-axis step floor (2e-5 instead of 2e-4) cut the CPU's polar error
+    tenfold, to 8.6e-4 M; 2e-6 made it worse again. The fix is open (§10).
+  - Scale: one pixel is ~0.04 M (48 M over 1,200 pixels). Off-axis, the test is far finer than
+    the display; it is a check of the ray solver, not of the drawn silhouette.
+- **Equatorial light paths (`make claims`):** captured below the critical impact parameter
+  and deflected by the Kerr angle, against a reference written independently of the theme
+  (Bardeen's closed-form b_c, and its own quadrature of the orbit equation).
+  - b_c matches to 2e-9 (prograde) and 4e-8 (retrograde), relative.
+  - Deflections at 1.3–3 b_c match to ≤ 3.5e-5 rad.
+  - Status: REFERENCE-VALIDATED.
 - **ISCO:** Bardeen–Press–Teukolsky. r_isco = 3.745 M at a = 0.62, efficiency η = 1 − E_isco = 0.093.
 - **Light-travel time:** each pixel's pattern phase includes the photon's coordinate travel time,
   relative to T_ref = r_obs + 2 ln(r_obs/2). Lensed images therefore lag the direct one.
@@ -184,10 +216,21 @@ Each test validates only its own claim: the Bardeen comparison checks the light 
 disk's luminosity, the turbulence statistics or the radiative transfer, which have their own
 tests or audits below.
 
-- **Tests:** shadow edge vs Bardeen; photon orbits; geodesic invariants (null condition, Carter
-  constant); Page-Thorne limits; blackbody colours; the redshift sign; the disk solution's mass
-  budget, Page-Thorne limit, temperature and luminosity; colour-correction continuity and
-  limb-darkening flux conservation.
+- **Tests:** full-contour shadow edge vs Bardeen, CPU and GPU (§3); equatorial b_c and
+  deflection vs an independent reference (`make claims`); photon orbits; geodesic invariants
+  (null condition, Carter constant); Page-Thorne limits; blackbody colours; the redshift sign;
+  the disk solution's mass budget, Page-Thorne limit, temperature and luminosity;
+  colour-correction continuity and limb-darkening flux conservation.
+- **Test ledger:** `make ledger` writes [`docs/opus_quasar_ledger.json`](opus_quasar_ledger.json),
+  one record per checked claim, from the theme's tests, `make claims` and `make gpu-bench`.
+  - Each record holds: the claim, the reference and its source, the test conditions, the
+    measured quantity and its units, the bounds, pass/fail, and the command that produced it.
+  - The tests assert through the same function that writes the record, so the ledger's
+    tolerance is the test's.
+  - Values with no bound (r_isco, η, the polar-band maximum, GPU/CPU pixel agreement) are
+    reported, not asserted, and marked `"pass": null`.
+  - Current ledger: 62 records; 54 asserted, of which 53 pass and 1 fails (the GPU's polar-band
+    maximum, §3); 8 reported.
 - **Reviews:** two independent physics reviews by Gemini 4 Argon, and two Claude Opus audits that
   wrote their own code (disk solver re-solved independently to 0.1%; turbulence measured on the
   tables). Every finding was re-derived before fixing; rejected findings are recorded in the
@@ -212,6 +255,9 @@ tests or audits below.
   (X-ray only or outside the view), the recoil.
 - **Opacity mean:** the Rosseland-mean Kramers law is used where a Planck mean might suit
   emission better.
+- **Near-axis step control:** rays that pass within a band ~0.002 M wide of the spin axis are
+  integrated too coarsely (§3). The shadow edge there is off by up to 0.4 pixel on the GPU.
+  This is not yet fixed.
 
 ## 11. Reviews so far
 
@@ -219,8 +265,9 @@ tests or audits below.
   inclination distinction. It corrected the Sun's surface brightness (−10.6, not −16 mag arcsec⁻²;
   the conclusion stands) and the spin-independence claim (the recipe scales, not the solution).
   It also asked for the Ṁ_Edd convention, the shadow test's scope and the observer lapse to be
-  stated. All verified and fixed here. Still open: a dense full-contour shadow sweep, and a
-  machine-readable test ledger (claim, reference, conditions, tolerance, result).
+  stated. All verified and fixed here. It then asked for a dense full-contour shadow sweep and a
+  machine-readable test ledger. Both are done (§3, §9). The sweep found the near-axis error the
+  11-point test had missed.
 
 ## 12. Questions for reviewers
 
