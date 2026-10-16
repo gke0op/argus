@@ -65,7 +65,7 @@
 //  * Camera: orthographic (we are 400 pc away), an exposure, an asinh stretch and a soft
 //    star image (a telescope's, not an eye's). It starts on Earth's line of sight, where
 //    it shows the measured maps (median 0.25/255 of a display level off them, 99% within
-//    0.8/255: tools/orion_bake/verify_earth_view.py), then swings slowly up to 4.3 deg
+//    0.8/255: tools/orion_bake/verify_earth_view.py), then swings slowly up to 2.4 deg
 //    round the nebula and back, every 16 minutes. Off Earth's line of sight what you see
 //    is the fitted geometry, not more data; its least certain part is the flow's
 //    thickness (tools/orion_bake/README.md).
@@ -94,13 +94,14 @@
 
 constant int   PALETTE   = 0;        // 0 = true colour, 1 = Hubble SHO false colour (labelled)
 constant float D_VEIL    = 1.0f;     // pc in front of theta1 Ori C (O'Dell et al. 2009)
-constant float VIEW_W_PC = 0.51f;    // field of view across the screen's width...
-constant float VIEW_H_PC = 0.48f;    // ...or its height, whichever is tighter. The data are 0.68 x 0.57 pc;
-                                     // the margin keeps the Veil, 1.1 pc above the pivot, inside them at
-                                     // full yaw (it shifts 1.1 x tan 4.3 deg = 0.084 pc)
+constant float VIEW_W_PC = 0.60f;    // field of view across the screen's width...
+constant float VIEW_H_PC = 0.50f;    // ...or its height, whichever is tighter. The data are 0.68 x 0.57 pc;
+                                     // with the yaw below, the Veil (1.1 pc above the pivot) stays within
+                                     // 4 mpc of the data at full swing (1.1 x tan 2.4 deg = 0.046 pc)
 constant float2 VIEW_C   = float2(-0.015f, -0.045f);   // view centre, pc from theta1 Ori C (west, north)
-constant float ORBIT_YAW = 0.075f;   // radians (4.3 deg)
-constant float ORBIT_PITCH = 0.045f; // radians (2.6 deg)
+constant float ORBIT_YAW = 0.042f;   // radians (2.4 deg)
+constant float ORBIT_PITCH = 0.035f; // radians (2.0 deg)
+constant float EDGE_TEX  = 12.0f;    // the gas fades out over the last 12 texels (0.014 pc) of the data
 constant float ORBIT_T   = 480.0f;   // seconds per yaw swing; pitch takes twice as long
 constant float PIVOT_Z   = -0.12f;   // the orbit turns about this depth (pc): the front stays put
 constant float GRAZE_MAX = 4.0f;     // front-sheet brightening at grazing view (a sheet is not infinitely thin)
@@ -715,6 +716,15 @@ static float2 st_uv(float2 xy, uint blk) {
     return float2((col + 0.5f) / float(DATA_W), (jn + 0.5f + float(blk * DATA_H)) / float(3u * DATA_H + 1u));
 }
 
+// 1 inside the measured field, falling to 0 at its edge: an orbiting ray that samples past the
+// data sees the gas fade out instead of the edge values smeared outward. Nothing is invented
+// beyond the field.
+static float in_data(float2 xy) {
+    const float col = STAR_C_TEX.x + xy.x / TEXEL_PC, row = STAR_C_TEX.y + xy.y / TEXEL_PC;
+    const float d = min(min(col, float(DATA_W) - 1.0f - col), min(row, float(DATA_H) - 1.0f - row));
+    return smoothstep(0.0f, EDGE_TEX, d);
+}
+
 // The flow's emission profile, u = h / R0 over 0..3 (state's last row): CDF in .x, PDF in .y,
 // and in .z the mean height of the emission above u.
 static float3 flow_prof(texture2d<float> st, sampler smp, float u) {
@@ -803,7 +813,8 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
         const uint slot = atomic_fetch_add_explicit(&nS, 1u, memory_order_relaxed);
         if (slot >= SCAP) continue;
         // where the line from the star toward the camera (-d) crosses the Veil
-        const float c = st.sample(smp, st_uv(s.xy - V.d.xy * ((D_VEIL - s.z) / max(-V.d.z, 0.2f)), 1u)).w + C_FG;
+        const float2 vxy = s.xy - V.d.xy * ((D_VEIL - s.z) / max(-V.d.z, 0.2f));
+        const float c = st.sample(smp, st_uv(vxy, 1u)).w + C_FG;
         // each star is dimmed through its own spectrum in X, Y and Z
         const float3 T = exp(-2.3025851f * c * STAR_K[i].xyz);
         // the star image's light sums to 1: Gaussian core (1) + the wing out to the cull radius
@@ -866,8 +877,9 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
             const float3 p1 = flow_prof(st, smp, v1);
             const float avg = abs(dv) > 1e-3f ? (p1.x - P0) / dv : flow_prof(st, smp, 0.5f * (v0 + v1)).y;
             const float w = avg * dl / Rv;
-            I_ha += w * 0.5f * (s0.x + s1.x);
-            I_o3 += w * 0.5f * (s0.y + s1.y);
+            const float e = in_data(o.xy + 0.5f * (t0 + t1) * d.xy);
+            I_ha += w * e * 0.5f * (s0.x + s1.x);
+            I_o3 += w * e * 0.5f * (s0.y + s1.y);
             t0 = t1; s0 = s1; v0 = v1; P0 = p1.x; step *= 1.75f;
             if (v1 >= 3.0f) break;
         }
@@ -875,20 +887,22 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
         const float v_tail = flow_prof(st, smp, v0).z;
         const float t_tail = t0 - (v_tail - v0) * max(s0.w, 1e-4f) / max(-dz, 0.3f);
         const float4 st_tail = st.sample(smp, st_uv(o.xy + t_tail * d.xy, 0u));
-        I_ha += tail * st_tail.x;
-        I_o3 += tail * st_tail.y;
+        const float e_tail = in_data(o.xy + t_tail * d.xy);
+        I_ha += tail * e_tail * st_tail.x;
+        I_o3 += tail * e_tail * st_tail.y;
     }
 
     // 3) the front sheet ([N II], [S II], [O I]) seen at its angle
     const float2 hit_xy = o.xy + t_hit * d.xy;
-    const float4 sheet = st.sample(smp, st_uv(hit_xy, 1u));
+    const float4 sheet = st.sample(smp, st_uv(hit_xy, 1u)) * float4(float3(in_data(hit_xy)), 1.0f);
     const float4 nb = st.sample(smp, st_uv(hit_xy, 2u));
     const float3 nrm = nb.xyz;
     const float graze = min(nrm.z / max(abs(dot(nrm, d)), 1e-3f), GRAZE_MAX);
 
     // 4) the Veil and the ISM in front
     const float t_veil = (D_VEIL - o.z) / dz;
-    const float c_veil = st.sample(smp, st_uv(o.xy + t_veil * d.xy, 1u)).w;
+    const float2 veil_xy = o.xy + t_veil * d.xy;
+    const float c_veil = st.sample(smp, st_uv(veil_xy, 1u)).w;   // stays within 4 mpc of the data
     const float c = c_veil + C_FG;
 
     float3 rgb;

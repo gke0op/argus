@@ -43,7 +43,7 @@ in numpy from the shipped data and compares the two.
 | Assumed | The Veil as a thin screen 1 pc in front of θ¹ Ori C | O'Dell et al. 2009 (published range 0.4–3 pc) |
 | Assumed | No dust inside the ionised gas, and no scattered light | |
 | Assumed (statistical) | The fainter cluster stars | ONC structure (Da Rio et al. 2014), Kroupa IMF, rough 1 Myr luminosities |
-| **Chosen** | Orbit (±4.3° yaw, ±2.6° pitch, 8 min), exposure, asinh stretch, chroma compression, star image | display |
+| **Chosen** | View 0.60 pc wide; orbit (±2.4° yaw, ±2.0° pitch, 16 min); the gas fading over the last 0.014 pc of the data; exposure, asinh stretch, chroma compression, star image | display |
 
 ## The model
 
@@ -104,7 +104,7 @@ in numpy from the shipped data and compares the two.
   the ions spread out on the sky by height. The emission peaks fall in order going toward
   the Trapezium: [O I] −26 mpc, [N II] −9, [S II] 0, Hβ +28, [O III] +29. That is the
   model's layering. The whole span is 55 mpc; drawing the low ions as one sheet misplaces
-  them by at most 4 mpc (3.6 texels) at the widest yaw. Toward the star, Hα doesn't drop to
+  them by at most 3 mpc at the widest yaw. Toward the star, Hα doesn't drop to
   half within 46 mpc of its peak, so R0 ≳ 0.13 pc, consistent with the fit (0.26–1.5 pc).
 - **Dust.** Edenhofer's map toward θ¹ Ori C puts almost nothing in front of 360 pc
   (A_V ≈ 0.08 mag, uniform over all 64 sightlines). So 93% of the median measured
@@ -169,8 +169,8 @@ The R0 clip at 1.5 pc (4.9% of texels) stays: beyond it the layer would reach th
   gives R0 ≈ 0.8 pc; the [Cl III] density gives 1.9 times that. Older 2e17 cm estimates of
   the layer point the other way, to about half. So R0 is known to within roughly a factor
   of 2.
-  - On screen, at the orbit's widest yaw, 0.6× or 1.7× R0 moves the median pixel by 3/255
-    and the 99th percentile by 11–12/255.
+  - On screen, at 4.3° yaw (well beyond the orbit's 2.4°), 0.6× or 1.7× R0 moves the
+    median pixel by 3/255 and the 99th percentile by 11–12/255.
   - From Earth it changes nothing: the image is the data either way.
 - **Absolute depth.** The depth scales as √Q (Q itself is ±10%) and with the assumed
   distance. The dust absorbing ionising photons inside the gas (Henney et al. 2005:

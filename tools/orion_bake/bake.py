@@ -45,6 +45,7 @@ EDEN = "https://zenodo.org/records/8187943/files/mean_and_std_healpix.fits?downl
 DIST_PC = 400.0            # ONC: 388 +- 5 (Kounkel+2017), 414 +- 7 (Menten+2007); chosen 400
 SPAXEL_AS = 0.2            # MUSE mosaic sampling (FITS CD matrix)
 VIEW_GUESS = (-0.015, -0.045)   # view centre in the theme (pc west, north of theta1 Ori C): star box
+ORBIT_DEG = 2.4                 # the theme's ORBIT_YAW, in degrees
 F = 3                      # downsampling of the shipped maps: 0.6" texels
 HA_HB = 2.89               # Weilbacher+2015's intrinsic ratio (Case B, 9000 K): keeps their dereddening
 T4 = 0.9                   # Te ~ 9000 K (Weilbacher+2015 [N II] map; O'Dell & Harris 2010)
@@ -489,9 +490,9 @@ def main():
     R("\nCheck, the Bright Bar seen edge-on (PA of the ridge in the pixel frame {:.1f} deg; + = toward the Trapezium): peaks of "
       .format(ang) + ", ".join(f"{k} {v:+.0f}" for k, v in sorted(offs.items(), key=lambda t: t[1])) + " mpc. "
       f"The ions are layered as the model has them (O0 -> S+/N+ -> H+/O++), across {max(offs.values()) - min(offs.values()):.0f} mpc. "
-      f"The model draws the low ions as a sheet at the base of the flow; at the orbit's widest yaw (4.3 deg) that "
-      f"misplaces them by at most {(max(offs.values()) - min(offs.values())) * math.tan(math.radians(4.3)):.0f} mpc "
-      f"({(max(offs.values()) - min(offs.values())) * math.tan(math.radians(4.3)) / (sp * 1000):.1f} texels).")
+      f"The model draws the low ions as a sheet at the base of the flow; at the orbit's widest yaw ({ORBIT_DEG} deg) that "
+      f"misplaces them by at most {(max(offs.values()) - min(offs.values())) * math.tan(math.radians(ORBIT_DEG)):.0f} mpc "
+      f"({(max(offs.values()) - min(offs.values())) * math.tan(math.radians(ORBIT_DEG)) / (sp * 1000):.1f} texels).")
 
     # --- [S II] doublet from density (Sanders+2016 eq. 6, 10^4 K) -------------------------------
     r_sii = 0.4315 * (2107 + ne) / (627.1 + ne)
