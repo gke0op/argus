@@ -82,12 +82,13 @@ maintained release branches yet.
 
 Please report vulnerabilities privately, not in a public issue:
 
-- Email: **<SECURITY CONTACT EMAIL: owner to fill in>**
-- or GitHub's private vulnerability reporting on this repository ("Report a vulnerability"
-  under the Security tab), if it is enabled.
+- Use GitHub's private vulnerability reporting: open the repository's
+  [Security tab](https://github.com/gke0op/argus/security) and choose **Report a vulnerability**
+  ([direct link](https://github.com/gke0op/argus/security/advisories/new)). Only the maintainer
+  sees the report.
 
 Include what you found, how to reproduce it, and what an attacker could do with it. You can
-expect an acknowledgement within <N> days. We will credit you in the fix unless you ask us not
+expect an acknowledgement within 7 days. We will credit you in the fix unless you ask us not
 to.
 
 In scope: anything in the Argus engine that lets a theme, a data file, a settings file or a
