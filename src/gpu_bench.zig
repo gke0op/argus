@@ -19,7 +19,7 @@ const std = @import("std");
 const theme = @import("theme");
 // Ledger id prefix and camera inclination of the theme under test (generated quasars carry their own).
 const ID = if (@hasDecl(theme, "LEDGER_PREFIX")) theme.LEDGER_PREFIX else "quasar.";
-const INCL_DEG: f64 = if (@hasDecl(theme, "INCL")) theme.INCL * 180.0 / std.math.pi else 88.0;
+const INCL_DEG: f64 = if (@hasDecl(theme, "INCL")) @round(theme.INCL * 180.0 / std.math.pi * 10.0) / 10.0 else 88.0;
 const mtl = @import("gpu/metal.zig");
 const bt = @import("gpu/bh_tables.zig");
 const bg = @import("gpu/bh_gpu.zig");

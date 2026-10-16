@@ -865,19 +865,33 @@ static float vmix(float a, float b, float t, float rho) {
     return ((1.0f - t) * a + t * b) * rsqrt((1.0f - t) * (1.0f - t) + t * t + 2.0f * t * (1.0f - t) * rho);
 }
 
+// Shear smear: across the pixel's radial footprint (`rows_fp` noise rows) a generation of age
+// `age_q` is advected by |dOmega/drow| rows_fp age_q of azimuth, `cells_per_q` cells per Q16. Old
+// generations are sheared into arcs thinner than a pixel; boxed over the footprint they average
+// out, so that smear joins the pixel's azimuthal footprint `ep` (cells) in the same fitted filter,
+// (1 + (f/c)^2)^(-1/4). Without it they alias into pixel-fine rings (moire).
+constant float TURB_AA = 2.0f; // turbulence anti-aliasing footprint, pixels (radial)
+
 static float turbOctave(device const uchar* noise, constant Static& st, constant Frame& fr, uint j,
-                        ushort phi, uint r0, float tr, float sb) {
+                        ushort phi, uint r0, float tr, float sb, float rows_fp, float cells_per_q, float ep,
+                        thread float& var_out) {
     device const uchar* plane = noise + j * NR * NP;
     const uint n0 = min(uint(sb), NBAND - 2);
     const float beta = clamp(sb - float(n0), 0.0f, 1.0f);
     const uint r1 = min(r0 + 1, NR - 1);
     const float om0 = st.om_row[r0];
     const float om1 = st.om_row[r1];
+    const float cp2 = st.foot_cp[j] * st.foot_cp[j];
+    const float base = 1.0f + ep * ep / cp2;
+    const float dom = fabs(om1 - om0) * rows_fp * cells_per_q; // azimuth cells smeared per unit age_q
     float g = 0.0f;
+    float v2 = 0.0f;
     for (uint kk = 0; kk < 2; kk++) {
         const float wb = kk == 0 ? cos(0.5f * M_PI_F * beta) : sin(0.5f * M_PI_F * beta);
         for (uint gi = 0; gi < 2; gi++) {
             const TurbGen t = fr.gen[j][n0 + kk][gi];
+            const float smear = dom * t.age_q;
+            const float att = rsqrt(sqrt((base + smear * smear / cp2) / base)); // relative to the footprint filter already applied
             float v[2];
             for (uint rr = 0; rr < 2; rr++) {
                 const uint row = ((rr == 0 ? r0 : r1) + t.rowoff) & (NR - 1);
@@ -887,9 +901,11 @@ static float turbOctave(device const uchar* noise, constant Static& st, constant
                 const uint p1 = (p0 + 1) & (NP - 1);
                 v[rr] = vmix(float(plane[row * NP + p0]) - 128.0f, float(plane[row * NP + p1]) - 128.0f, pc - float(p0), st.rho_ph[j]);
             }
-            g += wb * t.w * vmix(v[0], v[1], tr, st.rho_row[j]);
+            g += wb * t.w * att * vmix(v[0], v[1], tr, st.rho_row[j]);
+            v2 += (wb * t.w * att) * (wb * t.w * att);
         }
     }
+    var_out = v2;
     return g / NOISE_STD;
 }
 
@@ -927,13 +943,16 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     float var = 0.0f;
     for (uint j = 0; j < N_OCT; j++) {
         const float sc = float(1u << j);
-        const float er = frf * sc / st.cell_r0;
+        // Radially the filter sees a Nyquist-width footprint (TURB_AA pixels): structure finer than
+        // ~2 px aliases into rings that crawl as the disk turns (most visible at 120 FPS).
+        const float er = TURB_AA * frf * sc / st.cell_r0;
         const float ep = fpf * sc / st.cell_p0;
         const float a = OCT_AMP[j] / OCT_NORM * rsqrt(sqrt((1.0f + er * er / (st.foot_cr[j] * st.foot_cr[j])) * (1.0f + ep * ep / (st.foot_cp[j] * st.foot_cp[j]))));
         if (a * st.turb_sigma < 0.002f) continue;
         const float sb = mix(st.sband[j][b0], st.sband[j][min(b0 + 1, R_BINS - 1)], tb);
-        G += a * turbOctave(noise, st, fr, j, rc.phi, r0, trow, sb);
-        var += a * a;
+        float vg = 1.0f;
+        G += a * turbOctave(noise, st, fr, j, rc.phi, r0, trow, sb, TURB_AA * frf * (float(NR) / float(R_BINS)), sc / st.cell_p0, ep, vg);
+        var += a * a * vg;
     }
     // Log-normal dissipation with its mean kept at 1; the gas's temperature follows it, T ~ eps^(1/4).
     const float eps = exp(st.turb_sigma * G - 0.5f * st.turb_sigma * st.turb_sigma * var);
