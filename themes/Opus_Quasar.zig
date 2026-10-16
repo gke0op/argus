@@ -7,11 +7,15 @@
 // resolve a real quasar disk (we know them from their light: spectra, variability,
 // microlensing); this is what that physics predicts. The Event Horizon Telescope's images
 // (M87*, Sgr A*) are a different, starving kind of black hole: hot, faint, see-through flows.
-// Modelled on H1821+643, a radio-quiet quasar at the centre of the galaxy cluster CL1821+643:
-// its measured spin, a* = 0.62 (+0.22 / -0.37, 90%; Sisk-Reynes, Reynolds, Matthews & Smith
-// 2022, MNRAS 514, 2568, from Chandra X-ray reflection), and a mass inside its measured range
-// (log M ~ 9.2-10.5). Its accretion rate and our viewpoint are choices (below): from Earth we
-// see its inner disk at ~41-48 deg; this camera sits elsewhere around it, at 88 deg.
+// Modelled on H1821+643, the quasar at the centre of the galaxy cluster CL1821+643 (radio-quiet
+// by luminosity, though it drives a weak FR I-type jet with 280 kpc lobes, Blundell & Rawlings
+// 2001: invisible in optical light and far outside this view). Its measured spin, a* = 0.62
+// (+0.22 / -0.37, 90%; Sisk-Reynes, Reynolds, Matthews & Smith 2022, MNRAS 514, 2568, Chandra
+// X-ray reflection); its mass, 4e9 Msun (the centre of the consistent estimates, ~3-6e9; the
+// 2026 reverberation lag is in tension, unresolved); its luminosity, ~0.2 of Eddington's
+// (Fukuchi, Ichikawa et al. 2022: lambda = 0.18 from the full SED, 0.59 from X-rays): a
+// radiatively efficient thin disk. From Earth we see its inner disk at 44.6 +- 3.3 deg (90%);
+// this camera sits elsewhere around it, at 88 deg (a choice).
 // Audited independently (Gemini 4 Argon; Claude Opus with its own code): every item under
 // "computed" was re-derived and checked. Opus_Gargantua.zig is the same engine at a chosen,
 // cooler temperature.
@@ -35,9 +39,10 @@
 //    it the disk spreads outward, and its dissipation, temperature and opacity fall off
 //    together, so it thins out with no edge. The stress follows the closure, not the local
 //    pressure: W = 1.5 alpha (P/rho) r holds only at the flux peak, where it is set (further
-//    out the closure's stress implies alpha >> 1). Scaled to a 5e9 solar-mass hole whose
-//    ISCO accretion rate is 3% of Eddington's (alpha = 0.1); the snapshot shines at about half
-//    that, because its inflow stops at 5 ISCO radii. Peak 25,000 K at 5.7 M, blue-white, as real
+//    out the closure's stress implies alpha >> 1). Scaled to a 4e9 solar-mass hole whose
+//    ISCO accretion rate is 36% of Eddington's (alpha = 0.1); the snapshot shines at 0.54 of
+//    that (its inflow stops at 5 ISCO radii), i.e. ~0.2 L_Edd as measured. Peak ~50,000 K at
+//    5.7 M (radiation-pressure supported, H/r ~ 0.05 there), blue-white, as real
 //    thin disks around such holes are. Local structure: scale height from hydrostatic balance with gas +
 //    radiation pressure, midplane temperature from radiative diffusion, electron scattering +
 //    Kramers absorption at that temperature. Where the gas thins it emits as a grey isothermal
@@ -47,8 +52,9 @@
 //  * Color: each point radiates the spectrum of a disk atmosphere: a colour-corrected
 //    blackbody f^-4 B(f T_s), whose electron scattering hardens it to a bluer colour at the
 //    same flux (Done, Davis, Jin, Blaes & Ward 2012: f = 1 below 3e4 K, where hydrogen
-//    absorption thermalises the light; this disk peaks at 25,000 K, so f stays 1: it radiates
-//    as a true blackbody). The observed spectrum is that at g f T_s, with g the full Kerr redshift
+//    absorption thermalises the light; ~1.5 at this disk's 50,000 K peak. Where the gas is thick
+//    to scattering its temperature is T_eff and f alone hardens it; the thin-slab boost of the
+//    source temperature applies only where the gas is thin overall, so it is not counted twice). The observed spectrum is that at g f T_s, with g the full Kerr redshift
 //    (gravitational + Doppler), so color AND brightness come from Planck's law integrated
 //    against CIE 1931 color matching functions. Beaming is not switched off: the approaching
 //    side is much brighter, as it would be.
@@ -64,23 +70,23 @@
 //
 // What is chosen (stated honestly):
 //  * Spin a = 0.62 M (H1821+643's measured value, above), inclination 88 deg (nearly edge-on).
-//  * The disk's parameters: mass 5e9 Msun, ISCO accretion rate 3% of Eddington, alpha 0.1, the
+//  * The disk's parameters: mass 4e9 Msun, ISCO accretion rate 36% of Eddington, alpha 0.1, the
 //    initial ring (4 ISCO radii, width 0.8) and the snapshot (mass flux reversing at 5 ISCO
 //    radii). The Sigma-independent
 //    stress is what gives the soft outer fade: a stress that grows with Sigma (a pure alpha
 //    closure) makes a sharp front instead (Mummery & Balbus 2019). Opacity: grey, and an
-//    extrapolation beyond ~40 M: there the gas is below ~5000 K and neutral, so electron
+//    extrapolation beyond ~70 M: there the gas is below ~5000 K and neutral, so electron
 //    scattering and Kramers (which need free electrons) do not apply, and the true opacity
 //    (H-, molecules, dust) is not modelled. Sigma falls an e-fold per ~10 M out there, so the
 //    fade is robust but its exact radius and its colour are not computed physics. The colour
 //    correction and limb darkening are fits to disk-atmosphere models, not computed here.
-//  * Time-lapse: one ISCO orbit takes ~5 s on screen, one at r = 6 M ~10 s (in reality ~14
-//    and ~27 days for this 5e9 solar-mass hole).
+//  * Time-lapse: one ISCO orbit takes ~5 s on screen, one at r = 6 M ~10 s (in reality ~11
+//    and ~22 days for this 4e9 solar-mass hole).
 //  * Turbulence: procedural noise carrying the measured statistics of magnetorotational
 //    turbulence, not simulated MHD (Guan et al. 2009; Beckwith, Armitage & Simon 2011;
 //    Hirose et al. 2009). As rendered (time-averaged 1/e correlation ellipse, measured on the
 //    tables): eddies ~1.8 H along the orbit by ~0.25 H radially (axis ratio ~7), trailing
-//    12-14 deg; H/r = 0.01 is our choice (this disk: 0.004-0.01 at the peak, by convention).
+//    12-14 deg; H/r = 0.01 is our choice (this disk: ~0.05 at the peak, radiation-supported).
 //    They get there physically: born leading ~31 deg, swung by the Kerr shear through radial
 //    to trailing (the birth shape is fitted to that outcome). Two octaves with amplitude
 //    2^(-5j/6), a k^(-11/3) per-mode spectrum; octave j lives P(r) 2^(-2j/3) (correlation
@@ -107,7 +113,7 @@
 //    size and brightness are choices; their motion is not.
 //  * Sky: black, as it would be. From here, at the centre of the giant galaxy hosting
 //    H1821+643 inside its cluster, the sky holds the host's stars and the cluster's galaxies,
-//    but next to a 25,000 K disk they are ~1e12 times fainter, far below any exposure that
+//    but next to a 50,000 K disk they are ~1e12 times fainter, far below any exposure that
 //    shows the disk (or any HDR display's range). Renders that show a sky expose it separately.
 //  * Camera exposure + Reinhard tone mapping (HDR: to the display's EDR headroom).
 //    The CPU fallback composites translucent layers after tone mapping, in display
@@ -143,7 +149,7 @@ const OBS_R: f64 = 1000.0;
 // Omega(r) * 1000 M would wind the disk pattern ~0.5 rad per pixel radially and the
 // footprint filter would (rightly) erase all turbulence and hot spots.
 const T_REF: f64 = OBS_R + 2.0 * @log(OBS_R / 2.0);
-const HALF_H: f64 = 15.5; // half the screen height, in units of M
+const HALF_H: f64 = 24.0; // half the screen height, in units of M
 const TIME_LAPSE: f64 = 10.0; // M of coordinate time per unit of Argus dt
 // Turbulence: statistics of magnetorotational turbulence from shearing-box and global MHD
 // simulations (Guan et al. 2009, ApJ 694, 1010; Beckwith, Armitage & Simon 2011, MNRAS 416, 361).
@@ -171,7 +177,7 @@ const LIMB_B: f64 = 2.06; // electron-scattering limb darkening I(mu) ~ 1 + LIMB
 const EXP_N: usize = 1024; // exp table over [-4, 4] for the CPU draw
 const EXPO_TARGET: f64 = 7.0; // 99th-percentile disk luminance maps here before tone mapping
 const STAR_GAIN: f64 = 0.8;
-// The sky is black: next to a 25,000 K disk everything else (the host galaxy's stars, the cluster's
+// The sky is black: next to a 50,000 K disk everything else (the host galaxy's stars, the cluster's
 // galaxies) is ~1e12 times fainter, far below any exposure that shows the disk (see header).
 const SKY_VISIBLE: f64 = 0.0;
 const STAR_CELL: f64 = 8.0e-3; // star grid spacing on the sky, radians (resolution-independent)
@@ -257,8 +263,8 @@ pub fn pageThorne(a: f64, r_in: f64, r_max: f64, out: *[PT_N]f64) void {
 // Inside the mass-flux reversal radius it relaxes to the Page-Thorne flux; beyond it the disk is
 // spreading outward and its surface density, dissipation and opacity fall off together.
 
-pub const BH_MASS_SUN: f64 = 5.0e9; // a quasar-class supermassive hole
-pub const EDD_RATIO: f64 = 0.03; // ISCO accretion rate / (L_Edd / (eta c^2)): a thin disk (>~ 0.01)
+pub const BH_MASS_SUN: f64 = 4.0e9; // a quasar-class supermassive hole
+pub const EDD_RATIO: f64 = 0.36; // ISCO accretion rate / (L_Edd / (eta c^2)): a thin disk (>~ 0.01)
 pub const ALPHA_VISC: f64 = 0.1; // Shakura-Sunyaev alpha
 pub const RING_R0: f64 = 4.0 * R_ISCO; // where the gas was deposited
 const RING_D: f64 = 0.8 * R_ISCO; // initial ring width
@@ -327,6 +333,7 @@ pub const DiskProfile = struct {
     mass_budget: f64, // mass lost / integrated ISCO inflow (1 = exact)
     pt_ratio_spread: f64, // max/min of F / F_PageThorne inside SNAP_RREV / 4
     pt_ratio_at: [5]f64, // F / F_PageThorne (normalised at the ISCO) at PT_CHECK_R
+    lum_ratio: f64, // snapshot luminosity / a steady Page-Thorne disk's at the same ISCO inflow
 };
 
 /// Solves the disk. `pt` is the Page-Thorne flux on the same grid (shape only), used to set the
@@ -444,6 +451,17 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
     }
     const norm = ratio_sum / @max(ratio_n, 1.0);
     out.pt_ratio_spread = rmax / @max(rmin, 1e-300);
+    {
+        var l_snap: f64 = 0.0;
+        var l_pt: f64 = 0.0;
+        for (1..PT_N) |k| {
+            const rk = r_in * @exp(dl * @as(f64, @floatFromInt(k)));
+            const w = rk * rk * dl; // r dr in log steps (flat-space area weight)
+            l_snap += fgAt(&r, &fg, rk) / norm * w;
+            l_pt += @max(pt[k], 0.0) * w;
+        }
+        out.lum_ratio = l_snap / @max(l_pt, 1e-300);
+    }
     for (PT_CHECK_R, 0..) |rc, ci| {
         const k: usize = @intFromFloat(@round(@log(rc / r_in) / dl));
         out.pt_ratio_at[ci] = fgAt(&r, &fg, rc) / pt[k] / norm;
@@ -525,13 +543,25 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
         // temperature of the thin tail it runs away (free-free cooling falls as the gas heats),
         // the sign that neither Kramers nor electron scattering applies there (see header).
         const ta_f = 2.0 * lk.ta;
-        const tem = @min(ta_f * (1.0 + tes_f), @sqrt(ta_f * (ta_f + tes_f)));
-        const emiss = 1.0 - 2.0 * expE3(tem); // grey isothermal slab: flux out = sigma T_s^4 (1 - 2 E3)
-        const ts = @min(@sqrt(@sqrt(fphys / (SIGMA_SB * @max(emiss, 1e-300)))), T_MAX_SOURCE);
+        const tem_slab = @min(ta_f * (1.0 + tes_f), @sqrt(ta_f * (ta_f + tes_f)));
+        const emiss = 1.0 - 2.0 * expE3(tem_slab); // grey isothermal slab: flux out = sigma T_s^4 (1 - 2 E3)
+        const ts_slab = @min(@sqrt(@sqrt(fphys / (SIGMA_SB * @max(emiss, 1e-300)))), T_MAX_SOURCE);
+        // Where the gas is thick to scattering (tau_ext >~ 10) it is a scattering atmosphere: its
+        // spectrum harder than T_eff is what the colour correction f (buildTables) describes, at
+        // T_eff and with full emission. The slab's own boost of T_s (energy through a thin
+        // thermalisation depth) would count that twice, so it applies only where the gas is
+        // thin overall; blended in log tau_ext between 1 and 10.
+        const tau_ext = tes_f + ta_f;
+        const w_atm = math.clamp(@log10(@max(tau_ext, 1e-30)), 0.0, 1.0);
+        const t_eff = @sqrt(@sqrt(fphys / SIGMA_SB));
+        const ts = @exp((1.0 - w_atm) * @log(ts_slab) + w_atm * @log(t_eff));
+        const tem = @exp((1.0 - w_atm) * @log(@max(tem_slab, 1e-30)) + w_atm * @log(@max(tem_slab, tau_ext)));
         out.T[k] = @floatCast(ts);
-        out.lt_ext[k] = @floatCast(@max(@log(tes_f + ta_f), -60.0));
+        out.lt_ext[k] = @floatCast(@max(@log(tau_ext), -60.0));
         out.lt_em[k] = @floatCast(@max(@log(tem), -60.0));
-        if (rk < 30.0) out.t_peak = @max(out.t_peak, ts);
+        // Peak of the opaque disk (the zero-stress ISCO edge thins to a sub-pixel sliver whose thin-slab
+        // temperature is not the disk's).
+        if (rk < 8.0 * R_ISCO and tau_ext >= 1.0) out.t_peak = @max(out.t_peak, ts);
     }
 }
 
@@ -1628,8 +1658,20 @@ pub const State = struct {
                             while (hit.kind == .disk and hit.r > SPOT_RMAX) {
                                 const tau = self.slantTau(fx, hit);
                                 const sd = self.shadeDisk(fx, hit.r, hit.ph, hit.t);
-                                const dim = luma(sd.rgb) * self.emitWeight(fx, hit) * self.exposure * self.peakBoost(sd.tobs) < EMIT_FLOOR;
-                                if (!(tau < TAU_MIN or dim)) break;
+                                const yf = luma(sd.rgb) * self.emitWeight(fx, hit);
+                                const dim = yf * self.exposure * self.peakBoost(sd.tobs) < EMIT_FLOOR;
+                                if (!(tau < TAU_MIN or dim)) {
+                                    // Glowing but translucent gas over a brighter crossing behind it (the
+                                    // lensed underside seen through the warm outer disk): the brighter layer
+                                    // is the animated one; this one's faint glow goes to the background.
+                                    if (tau >= TAU_BEHIND or backs[0].kind != .disk) break;
+                                    const sb = self.shadeDisk(fx, backs[0].r, backs[0].ph, backs[0].t);
+                                    if (yf >= luma(sb.rgb) * self.emitWeight(fx, backs[0]) * @exp(-tau)) break;
+                                    const k = @as(f64, self.exposure) * self.emitWeight(fx, hit);
+                                    const cf = [3]f64{ sd.rgb[0] * k, sd.rgb[1] * k, sd.rgb[2] * k };
+                                    const tmf = 1.0 / (1.0 + luma(cf));
+                                    for (0..3) |i| bg_rgb[i] += front_tr * @min(cf[i] * tmf, 1.0) / STAR_GAIN;
+                                }
                                 if (tau >= TAU_BEHIND) {
                                     hidden = true; // dim and opaque: nothing shows here
                                     break;
@@ -2313,7 +2355,7 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
             return .{ dd.T[k], @exp(@as(f64, dd.lt_ext[k])), @exp(@as(f64, dd.lt_em[k])) };
         }
     }.f;
-    std.debug.print("\n  disk: T_peak {d:.0} K at r={d:.2}, tau_es {d:.0}, Sigma {e:.2}, H/r {d:.4}, mass budget {d:.4}, F/F_PT spread {d:.3}\n", .{ d.t_peak, d.r_peak, d.tau_es_peak, d.sigma_peak, d.h_over_r_peak, d.mass_budget, d.pt_ratio_spread });
+    std.debug.print("\n  disk: T_peak {d:.0} K at r={d:.2}, tau_es {d:.0}, Sigma {e:.2}, H/r {d:.4}, mass budget {d:.4}, F/F_PT spread {d:.3}, L/L_PT {d:.3}\n", .{ d.t_peak, d.r_peak, d.tau_es_peak, d.sigma_peak, d.h_over_r_peak, d.mass_budget, d.pt_ratio_spread, d.lum_ratio });
     for (PT_CHECK_R, d.pt_ratio_at) |rr, q| std.debug.print("  F/F_PT at r {d}: {d:.3}\n", .{ rr, q });
     for ([_]f64{ 1.5, 5, 10, 15, 20, 25, 30, 40 }) |ri| {
         const rr = ri * R_ISCO;
@@ -2322,7 +2364,8 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
     }
     try testing.expectApproxEqAbs(1.0, d.mass_budget, 0.01);
     try testing.expect(d.pt_ratio_spread < 1.15);
-    try testing.expect(d.t_peak > 20_000.0 and d.t_peak < 45_000.0);
+    try testing.expect(d.t_peak > 40_000.0 and d.t_peak < 60_000.0); // H1821+643's L ~ 0.2 L_Edd at 4e9 Msun
+    try testing.expectApproxEqAbs(0.2, EDD_RATIO * d.lum_ratio, 0.03); // the snapshot shines at its measured rate
     try testing.expect(at(&d, r_in, dl, 10.0 * R_ISCO)[1] > 10.0); // opaque at 10 ISCO radii
     try testing.expect(at(&d, r_in, dl, 45.0 * R_ISCO)[1] < 1e-2); // gone by 45
 }

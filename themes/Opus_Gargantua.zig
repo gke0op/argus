@@ -1655,8 +1655,20 @@ pub const State = struct {
                             while (hit.kind == .disk and hit.r > SPOT_RMAX) {
                                 const tau = self.slantTau(fx, hit);
                                 const sd = self.shadeDisk(fx, hit.r, hit.ph, hit.t);
-                                const dim = luma(sd.rgb) * self.emitWeight(fx, hit) * self.exposure * self.peakBoost(sd.tobs) < EMIT_FLOOR;
-                                if (!(tau < TAU_MIN or dim)) break;
+                                const yf = luma(sd.rgb) * self.emitWeight(fx, hit);
+                                const dim = yf * self.exposure * self.peakBoost(sd.tobs) < EMIT_FLOOR;
+                                if (!(tau < TAU_MIN or dim)) {
+                                    // Glowing but translucent gas over a brighter crossing behind it (the
+                                    // lensed underside seen through the warm outer disk): the brighter layer
+                                    // is the animated one; this one's faint glow goes to the background.
+                                    if (tau >= TAU_BEHIND or backs[0].kind != .disk) break;
+                                    const sb = self.shadeDisk(fx, backs[0].r, backs[0].ph, backs[0].t);
+                                    if (yf >= luma(sb.rgb) * self.emitWeight(fx, backs[0]) * @exp(-tau)) break;
+                                    const k = @as(f64, self.exposure) * self.emitWeight(fx, hit);
+                                    const cf = [3]f64{ sd.rgb[0] * k, sd.rgb[1] * k, sd.rgb[2] * k };
+                                    const tmf = 1.0 / (1.0 + luma(cf));
+                                    for (0..3) |i| bg_rgb[i] += front_tr * @min(cf[i] * tmf, 1.0) / STAR_GAIN;
+                                }
                                 if (tau >= TAU_BEHIND) {
                                     hidden = true; // dim and opaque: nothing shows here
                                     break;
