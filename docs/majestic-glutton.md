@@ -56,20 +56,37 @@ black hole fed by a thin, hot accretion disk.
 
   | Path | max, all points | max off-axis | RMS, curve sweep | RMS off-axis | max, polar band |
   |---|---|---|---|---|---|
-  | CPU f64 | 8.2e-3 M | 7.6e-6 M | 1.5e-4 M | 2.7e-6 M | 8.2e-3 M |
-  | GPU f32 | **1.7e-2 M (fails)** | 7.8e-5 M | 1.3e-4 M | 7.3e-6 M | 1.7e-2 M |
+  | CPU f64 | 7.6e-6 M | 7.6e-6 M | 2.7e-6 M | 2.7e-6 M | 2.9e-6 M |
+  | GPU f32 | 7.8e-5 M | 7.8e-5 M | 7.2e-6 M | 7.3e-6 M | 8.1e-6 M |
   | Tolerance | 1e-2 M (¼ pixel) | 1e-4 M | 1e-3 M | 1e-4 M | reported |
 
-  - **Off the spin axis** the ray solver matches the critical curve to < 1e-5 M on the CPU and
-    < 1e-4 M on the GPU, over the whole contour.
-  - **On it (found by the sweep):** rays with angular momentum L ≈ 0 (|α| ≲ 0.002 M) pass close
-    to the spin axis, where Boyer–Lindquist coordinates are singular and the step control is too
-    coarse. The edge there is off by up to 8.2e-3 M (CPU) and 1.7e-2 M (GPU, 0.4 pixel). The
-    band is ~1/20 of a pixel wide, at the top and bottom of the shadow.
-  - The GPU's polar maximum fails the ¼-pixel tolerance: the one failing record in the ledger.
-    It was always there. The old 11-point test (worst 7.5e-6 M) never sampled the band.
-  - In a trial, a finer near-axis step floor (2e-5 instead of 2e-4) cut the CPU's polar error
-    tenfold, to 8.6e-4 M; 2e-6 made it worse again. The fix is open (§10).
+  - The ray solver matches the critical curve to < 1e-5 M on the CPU and < 1e-4 M on the GPU,
+    over the whole contour, the spin axis included. GPU and CPU agree per sample to 7.8e-5 M.
+  - **Near the spin axis (found by the sweep, now fixed):** the old 11-point test (worst 7.5e-6 M)
+    never sampled α ≈ 0. The first dense sweep found the edge off there by up to 8.2e-3 M (CPU)
+    and 1.7e-2 M (GPU, 0.4 pixel). There were two causes.
+    - A ray with angular momentum L turns back from the axis at sin θ ≈ |L|/√Q ≈ |L|/5. The
+      near-axis step floor (Δθ ≥ 2e-4 per step) was coarser than that turn for |L| ≲ 4e-3.
+      Unresolved, the turn threw the photon off its orbit: a sliver of false capture just
+      outside the shadow at α ≈ 0. The floor now scales with the turn,
+      clamp(0.01 |L|, 1e-8, 2e-4), and so does the minimum step, clamp(0.01 |L|, 1e-8, 1e-5).
+      Rays with |L| ≥ 0.02 keep the old floor, and those with |L| ≥ 1e-3 the old minimum step.
+      Even L = 0 crosses the pole in ~300 steps.
+    - On the GPU, f32 holds θ ≈ π only to 2.4e-7, about 1% of such a turn, so rays crossing the
+      south pole were captured or freed at random. A ray that comes within 0.01 rad of θ = π is
+      now reflected, (θ, p_θ) → (π − θ, −p_θ). This is an exact symmetry of the Kerr equations,
+      which see only sin θ and cos²θ, so near either pole the GPU works at small θ, where f32
+      is relatively exact.
+  - **The render:** only the rays these touch change, those passing within 0.01 rad of a pole
+    (a wedge |α| ≲ 0.01 |β| around the axis column, 0.5% of the frame).
+    - On the GPU, 0 pixels change outside that wedge (1920×1200 and 3024×1964).
+    - Inside it, the axis column was a 1-pixel seam: it differed from its neighbours by
+      18.5 levels at the 99th percentile, against 4.5 for an ordinary column. It now differs by
+      2.0. One falsely captured pixel at the shadow's lower edge is lit again.
+    - The CPU fallback changes by ≤ 2 levels, carried a few pixels along rows by draw()'s
+      per-row turbulence cache.
+    - Cost: the one-time GPU trace takes ~8% longer (native: 4.25 s → 4.6 s); the CPU trace is
+      not slower.
   - Scale: one pixel is ~0.04 M (48 M over 1,200 pixels). Off-axis, the test is far finer than
     the display; it is a check of the ray solver, not of the drawn silhouette.
 - **Equatorial light paths (`make claims`):** captured below the critical impact parameter
@@ -229,8 +246,8 @@ tests or audits below.
     tolerance is the test's.
   - Values with no bound (r_isco, η, the polar-band maximum, GPU/CPU pixel agreement) are
     reported, not asserted, and marked `"pass": null`.
-  - Current ledger: 56 records; 49 asserted, of which 48 pass and 1 fails (the GPU's polar-band
-    maximum, §3); 7 reported.
+  - Current ledger: 56 records; 49 asserted, all pass; 7 reported. (The first ledger had one
+    failure, the GPU's polar-band maximum; fixed, §3.)
 - **Reviews:** two independent physics reviews by Gemini 4 Argon, and two Claude Opus audits that
   wrote their own code (disk solver re-solved independently to 0.1%; turbulence measured on the
   tables). Every finding was re-derived before fixing; rejected findings are recorded in the
@@ -255,9 +272,6 @@ tests or audits below.
   (X-ray only or outside the view), the recoil.
 - **Opacity mean:** the Rosseland-mean Kramers law is used where a Planck mean might suit
   emission better.
-- **Near-axis step control:** rays that pass within a band ~0.002 M wide of the spin axis are
-  integrated too coarsely (§3). The shadow edge there is off by up to 0.4 pixel on the GPU.
-  This is not yet fixed.
 
 ## 11. Reviews so far
 
@@ -266,8 +280,8 @@ tests or audits below.
   the conclusion stands) and the spin-independence claim (the recipe scales, not the solution).
   It also asked for the Ṁ_Edd convention, the shadow test's scope and the observer lapse to be
   stated. All verified and fixed here. It then asked for a dense full-contour shadow sweep and a
-  machine-readable test ledger. Both are done (§3, §9). The sweep found the near-axis error the
-  11-point test had missed.
+  machine-readable test ledger. Both are done (§3, §9). The sweep found a near-axis error the
+  11-point test had missed; it is fixed (§3).
 
 ## 12. Questions for reviewers
 
