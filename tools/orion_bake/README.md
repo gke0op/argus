@@ -98,16 +98,19 @@ in numpy from the shipped data and compares the two.
     and 436 pc): the molecular cloud whose surface is our front, just beyond the stars'
     388–414 pc.
   - Veil encoding error: < 0.7% in Hβ transmission. No texel needs clipping.
-- **Clumping.** φ = 0.22: the flow needs a front density 2.1 times the [S II] density. That
-  matches the higher [Cl III] densities in the same data (Weilbacher et al. 2015: up to
-  2.5e4 cm⁻³ against 1e4 cm⁻³ from [S II]). R0 median 0.9 pc, so half of Hα lies within
+- **Clumping.** φ = 0.22: the flow needs a front density 2.1 times the [S II] density. An
+  independent check comes from [Cl III], which traces the denser gas nearer the front, in
+  the same data. Over the bright half of the field it reads 1.64 times the [S II] density
+  (16–84%: 1.33–2.04), i.e. φ = 0.37. So the two estimates of the layer thickness agree
+  within a factor of 1.7. R0 median 0.9 pc, so half of Hα lies within
   0.12 pc of the front. Classic estimates of the layer are 0.07–0.2 pc.
 
 ## What stays degenerate or uncertain
 
-- **Layer thickness (R0).** This is the least certain fitted quantity. The emission-measure
-  thickness and the front curvature disagree by a factor φ. A thinner layer, as the 2e17 cm
-  estimates suggest, would halve R0. It changes only the off-Earth views: from Earth the
+- **Layer thickness (R0).** This is the least certain fitted quantity. The front's curvature
+  gives R0 ≈ 0.9 pc; the [Cl III] density gives 1.6 times that. Older 2e17 cm estimates of
+  the layer point the other way, to about half. So R0 is known to within roughly a factor
+  of 2. It changes only the off-Earth views: from Earth the
   image is the data either way.
 - **Absolute depth.** The depth scales as √Q (Q itself is ±10%) and with the assumed
   distance. The dust absorbing ionising photons inside the gas (Henney et al. 2005:
