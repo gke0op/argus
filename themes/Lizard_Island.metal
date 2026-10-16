@@ -1361,9 +1361,11 @@ static inline float grassDensity(float4 sm) {
 static bool seagrass(texture2d<float> st, Scene S, float rk, float ry, float zhit,
                      thread float& zg, thread float3& cg, thread float& cov) {
     if (ry >= -1e-4f || zhit > GRASS_Z) return false;
-    const float gb = S.camy + ry * zhit - 0.01f;   // ground under the blades ~ the hit
-    if (gb > 0.6f) return false;                   // blades grow on the lagoon floor only
-    const float z0 = max(Z_NEAR, zhit - GRASS_HMAX / -ry);
+    const float gh = S.camy + ry * zhit;           // height where the ray lands
+    if (gh > 0.6f) return false;                   // it lands high on a rock: blades are below it
+    // Blades stand on the sand at their own place, which is never above ~0.25 m;
+    // where the ray lands on a rock's foot, the sand in front is lower than the hit.
+    const float z0 = max(Z_NEAR, zhit - (GRASS_HMAX + max(gh - 0.25f, 0.0f)) / -ry);
     // Most pixels see bare sand: skip them unless the ray's ground track meets a meadow.
     const float zm = 0.5f * (z0 + zhit);
     if (grassDensity(reefAt(st, S.camx + rk * zhit, S.scroll + zhit)) <= 0.0f &&
@@ -1390,6 +1392,12 @@ static bool seagrass(texture2d<float> st, Scene S, float rk, float ry, float zhi
             const float bz = bzw - S.scroll;
             if (bz < Z_NEAR || bz > zhit + 0.05f) continue;
             const float H = 0.10f + 0.22f * q3;
+            // Each blade is planted on the ground at its own spot, and only where
+            // that spot is meadow (not rock): near a coral head the ray lands on the
+            // rock, and planting blades there stretched them up its face.
+            const float4 at = reefAt(st, bx, bzw);
+            if (grassDensity(at) <= 0.0f) continue;
+            const float gb = at.a - 0.01f;
             // The surge leans it shoreward and back; a faster wobble on top.
             const float lean_z = 0.06f * sin(1.25f * t - 0.9f * bzw + 6.0f * q1) + 0.015f * sin(3.3f * t + 9.0f * q2);
             const float lean_x = 0.035f * sin(0.9f * t + 0.7f * bx + 6.0f * q3);
