@@ -5,10 +5,10 @@ app asks for macOS 13 or later.
 
 ## Download a release (nothing else to install)
 
-1. Download `Argus-v0.1.0-macos-arm64.zip` from the project's GitHub Releases page.
-   To check it, download the `.sha256` file next to it and run
-   `shasum -a 256 -c Argus-v0.1.0-macos-arm64.zip.sha256` in the same folder.
-2. Double-click the zip. You get a folder `Argus-v0.1.0-macos-arm64` that holds `Argus.app`
+1. Download `Argus-v<version>-macos-arm64.zip` (currently `Argus-v0.1.1-macos-arm64.zip`)
+   from the project's GitHub Releases page. To check it, download the `.sha256` file next to
+   it and run `shasum -a 256 -c Argus-v<version>-macos-arm64.zip.sha256` in the same folder.
+2. Double-click the zip. You get a folder `Argus-v<version>-macos-arm64` that holds `Argus.app`
    and `themes/`. **Keep them together.** Argus loads themes from the folder it sits in and
    saves its settings there (`.argus_spaces.conf`, `.argus_settings.conf`). You can move or
    rename the whole folder, for example to `~/Applications/Argus`, before you open the app.
@@ -20,8 +20,9 @@ app asks for macOS 13 or later.
    mark from the folder, so macOS opens it like an app you built yourself:
 
    ```bash
-   xattr -dr com.apple.quarantine ~/Downloads/Argus-v0.1.0-macos-arm64
-   open ~/Downloads/Argus-v0.1.0-macos-arm64/Argus.app
+   V=0.1.1   # the version you downloaded
+   xattr -dr com.apple.quarantine ~/Downloads/Argus-v$V-macos-arm64
+   open ~/Downloads/Argus-v$V-macos-arm64/Argus.app
    ```
 
    Use the folder's real path if you moved it. Only do this for software you trust. You can
@@ -94,4 +95,4 @@ Other targets:
 | --- | --- |
 | `make check-themes` | Runs the headless harness on every theme: CPU for `.zig`, GPU for `.metal`. |
 | `make harness THEME=themes/Cygnus_A.zig` | Runs the harness on one theme. |
-| `make release` | Builds `dist/Argus-v0.1.0-macos-arm64.zip`, with the `.zig` themes precompiled. |
+| `make release` | Builds `dist/Argus-v<VERSION>-macos-arm64.zip` (`VERSION` in the Makefile), with the `.zig` themes precompiled. |
