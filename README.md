@@ -90,7 +90,8 @@ make release                              # dist/Argus-v0.1.0-macos-arm64.zip fo
 ```
 
 Then click the eye in the menu bar. The Spaces strip shows one thumbnail per Desktop Space:
-drop a theme (or a picture) on any of them. Pause with ⏸ (the eye closes while paused). The
+drop a theme (or a picture) on any of them, and double-click one (or tap it with two fingers)
+to eject its theme and give that Space back to macOS. Pause with ⏸ (the eye closes while paused). The
 gear opens Settings: step a Space's theme (or go back to the macOS default), speed, smooth
 swipes, live reload and open at login. Settings live in `.argus_settings.conf` next to
 Argus.app, one `key=value` per line.

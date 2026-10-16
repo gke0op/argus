@@ -583,6 +583,15 @@ pub const SpaceConfig = struct {
         return self.path_buf[0..self.path_len];
     }
 
+    /// Ejects whatever the Space shows (theme or picture) and gives it back to macOS: no shader,
+    /// no path, passthrough. The caller releases window-side resources and saves the config.
+    pub fn resetToDefault(self: *SpaceConfig) void {
+        self.unloadShader();
+        self.setPath("");
+        self.mode = .passthrough;
+        self.setLabel(SpaceMode.passthrough.label());
+    }
+
     pub fn unloadShader(self: *SpaceConfig) void {
         if (self.theme_state) |old_st| {
             if (self.theme_deinit_fn) |deinit_f| deinit_f(old_st);

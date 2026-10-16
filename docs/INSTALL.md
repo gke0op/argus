@@ -41,8 +41,9 @@ app asks for macOS 13 or later.
    Since macOS 15 Sequoia, Control-click > Open no longer skips this check
    ([Apple developer news, Aug 2024](https://developer.apple.com/news/?id=saqachfa)).
 
-4. Click the eye in the menu bar to pick a theme for each Desktop Space. To start Argus when
-   you log in, turn on **Open at login** in its Settings.
+4. Click the eye in the menu bar to pick a theme for each Desktop Space. Double-click a
+   thumbnail (or tap it with two fingers) to eject its theme and return that Space to the
+   macOS default. To start Argus when you log in, turn on **Open at login** in its Settings.
 
 ### What works without Zig
 
