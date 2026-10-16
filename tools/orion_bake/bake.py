@@ -344,10 +344,13 @@ def flow_profile(umax=3.0, n=4001):
 
 # ---------------------------------------------------------------------------------------------
 def main():
+    global F
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", required=True)
     ap.add_argument("--report", default=None)
+    ap.add_argument("--downsample", type=int, default=F, help="MUSE spaxels per shipped texel (default 3: 0.6\")")
     a = ap.parse_args()
+    F = a.downsample
     rep = a.report; lines = []
     def R(s=""): lines.append(s); log(s)
     if rep: os.makedirs(rep, exist_ok=True)
@@ -624,6 +627,8 @@ def main():
     W("// END BAKED")
     src = open(THEME).read()
     new = re.sub(r"// BEGIN BAKED.*?// END BAKED", "\n".join(out), src, flags=re.S)
+    new = re.sub(r"// @argus state \d+x\d+", f"// @argus state {NX}x{3 * NY + 1}", new)
+    new = re.sub(r"// @argus data (\S+) \d+x\d+", lambda m: f"// @argus data {m.group(1)} {NX}x{2 * NY}", new)
     open(THEME, "w").write(new)
     log("wrote", THEME, "and", DATA)
 

@@ -76,6 +76,11 @@ in numpy from the shipped data and compares the two.
 - **Earth view reproduces the data.** A GPU frame with the orbit frozen, against an
   independent numpy rebuild from the shipped file: median 0.26 / 255 display levels, 99th
   percentile 1.2, over 94% of pixels (stars masked).
+- **Resolution.** The shipped maps are 0.6″ texels (`--downsample 3`). A 0.4″ bake
+  (`--downsample 2`, 5.2 MB instead of 2.3 MB) gives the same fit to three digits (0.041
+  dex; φ 0.221; R0 0.90 pc). It also looks nearly identical on screen, because the data are
+  seeing-limited and the true-colour image is dominated by smooth [O III]. So the smaller
+  file ships.
 - **Encoding.** The 8-bit log encoding errs by 0.002–0.003 dex rms per line (< 1%).
 - **Destriping.** The removed MUSE slicer pattern is 1.5–3.7% rms (vertical and horizontal,
   per line). The removed pattern holds no nebular structure.
@@ -132,7 +137,8 @@ in numpy from the shipped data and compares the two.
 - **The Veil's distance.** Published values run from 0.4 to 3 pc. It sets how far the
   extinction pattern slides as the view orbits.
 - **[O III] layering.** There is no [O III] velocity map, so it is assumed to fill the flow
-  like Hα.
+  like Hα. The Bright Bar supports this: [O III] peaks 1 mpc from Hβ, against 26–55 mpc for
+  the low ions.
 - **Things not modelled.** The Orion-S cloud inside the ionised gas (O'Dell et al. 2009),
   shocks and Herbig-Haro flows, proplyds as 3D objects (they are in the line maps), dust
   scattering, and M43 (outside the field).
