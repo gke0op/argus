@@ -40,7 +40,7 @@ fn run(io: std.Io, src: []const u8, label: []const u8, s: f64, frames: usize, pn
     const lw: usize = @intFromFloat(@round(@as(f64, W) * s));
     const lh: usize = @intFromFloat(@round(@as(f64, H) * s));
     var err_buf: [4096]u8 = undefined;
-    var theme = metal_theme.Theme.compile(src, label, @intCast(lw), @intCast(lh), 0x5EED, &err_buf) catch {
+    var theme = metal_theme.Theme.compile(src, label, null, @intCast(lw), @intCast(lh), 0x5EED, &err_buf) catch {
         std.debug.print("compile failed: {s}\n", .{std.mem.sliceTo(&err_buf, 0)});
         return error.Compile;
     };

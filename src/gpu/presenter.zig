@@ -77,9 +77,9 @@ pub const ThemePresenter = struct {
     gen: u32, // SpaceConfig.dylib_gen of the load this was built for
     snap_tex: mtl.Id = null,
 
-    pub fn create(src: []const u8, label: []const u8, gen: u32, seed: u32, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize) ?ThemePresenter {
+    pub fn create(src: []const u8, data: ?[]const u8, label: []const u8, gen: u32, seed: u32, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize) ?ThemePresenter {
         var err_buf: [2048]u8 = undefined;
-        var theme = metal_theme.Theme.compile(src, label, @intCast(w), @intCast(h), seed, &err_buf) catch {
+        var theme = metal_theme.Theme.compile(src, label, data, @intCast(w), @intCast(h), seed, &err_buf) catch {
             std.debug.print("argus: {s}: {s}\n", .{ label, std.mem.sliceTo(&err_buf, 0) });
             return null;
         };
