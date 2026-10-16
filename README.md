@@ -86,7 +86,7 @@ make test                                 # run the test suites
 make harness THEME=themes/Cygnus_A.zig    # verify and benchmark a theme headlessly
 make harness THEME=themes/Tutorial_Tides.metal   # same, on the GPU for Metal themes
 make check-themes                         # the harness on every theme
-make release                              # dist/Argus-v0.1.0-macos-arm64.zip for a GitHub Release
+make release                              # dist/Argus-v<version>-macos-arm64.zip for a GitHub Release
 ```
 
 Then click the eye in the menu bar. The Spaces strip shows one thumbnail per Desktop Space:
