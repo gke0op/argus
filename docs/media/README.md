@@ -11,7 +11,7 @@ Every theme frame is rendered offline by the themes' own code on the GPU path th
 | `spaces.png` | 0.5 MB | The seven shipped themes, one per Space, and an eighth Space left on macOS Default. Each tile is a 1920×1080 offline frame |
 | `theme-authoring.png` | 0.3 MB | `themes/Tutorial_Tides.metal` next to its `make harness` frame and verbatim report |
 | `social-card.png` | 0.3 MB | 1280×640 GitHub social preview. Cygnus A rendered at 3840×1920, cropped and scaled |
-| `popover.png` | 0.15 MB | The menu-bar popover (Spaces strip), 1360×196 (2×) |
+| `popover.png` | 0.16 MB | The menu-bar popover (Spaces strip) with the seven shipped themes, 1360×196 (2×) |
 | `settings.png` | 0.04 MB | The popover's Settings view, 1360×196 (2×) |
 
 ## Cygnus_A (video, GIF, stills, card)
@@ -28,7 +28,7 @@ A driver (`src/launch_render_metal.zig`, not committed) compiles each theme thro
 
 ## Popover and Settings
 
-These are the app's own drawing of the popover, not a screen capture. The `--snapshot-popover DIR` dev aid renders each popover face to PNG and quits; no desktop, Dock or other app is in the frame. They were taken from a build of this commit, run with `--window` from its own folder, so the owner's live Argus and its config were untouched. That folder held a clean `.argus_spaces.conf` with the six shipped themes on six Spaces (Cygnus_A on the active one) and the seventh left on macOS Default. One local change, not committed: the snapshot fired at 10 s, with the popover marked open at 5 s, the way a user opening the menu would. Before that, GPU Spaces had published only their first, still-tracing frame.
+These are the app's own drawing of the popover, not a screen capture. The `--snapshot-popover DIR` dev aid renders each popover face to PNG and quits; no desktop, Dock or other app is in the frame. They were taken from a build of this commit, run with `--offscreen` from its own folder (windows far off-screen, no menu-bar item), so the owner's live Argus and its config were untouched. That folder held a clean `.argus_spaces.conf` with the seven shipped themes on seven Spaces, Cygnus_A on the active one. Two local changes for the run, not committed: the snapshot fired at 15 s, with the popover marked open at 5 s, the way a user opening the menu would; and the active Space counted as on screen, which off-screen windows otherwise never are. The themes that need simulation time (Lizard_Island builds its reef, Tutorial_Reef grows) sat on the active Space's warm neighbours.
 
 ## Encoding
 
