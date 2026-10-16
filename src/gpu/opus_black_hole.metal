@@ -119,6 +119,7 @@ struct Static {
     float rho_ph[N_OCT];
     float foot_cr[N_OCT];       // footprint filter cell constants, from the theme
     float foot_cp[N_OCT];
+    float sky_gain;             // 0 = black sky, from the theme (SKY_VISIBLE)
     uchar srgb[4096];
 };
 
@@ -501,7 +502,8 @@ static float3 milkyWay(constant TraceParams& P, constant Static& st, float3 d) {
 
 // Sky light in display-linear units (the theme's packBg gain applied).
 static float3 sky(constant TraceParams& P, constant Static& st, float3 d, float foot) {
-    return (star(P, st, d, foot) + milkyWay(P, st, d)) * STAR_GAIN;
+    if (st.sky_gain <= 0.0f) return float3(0.0f);
+    return (star(P, st, d, foot) + milkyWay(P, st, d)) * (STAR_GAIN * st.sky_gain);
 }
 
 // ---------------------------------------------------------------- trace kernels

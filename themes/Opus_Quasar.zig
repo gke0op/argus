@@ -105,14 +105,14 @@
 //    an age a the part at r has moved Omega(r) a and the clump draws out into an arc.
 //    Hotter gas: emissivity x (1 + boost), so T rises as (1 + boost)^(1/4). Their count,
 //    size and brightness are choices; their motion is not.
-//  * Sky: a procedural Milky Way (band, dust lanes, bulge) and stars placed
-//    behind the hole and seen through the geodesics, so it bends into arcs and
-//    an Einstein ring. Its brightness is a composite-exposure choice.
+//  * Sky: black, as it would be. From here, at the centre of the giant galaxy hosting
+//    H1821+643 inside its cluster, the sky holds the host's stars and the cluster's galaxies,
+//    but next to a 25,000 K disk they are ~1e12 times fainter, far below any exposure that
+//    shows the disk (or any HDR display's range). Renders that show a sky expose it separately.
 //  * Camera exposure + Reinhard tone mapping (HDR: to the display's EDR headroom).
 //    The CPU fallback composites translucent layers after tone mapping, in display
 //    values; the GPU composites radiances before it.
-//  Not modelled: limb darkening, color correction of disk atmospheres,
-//  returning radiation, disk thickness, gas inside the ISCO.
+//  Not modelled: returning radiation, disk thickness, gas inside the ISCO.
 //
 // Contract: 1 allocation (one slab) at init, 0 after; no clocks or I/O.
 // The geodesic work happens once in init; draw() is table lookups.
@@ -171,6 +171,9 @@ const LIMB_B: f64 = 2.06; // electron-scattering limb darkening I(mu) ~ 1 + LIMB
 const EXP_N: usize = 1024; // exp table over [-4, 4] for the CPU draw
 const EXPO_TARGET: f64 = 7.0; // 99th-percentile disk luminance maps here before tone mapping
 const STAR_GAIN: f64 = 0.8;
+// The sky is black: next to a 25,000 K disk everything else (the host galaxy's stars, the cluster's
+// galaxies) is ~1e12 times fainter, far below any exposure that shows the disk (see header).
+const SKY_VISIBLE: f64 = 0.0;
 const STAR_CELL: f64 = 8.0e-3; // star grid spacing on the sky, radians (resolution-independent)
 const STAR_FLUX: f64 = 60.0; // intrinsic star brightness; lensing then dims or brightens each one
 const SKY_GAIN: f64 = 0.010; // diffuse Milky Way surface brightness (linear, pre-encode)
@@ -908,6 +911,7 @@ pub const State = struct {
     cell_p0: f32, // octave-0 cell size: azimuth, Q16
     turb_sigma: f32, // TURB_SIGMA, for the GPU path
     spot_rmax: f64, // SPOT_RMAX, for the GPU path
+    sky_gain: f32, // SKY_VISIBLE, for the GPU path
     rho_row: [N_OCT]f32, // measured neighbour correlation of each noise plane: rows, phase cells
     rho_ph: [N_OCT]f32,
     foot_cr: [N_OCT]f32, // GPU footprint filter: cell constants of the box-averaged rendered field
@@ -1045,6 +1049,7 @@ pub const State = struct {
         self.cell_p0 = @floatCast(2.0 * EDDY_MAJ_H * H_OVER_R / (2.0 * math.pi) * 65536.0);
         self.turb_sigma = TURB_SIGMA;
         self.spot_rmax = SPOT_RMAX;
+        self.sky_gain = @floatCast(SKY_VISIBLE);
         for (0..N_OCT) |oct| {
             const sc = math.pow(f64, 2.0, @floatFromInt(oct));
             const gr: usize = @max(1, @as(usize, @intFromFloat(@round(@as(f64, NR) / (cell_rows / sc)))));
@@ -1363,6 +1368,7 @@ pub const State = struct {
     }
 
     fn sky(self: *const State, d: [3]f64, foot: f64) [3]f64 {
+        if (SKY_VISIBLE <= 0.0) return .{ 0, 0, 0 };
         const a = self.star(d, foot);
         const b = self.milkyWay(d);
         return .{ a[0] + b[0], a[1] + b[1], a[2] + b[2] };
@@ -1371,6 +1377,7 @@ pub const State = struct {
     /// Could a star lie within `margin` of direction d? Stars sit >= 0.15 cell from their
     /// cell walls, so for margins below that, checking d's own cell is exact.
     fn starNear(self: *const State, d: [3]f64, margin: f64) bool {
+        if (SKY_VISIBLE <= 0.0) return false;
         const G = 1.0 / STAR_CELL;
         if (margin * G > 0.14) return true;
         const cx = @floor(d[0] * G);
