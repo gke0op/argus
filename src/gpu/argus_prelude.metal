@@ -11,10 +11,14 @@ using namespace metal;
 
 // Everything Argus tells a theme about the current frame (buffer 0 in every kernel).
 struct ArgusFrame {
-    float time;         // seconds of animation, 1/30 s per 30 FPS frame; wraps to 0 every
-                        // ARGUS_TIME_PERIOD (4 h) so it stays precise on a Space that runs for weeks
-    float dt;           // seconds since this Space's previous frame
-    uint  frame;        // frames drawn since the theme was loaded
+    float time;         // seconds of animation, continuous at any frame rate (it advances by
+                        // the real frame interval); wraps to 0 every ARGUS_TIME_PERIOD (4 h)
+                        // so it stays precise on a Space that runs for weeks
+    float dt;           // in argus_step: seconds since the previous step (1/30 s); in argus_draw:
+                        // seconds since this Space's previous drawn frame
+    uint  frame;        // the 30 Hz simulation tick since the theme was loaded: 0, 1, 2... at
+                        // 30, 60 and 120 FPS alike (argus_step runs once per tick). Frames drawn
+                        // between ticks at 60/120 FPS see the current tick's number again.
     uint  width;        // output size in pixels (1920 x 1200)
     uint  height;
     uint  state_width;  // state texture size (0 x 0 when the theme keeps no state)

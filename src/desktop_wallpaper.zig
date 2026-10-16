@@ -3048,6 +3048,75 @@ test "popover dismissal: hand-built global blocks match the Blocks ABI layout" {
     try std.testing.expectEqual(@as(c_ulong, 32), monitor_desc.size);
 }
 
+/// Drives the app's pacer and a theme's f.frame counter like a Space drawn on every vsync at `hz`
+/// for `secs` seconds; calls `visit(frame, steps)` for each encode.
+fn simulateMetalFrames(hz: u32, secs: u32, ctx: anytype, comptime visit: fn (@TypeOf(ctx), u32, bool) void) void {
+    var p: frame_rate.Pacer = .{};
+    p.setRate(hz);
+    var c: metal_theme.FrameCounter = .{};
+    for (1..hz * secs + 1) |f| {
+        _ = p.advance(@as(f64, @floatFromInt(f)) / @as(f64, @floatFromInt(hz))) orelse continue;
+        const st = p.spaceTimes(0, 1.0);
+        visit(ctx, c.forEncode(st.step_dt != null), st.step_dt != null);
+    }
+}
+
+test "frame rate: argus_step sees f.frame 0, 1, 2... at 30, 60 and 120 FPS" {
+    const Rec = struct {
+        steps: [64]u32 = undefined,
+        n: usize = 0,
+        draw_max: u32 = 0,
+        fn visit(self: *@This(), frame: u32, steps: bool) void {
+            if (steps and self.n < self.steps.len) {
+                self.steps[self.n] = frame;
+                self.n += 1;
+            }
+            self.draw_max = @max(self.draw_max, frame);
+        }
+    };
+    for (frame_rate.RATES) |hz| {
+        var r: Rec = .{};
+        simulateMetalFrames(hz, 1, &r, Rec.visit); // 30 logic ticks
+        try std.testing.expectEqual(@as(usize, 30), r.n);
+        for (r.steps[0..8], 0..) |f, i| try std.testing.expectEqual(@as(u32, @intCast(i)), f);
+        // Draw-only frames between ticks reuse the current tick's number: never ahead of the steps.
+        try std.testing.expectEqual(r.steps[r.n - 1], r.draw_max);
+    }
+}
+
+test "frame rate: Lizard Island's build frames and Tutorial Reef's seed cadence match at every rate" {
+    const Rec = struct {
+        build: [3]u32 = @splat(0), // argus_step runs that hit f.frame == 0, 1, 2 (Lizard's reef build)
+        seeds: u32 = 0, // distinct f.frame / 90 values (Tutorial_Reef drops a seed on each)
+        last_seed: ?u32 = null,
+        grain: u32 = 0, // distinct f.frame / 2 values drawn (Night_Tide's sparkle grain)
+        last_grain: ?u32 = null,
+        fn visit(self: *@This(), frame: u32, steps: bool) void {
+            if (steps and frame <= 2) self.build[frame] += 1;
+            if (steps and self.last_seed != frame / 90) {
+                self.seeds += 1;
+                self.last_seed = frame / 90;
+            }
+            if (self.last_grain != frame / 2) {
+                self.grain += 1;
+                self.last_grain = frame / 2;
+            }
+        }
+    };
+    var ref: Rec = .{};
+    simulateMetalFrames(30, 30, &ref, Rec.visit);
+    try std.testing.expectEqual([3]u32{ 1, 1, 1 }, ref.build);
+    try std.testing.expectEqual(@as(u32, 10), ref.seeds); // one per 3 s over 30 s
+    try std.testing.expectEqual(@as(u32, 450), ref.grain); // 15 Hz over 30 s
+    for ([_]u32{ 60, 120 }) |hz| {
+        var r: Rec = .{};
+        simulateMetalFrames(hz, 30, &r, Rec.visit);
+        try std.testing.expectEqual(ref.build, r.build);
+        try std.testing.expectEqual(ref.seeds, r.seeds);
+        try std.testing.expectEqual(ref.grain, r.grain);
+    }
+}
+
 test "eject: a theme Space goes back to macOS Default and saves as passthrough" {
     g_io = std.testing.io;
     sc.g_io = std.testing.io;

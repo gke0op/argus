@@ -84,6 +84,9 @@ pub const Pacer = struct {
         const t0 = self.t0 orelse {
             self.t0 = now;
             self.last_frame = 0;
+            // The very first frame is a whole logic tick at any rate, so tick 0 (the first
+            // argus_step, f.frame 0) lands on the same frame at 30, 60 and 120 FPS.
+            if (self.clock == 0) return self.step((UNITS_PER_TICK + unitsPerFrame(self.hz) - 1) / unitsPerFrame(self.hz));
             return self.step(1);
         };
         const f = @round((now - t0) * hz_f);
