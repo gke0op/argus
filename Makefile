@@ -32,12 +32,12 @@ claims:
 	$(ZIG) run -lc -O ReleaseFast --dep theme -Mroot=src/claim_check.zig -O ReleaseFast -Mtheme=$(THEME)
 
 # Test ledger: one JSON record per checked physics claim, from the theme's tests, claims and gpu-bench.
-LEDGER_THEME ?= themes/Opus_Quasar.zig
-LEDGER_OUT ?= docs/opus_quasar_ledger.json
+LEDGER_THEME ?= themes/H1821.zig
+LEDGER_OUT ?= docs/h1821_ledger.json
 ledger:
 	ZIG=$(ZIG) tools/ledger.sh $(LEDGER_THEME) $(LEDGER_OUT)
 
-# The quasar family: generated from themes/Opus_Quasar.zig (tools/gen_quasars.py).
+# The quasar family: generated from themes/H1821.zig (tools/gen_quasars.py).
 quasars:
 	python3 -I tools/gen_quasars.py
 
@@ -91,9 +91,9 @@ release: app
 	@cd dist && shasum -a 256 $(RELEASE).zip | tee $(RELEASE).zip.sha256
 	@du -h dist/$(RELEASE).zip
 
-# GPU prototype: Opus_Quasar's draw() as a Metal compute kernel, timed and diffed against the CPU.
+# GPU prototype: H1821's draw() as a Metal compute kernel, timed and diffed against the CPU.
 GPU_FRAMES ?= 240
-BH_THEME ?= themes/Opus_Quasar.zig # any theme on the Kerr-disk engine (or themes/Opus_Gargantua.zig)
+BH_THEME ?= themes/H1821.zig # any theme on the Kerr-disk engine (or themes/Gargantua.zig)
 metalfx-demo:
 	$(ZIG) run $(ZFLAGS) src/metalfx_demo.zig -- $(THEME) --out-dir $(dir $(OUT))
 

@@ -40,11 +40,11 @@ falls out of Einstein's equations, solved for every pixel of your screen.
 
 | Theme | Modelled on | What is real | What is chosen |
 |---|---|---|---|
-| **Opus Quasar** | H1821+643, the quasar at the heart of a galaxy cluster | Spin 0.62 (X-ray), mass ~4 billion Suns, feeding at ~20% of its limit | The 88° camera; the disk drawn thin |
-| **Opus Cygnus A** | Cygnus A, the hidden quasar inside the most famous radio galaxy | Mass 2.5 billion Suns (gas dynamics), feeding at ~1% | Spin 0.9 (never measured: dust hides it) |
-| **Opus J0834** | F2MS J0834+3506, a young, dust-reddened "red quasar" | Mass 3.2 billion Suns, feeding at 4% | Spin 0.99 from published models, not a direct measurement |
-| **Opus PG1426** | PG 1426+015, the heaviest black hole weighed by light echoes | Mass 1.0 billion Suns, spin above 0.7 (X-ray) | Spin set to 0.9 inside that range |
-| **Opus Gargantua** | The black hole from *Interstellar* | The same computed light paths and spin physics | Its disk is tuned to a cinematic 6,500 K glow |
+| **H1821** | H1821+643, the quasar at the heart of a galaxy cluster | Spin 0.62 (X-ray), mass ~4 billion Suns, feeding at ~20% of its limit | The 88° camera; the disk drawn thin |
+| **Cygnus A** | Cygnus A, the hidden quasar inside the most famous radio galaxy | Mass 2.5 billion Suns (gas dynamics), feeding at ~1% | Spin 0.9 (never measured: dust hides it) |
+| **J0834** | F2MS J0834+3506, a young, dust-reddened "red quasar" | Mass 3.2 billion Suns, feeding at 4% | Spin 0.99 from published models, not a direct measurement |
+| **PG1426** | PG 1426+015, the heaviest black hole weighed by light echoes | Mass 1.0 billion Suns, spin above 0.7 (X-ray) | Spin set to 0.9 inside that range |
+| **Gargantua** | The black hole from *Interstellar* | The same computed light paths and spin physics | Its disk is tuned to a cinematic 6,500 K glow |
 
 Each theme's header lists its sources. Three of the real quasars feed slowly enough
 (1–4% of their limit) that their disks are genuinely razor-thin, which is what makes the
@@ -100,7 +100,7 @@ Not everything here is equally exact, and we say which is which.
 ## How it was checked
 
 - **A test ledger.** Every physics claim the code makes is a test with a reference and a
-  tolerance, written to [`opus_quasar_ledger.json`](opus_quasar_ledger.json): 56 records,
+  tolerance, written to [`h1821_ledger.json`](h1821_ledger.json): 56 records,
   49 pass, 0 fail, 7 reported values. Regenerate it with `make ledger`.
 - **Two independent renderers.** A double-precision CPU path and a single-precision GPU path
   trace the same scene; they agree on 97% of pixels to within 8 levels, and on the shadow edge
@@ -114,13 +114,13 @@ Not everything here is equally exact, and we say which is which.
 
 ```sh
 make test                                   # unit tests + generated-theme check
-./.toolchain/zig test themes/Opus_Quasar.zig  # the physics claims, printed as ledger records
-make ledger                                 # rebuild docs/opus_quasar_ledger.json
-make gpu-bench BH_THEME=themes/Opus_Quasar.zig  # GPU vs CPU, shadow contour, timings
-make quasars                                # regenerate the quasar family from Opus_Quasar.zig
+./.toolchain/zig test themes/H1821.zig  # the physics claims, printed as ledger records
+make ledger                                 # rebuild docs/h1821_ledger.json
+make gpu-bench BH_THEME=themes/H1821.zig  # GPU vs CPU, shadow contour, timings
+make quasars                                # regenerate the quasar family from H1821.zig
 ```
 
-The four real quasars share one engine: `themes/Opus_Quasar.zig`. The others are generated
+The four real quasars share one engine: `themes/H1821.zig`. The others are generated
 from it by `tools/gen_quasars.py` with their own mass, spin, feeding rate and sources. Adding a
 quasar is one entry in that table.
 

@@ -1,5 +1,5 @@
 // ============================================================================
-// OPUS NIGHT TIDE // themes/Opus_Night_Tide.metal
+// NIGHT TIDE // themes/Night_Tide.metal
 // Author: Claude Opus (Anthropic), 2026-10-15.
 //
 // A beach on a moonless night during a red tide. Swells roll in dark from the

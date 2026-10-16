@@ -88,7 +88,7 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
   a plain file name in the theme's folder. `argus_init` then gets it as a third argument,
   `texture2d<float, access::read> data [[texture(1)]]`, to decode or bake into the state; it is
   not bound for step or draw. A missing or wrong-sized file fails the load (and the harness).
-  Example: `themes/Opus_Orion_Nebula.metal` (built by `tools/orion_bake/bake.py`).
+  Example: `themes/Orion_Nebula.metal` (built by `tools/orion_bake/bake.py`).
 
 ## 4. Workflow
 
@@ -156,7 +156,7 @@ them in **SIMD groups of 32 threads = 32 neighbouring pixels of one row**, which
    lanes are active (earlier `continue`s, right screen edge): split work by rank among
    `simd_ballot(true)` and fall back when lanes aren't on the same item
    (`simd_all(id == simd_broadcast_first(id))`). Examples: `Gemini_Aquarium.metal` (whole
-   draw 9.9 → 1.7 ms), `Opus_Coral_Reef.metal` corals. For bigger lists, cull per threadgroup
+   draw 9.9 → 1.7 ms), `Coral_Reef.metal` corals. For bigger lists, cull per threadgroup
    into `threadgroup` arrays with an atomic append and a `threadgroup_barrier` (no early
    `return` before the barrier): `Lizard_Island.metal`.
 5. **Use power-of-two strides for packed tables** (`uint2(n & 2047, row + (n >> 11))`, not
@@ -193,7 +193,7 @@ Explain the one mental shift up front: you write the rule for one pixel, and the
 |---|---|
 | `src/gpu/argus_prelude.metal` | the prelude (helpers, `ArgusFrame`) |
 | `src/gpu/metal_theme.zig` | compiles themes, directives, state ping-pong, encodes frames |
-| `src/gpu/presenter.zig` | CAMetalLayer per Space window; Zig + Metal hybrids (Opus_Quasar) |
+| `src/gpu/presenter.zig` | CAMetalLayer per Space window; Zig + Metal hybrids (H1821) |
 | `src/theme_harness.zig` | `make harness`; `.metal` files take the GPU path |
 | `themes/Tutorial_*.metal` | the two tutorials |
 | `tools/gpu_probes/` | `make gpu-probes`: one-cost-each probe kernels behind section 5 |
@@ -201,7 +201,7 @@ Explain the one mental shift up front: you write the rule for one pixel, and the
 | `apple_gpu.md` | the Apple GPU as Argus drives it: measured + sourced |
 
 Zig + Metal hybrids (a Zig theme whose per-pixel draw runs as a Metal kernel over its
-CPU-built tables) exist as a prototype for `Opus_Quasar` only (`src/gpu/bh_*.zig`,
+CPU-built tables) exist as a prototype for `H1821` only (`src/gpu/bh_*.zig`,
 `make gpu-bench`). They aren't a general SDK feature yet.
 
 ## When you are done: leave field notes

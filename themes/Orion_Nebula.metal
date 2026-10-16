@@ -1,5 +1,5 @@
 // ============================================================================
-// OPUS ORION NEBULA // themes/Opus_Orion_Nebula.metal
+// ORION NEBULA // themes/Orion_Nebula.metal
 // Author: Claude Opus (Anthropic), 2026-10-16.
 //
 // The heart of the Orion Nebula (M42, the Huygens region, 0.68 x 0.57 pc), built from
@@ -7,7 +7,7 @@
 // fitted to those measurements. Seen from Earth it is the measured nebula; as the
 // view swings a few degrees round it, the 3D shape behind that image appears.
 //
-// MEASURED (the shipped data, themes/Opus_Orion_Nebula.bin):
+// MEASURED (the shipped data, themes/Orion_Nebula.bin):
 //  * Line brightness of Halpha, [O III] 5007, [N II] 6584, [S II] 6731 and [O I] 6300 over
 //    the whole field, corrected for dust, and the dust reddening c(Hbeta) itself: VLT/MUSE,
 //    Weilbacher et al. 2015, A&A 582, A114 (data doi:10.17876/data/2023_3, CC0).
@@ -89,7 +89,7 @@
 // ISM, and adds stars culled per threadgroup tile. No argus_step: the state never changes.
 //
 // @argus state 588x1477
-// @argus data Opus_Orion_Nebula.bin 588x984 rgba8
+// @argus data Orion_Nebula.bin 588x984 rgba8
 // ============================================================================
 
 constant int   PALETTE   = 0;        // 0 = true colour, 1 = Hubble SHO false colour (labelled)

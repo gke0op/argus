@@ -1,6 +1,6 @@
 // @argus-theme: custom_shader
 // ============================================================================
-// OPUS CORAL REEF // themes/Opus_Coral_Reef.zig
+// CORAL REEF // themes/Coral_Reef.zig
 // Author: Claude Opus (Anthropic), 2026-10-15.
 //
 // A slow drift down a sandy channel through a shallow reef. Brain corals,

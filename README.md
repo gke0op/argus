@@ -9,11 +9,11 @@
 
 **Live wallpapers for macOS that you write yourself: one Zig or Metal file per Desktop Space, running on the bare metal.**
 
-<!-- HERO MEDIA SLOT: being rendered. Flagship Opus_Cygnus_A first, then Opus_Night_Tide.
+<!-- HERO MEDIA SLOT: being rendered. Flagship Cygnus_A first, then Night_Tide.
      GitHub plays an .mp4 only from an uploaded asset URL, so the GIF is the inline fallback;
      link the mp4 below it (or swap in the uploaded asset URL once it exists). -->
 <p align="center">
-  <img src="docs/media/hero.gif" alt="Opus_Cygnus_A: a Kerr black hole with a thin accretion disk, seen nearly edge-on, then Opus_Night_Tide: bioluminescent surf on a moonless beach" width="100%">
+  <img src="docs/media/hero.gif" alt="Cygnus_A: a Kerr black hole with a thin accretion disk, seen nearly edge-on, then Night_Tide: bioluminescent surf on a moonless beach" width="100%">
 </p>
 <p align="center"><a href="docs/media/hero.mp4">Watch in full quality (MP4)</a></p>
 
@@ -38,12 +38,12 @@ wrapper and nothing to install beyond Zig (and `python3`, which `make test` uses
 
 ## The black holes
 
-Five black-hole themes, four of them real quasars: H1821+643 (`Opus_Quasar`), Cygnus A,
+Five black-hole themes, four of them real quasars: H1821+643 (`H1821`), Cygnus A,
 F2MS J0834+3506 and PG 1426+015, plus *Interstellar*'s Gargantua. Every pixel's light is traced
 through the curved spacetime of a spinning black hole; the disk's glow comes from a physical
 model of a feeding quasar; the approximations and the artistic choices are named as such.
 
-The flagship is `themes/Opus_Cygnus_A.zig`: the hidden quasar in Cygnus A, 2.5 billion Suns,
+The flagship is `themes/Cygnus_A.zig`: the hidden quasar in Cygnus A, 2.5 billion Suns,
 feeding at about 1% of its limit, seen nearly edge-on. Why we think it is real, and how you can
 check:
 
@@ -52,8 +52,8 @@ check:
   8.9e-6 M on the CPU and 1.8e-5 M on the GPU, under 1/2000 of a pixel.
 - **Every checked claim is a record in a test ledger** (`make ledger`): the claim, its
   reference, the measured value, the bounds and the command that produced it. Cygnus A:
-  49 asserted claims, all pass ([`docs/opus_cygnus_a_ledger.json`](docs/opus_cygnus_a_ledger.json);
-  H1821+643: [`docs/opus_quasar_ledger.json`](docs/opus_quasar_ledger.json)).
+  49 asserted claims, all pass ([`docs/cygnus_a_ledger.json`](docs/cygnus_a_ledger.json);
+  H1821+643: [`docs/h1821_ledger.json`](docs/h1821_ledger.json)).
 - **The headers say what is computed and what is chosen.** Cygnus A's spin has never been
   measured, so a = 0.9 is labelled a choice.
 
@@ -61,8 +61,8 @@ What you are looking at, how faithful each part is, how it was checked and how t
 **[docs/QUASARS.md](docs/QUASARS.md)**. The full derivations and open questions for physicists:
 [docs/majestic-glutton.md](docs/majestic-glutton.md).
 
-Other themes worth a look: `Opus_Night_Tide` (bioluminescent surf; the flashes follow
-published dinoflagellate research), `Opus_Orion_Nebula` (from VLT/MUSE line maps),
+Other themes worth a look: `Night_Tide` (bioluminescent surf; the flashes follow
+published dinoflagellate research), `Orion_Nebula` (from VLT/MUSE line maps),
 `Lizard_Island` (a real reef lagoon at metre scale), `Claude_Textus` (a loom weaving cellular
 automata), `Echo` (a reservoir network learning online), `Fable_Chimera` (a Kuramoto chimera
 state).
@@ -149,7 +149,7 @@ Measured on an M3 at 1920x1200. GPU numbers are the **live** cost at Argus's 30 
 | :--- | ---: |
 | `Tutorial_Tides.metal` | 1.0–1.5 ms |
 | `Tutorial_Reef.metal` | 2.1–2.2 ms |
-| `Opus_Night_Tide.metal` | 5.3–6.2 ms |
+| `Night_Tide.metal` | 5.3–6.2 ms |
 | Quasar engine on the GPU (HDR10, native 3024x1964, per-frame shade) | 4.8–5.5 ms |
 
 The full table, including the CPU themes, is in [BENCHMARK.md](BENCHMARK.md).

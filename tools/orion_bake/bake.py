@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-tools/orion_bake/bake.py -- builds the data behind themes/Opus_Orion_Nebula.metal.
+tools/orion_bake/bake.py -- builds the data behind themes/Orion_Nebula.metal.
 
     python3 -I tools/orion_bake/bake.py --cache <dir> [--report <dir>]
 
@@ -12,8 +12,8 @@ Needs numpy and scipy. Downloads (once, into --cache):
     around M42, read with HTTP range requests from mean_and_std_healpix.fits.
 
 Writes:
-  * themes/Opus_Orion_Nebula.bin: the measured maps, downsampled and encoded (see FORMAT).
-  * the block between "BEGIN BAKED" and "END BAKED" in themes/Opus_Orion_Nebula.metal:
+  * themes/Orion_Nebula.bin: the measured maps, downsampled and encoded (see FORMAT).
+  * the block between "BEGIN BAKED" and "END BAKED" in themes/Orion_Nebula.metal:
     the fitted front surface, the flow profile, line colours, extinction ratios.
   * --report: residual maps (PNG) and report.md with every fit number.
 
@@ -26,8 +26,8 @@ from scipy import ndimage as nd, optimize as op
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
-THEME = os.path.join(ROOT, "themes", "Opus_Orion_Nebula.metal")
-DATA = os.path.join(ROOT, "themes", "Opus_Orion_Nebula.bin")
+THEME = os.path.join(ROOT, "themes", "Orion_Nebula.metal")
+DATA = os.path.join(ROOT, "themes", "Orion_Nebula.bin")
 
 # ---------------------------------------------------------------------------------------------
 # Sources and constants (each with where it comes from)
@@ -370,7 +370,7 @@ def main():
     sp = SPAXEL_AS * F * DIST_PC * math.pi / 180 / 3600          # pc per texel
     tex = lambda col, row: ((col + 0.5) / F - 0.5, (row + 0.5) / F - 0.5)
     cx, cy = tex(*sky_to_pix(*STARS[0][1:3])); ax, ay = tex(*sky_to_pix(*STARS[2][1:3]))
-    R(f"# Opus_Orion_Nebula bake report\n\nGrid {NX} x {NY} texels of {SPAXEL_AS * F:.1f}\" = {sp * 1000:.2f} mpc at {DIST_PC:.0f} pc; field {NX * sp:.3f} x {NY * sp:.3f} pc.")
+    R(f"# Orion_Nebula bake report\n\nGrid {NX} x {NY} texels of {SPAXEL_AS * F:.1f}\" = {sp * 1000:.2f} mpc at {DIST_PC:.0f} pc; field {NX * sp:.3f} x {NY * sp:.3f} pc.")
 
     R("Destriping (rms of the removed pattern, vertical / horizontal): " + ", ".join(f"{n} {v[0] * 100:.1f}% / {v[1] * 100:.1f}%" for n, v in stripes))
 

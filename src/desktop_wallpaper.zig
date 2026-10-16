@@ -932,7 +932,7 @@ const MacBridge = struct {
 
     // ---- Settings face --------------------------------------------------------------------
 
-    /// "Opus_Coral_Reef.zig" -> "Opus Coral Reef", shortened with an ellipsis to fit `max` bytes.
+    /// "Coral_Reef.zig" -> "Coral Reef", shortened with an ellipsis to fit `max` bytes.
     fn displayName(file: []const u8, out: []u8) []const u8 {
         const ext = std.Io.Dir.path.extension(file);
         const stem = file[0 .. file.len - ext.len];
