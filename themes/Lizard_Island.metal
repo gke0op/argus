@@ -1088,12 +1088,14 @@ static float3 fishRel(int s, float t, float tau, float4 an, float4 ao, float see
 constant uint FISH_ROW = 2052;   // 2052..2055: fish i at column 32 + i
 constant uint SNOW_ROW = 2056;   // mote i at column 32 + i
 constant uint CORAL_ROW = 2057;  // 2057..2058: coral i this frame (screen circle, camera-relative place)
+constant uint FISH_RECT_ROW = 2059;   // fish i's screen rect this frame (padded), for culling
 
 static inline float2 splitf(float v) { const float i = floor(v); return float2(i, v - i); }
 
 static void fishStep(int i, Scene S, texture2d<float, access::read> prev, texture2d<float, access::write> next) {
     const uint col = CORAL_COL0 + uint(i);
     next.write(float4(0.0f), uint2(col, FISH_ROW + 3u));   // invalid until proven otherwise
+    next.write(float4(0.0f), uint2(col, FISH_RECT_ROW));
     int s = 0;
     for (int k = 1; k < N_SPECIES; k++) if (i >= SP_START[k]) s = k;
     const uint fh = argus_hash(uint(i) * 0x27D4EB2Du ^ 0x51F1u);
@@ -1152,6 +1154,15 @@ static void fishStep(int i, Scene S, texture2d<float, access::read> prev, textur
     next.write(float4(ax, splitf(min(Lp, 4000.0f))), uint2(col, FISH_ROW + 1u));
     next.write(float4(min(W, 4000.0f), wag, p.z, 0.0f), uint2(col, FISH_ROW + 2u));
     next.write(float4(seed, float(s), 1.0f, 0.0f), uint2(col, FISH_ROW + 3u));
+    // The draw's culling rectangle, padded and rounded outward so the 16-bit
+    // store can only make it bigger (the draw re-tests with the exact values).
+    {
+        const float Lr = min(Lp, 4000.0f);
+        const float2 tlr = hd + ax * Lr;
+        const float pad = SP_EXT[s] * min(W, 4000.0f) + 2.0f;
+        const float2 lo = floor(min(hd, tlr) - pad) - 4.0f, hi = ceil(max(hd, tlr) + pad) + 4.0f;
+        next.write(float4(clamp(lo, -8000.0f, 8000.0f), clamp(hi, -8000.0f, 8000.0f)), uint2(col, FISH_RECT_ROW));
+    }
 }
 
 static void coralStep(int i, Scene S, texture2d<float, access::read> prev, texture2d<float, access::write> next) {
@@ -1416,12 +1427,17 @@ static bool seagrass(texture2d<float> st, Scene S, float rk, float ry, float zhi
     if (gh > 0.6f) return false;                   // it lands high on a rock: blades are below it
     // Blades stand on the sand at their own place, which is never above ~0.25 m;
     // where the ray lands on a rock's foot, the sand in front is lower than the hit.
-    const float z0 = max(Z_NEAR, zhit - (GRASS_HMAX + max(gh - 0.25f, 0.0f)) / -ry);
+    float z0 = max(Z_NEAR, zhit - (GRASS_HMAX + max(gh - 0.25f, 0.0f)) / -ry);
     // Most pixels see bare sand: skip them unless the ray's ground track meets a meadow.
     const float zm = 0.5f * (z0 + zhit);
     if (grassDensity(reefAt(st, S.camx + rk * zhit, S.scroll + zhit)) <= 0.0f &&
         grassDensity(reefAt(st, S.camx + rk * zm, S.scroll + zm)) <= 0.0f &&
         grassDensity(reefAt(st, S.camx + rk * z0, S.scroll + z0)) <= 0.0f) return false;
+    // Over Halophila only (no strap blade can stand anywhere along this stretch:
+    // the meadow type changes over metres), the plants are under 9 cm, so the
+    // rows the ray passes high above them needn't be visited at all.
+    if (max(strapness(S.camx + rk * zhit, S.scroll + zhit), strapness(S.camx + rk * z0, S.scroll + z0)) < 0.2f)
+        z0 = max(z0, zhit - (0.09f + 0.10f + max(gh - 0.25f, 0.0f)) / -ry);
     const float px = 1.0f / S.focal;   // metres per pixel per metre of depth
     const float t = S.t;
     const int r0 = int(floor((S.scroll + z0) / GRASS_CELL));
@@ -1430,8 +1446,14 @@ static bool seagrass(texture2d<float> st, Scene S, float rk, float ry, float zhi
     for (int iz = r0; iz <= r1 && iz < r0 + 40; iz++) {
         const float zr = (float(iz) + 0.5f) * GRASS_CELL - S.scroll;   // this row's depth
         const float xr = S.camx + rk * zr;
-        const float dens = grassDensity(reefAt(st, xr, S.scroll + zr));
+        const float4 rs = reefAt(st, xr, S.scroll + zr);
+        const float dens = grassDensity(rs);
         if (dens <= 0.0f) continue;
+        // Meadow type for this 6 cm row (it changes over metres, not centimetres),
+        // and the tallest plant it can hold: skip rows the ray passes over.
+        const float sr = strapness(xr, S.scroll + zr);
+        const float hrow = sr > 0.3f ? 0.36f + 0.08f : 0.07f + 0.02f;
+        if (S.camy + ry * zr - rs.a > hrow + 0.10f) continue;
         const int ix0 = int(floor(xr / GRASS_CELL));
         for (int ix = ix0 - 1; ix <= ix0 + 1; ix++) {
             const uint h = argus_hash(uint(ix + 1000000) * 0x9E3779B1u ^ argus_hash(uint(iz + 1000000)));
@@ -1445,7 +1467,7 @@ static bool seagrass(texture2d<float> st, Scene S, float rk, float ry, float zhi
             // Strap-leaved Halodule/Thalassia only in the shallows at the foot of the
             // fringing reef; Halophila (a pair of small oval leaves on a short stalk)
             // everywhere else in the lagoon.
-            const bool strap = strapness(bx, bzw) > 0.5f + 0.3f * (q2 - 0.5f);
+            const bool strap = sr > 0.5f + 0.3f * (q2 - 0.5f);
             const float H = strap ? 0.12f + 0.24f * q3 : 0.03f + 0.04f * q3;
             // Each blade is planted on the ground at its own spot, and only where
             // that spot is meadow (not rock): near a coral head the ray lands on the
@@ -1532,7 +1554,7 @@ static bool marchReef(texture2d<float> st, Scene S, float rk, float ry, thread f
     // frame as the diver drifted, so the heads seemed to dance).
     if (zp < z) {
         float za = zp, zb = z;
-        for (int k = 0; k < 7; k++) {
+        for (int k = 0; k < 5; k++) {
             const float zm = 0.5f * (za + zb);
             const float4 s2 = reefAt(st, S.camx + rk * zm, S.scroll + zm);
             if (S.camy + ry * zm < s2.a) { zb = zm; sm = s2; } else za = zm;
@@ -1582,6 +1604,8 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
 
     // ---- cull: each thread places a few animals, corals and motes, keeps those on this tile ----
     for (uint i = tidx; i < uint(NUM_FISH); i += nthreads) {
+        const float4 fr = st.read(uint2(CORAL_COL0 + i, FISH_RECT_ROW));
+        if (fr.z <= fr.x || fr.z < tlo.x || fr.x > thi.x || fr.w < tlo.y || fr.y > thi.y) continue;
         const float4 t3 = st.read(uint2(CORAL_COL0 + i, FISH_ROW + 3u));
         if (t3.z < 0.5f) continue;
         const float4 t0 = st.read(uint2(CORAL_COL0 + i, FISH_ROW));
