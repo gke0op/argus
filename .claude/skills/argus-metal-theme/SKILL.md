@@ -84,7 +84,7 @@ pixel; it never loops over the screen.
 
 | Name | What it is |
 |---|---|
-| `ArgusFrame f` | `time` (s, wraps every 4 h), `dt` (s), `frame`, `width`, `height`, `state_width`, `state_height`, `seed` |
+| `ArgusFrame f` | `time` (s, continuous, wraps every 4 h), `dt` (s), `frame` (30 Hz simulation tick: 0, 1, 2… at 30, 60 and 120 FPS alike), `width`, `height`, `state_width`, `state_height`, `seed` |
 | `ARGUS_TIME_PERIOD` | 14400.0f: where `f.time` wraps; fit long cycles to it |
 | `float2 argus_uv(uint2 gid, constant ArgusFrame& f)` | pixel → centred coords, y up, short side spans -1..1 |
 | `float2 argus_uv01(uint2 gid, uint w, uint h)` | pixel → 0..1, y down (texture coordinates) |
@@ -104,12 +104,18 @@ If anything in your composition is seeded, check several seeds (§5).
 
 ## 3. Themes that remember: GPU state
 
+**Frame rate.** The user can run Argus at 30, 60 or 120 FPS. Simulation always ticks at 30 Hz:
+`argus_step` runs once per tick with `f.dt` = 1/30 s, and `f.frame` is the tick index, so
+building state on frames 0, 1, 2 or pacing events by `f.frame / N` behaves the same at every
+rate. At 60/120 FPS `argus_draw` also runs between ticks, on the current state, with the same
+`f.frame` and a continuous `f.time`; animate smooth motion from `f.time`, not `f.frame`.
+
 For simulations (reaction-diffusion, cellular automata, fluids, lattice Boltzmann, trails), add
 a **state texture** that persists between frames:
 
 ```cpp
 // @argus state 960x600          <- state size (default: screen size). Add `float32` for full precision.
-// @argus steps 8                <- argus_step runs this many times per frame (default 1, max 64)
+// @argus steps 8                <- argus_step runs this many times per tick (default 1, max 64)
 
 kernel void argus_init(constant ArgusFrame& f [[buffer(0)]],
                        texture2d<float, access::write> state [[texture(0)]], uint2 gid [[thread_position_in_grid]]);

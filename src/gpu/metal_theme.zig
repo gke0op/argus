@@ -39,6 +39,23 @@ pub fn advanceClock(clock: *f64, dt: f32) f32 {
     return @floatCast(@mod(clock.*, TIME_PERIOD));
 }
 
+/// `f.frame`: the 30 Hz simulation tick index, the same at every frame rate. The first encode
+/// is tick 0; each later encode that steps (a logic tick, see desktop/frame_rate.zig) moves to the
+/// next tick, and draw-only encodes between ticks reuse the current number. Themes that build
+/// state on frames 0, 1, 2 or pace events by `f.frame / N` therefore behave as at 30 FPS.
+pub const FrameCounter = struct {
+    current: u32 = 0,
+    started: bool = false,
+
+    /// The f.frame for this encode; `tick` is true when argus_step runs in it.
+    pub fn forEncode(self: *FrameCounter, tick: bool) u32 {
+        if (tick) {
+            if (self.started) self.current +%= 1 else self.started = true;
+        }
+        return self.current;
+    }
+};
+
 /// Mirrors `struct ArgusFrame` in the prelude.
 pub const Frame = extern struct {
     time: f32 = 0,
@@ -171,6 +188,7 @@ pub const Theme = struct {
     cur: usize = 0,
     needs_init: bool = true,
     frame: Frame = .{},
+    ticks: FrameCounter = .{},
     /// Seconds since load, in f64 (see TIME_PERIOD); frame.time is this, wrapped.
     clock: f64 = 0,
 
@@ -251,6 +269,7 @@ pub const Theme = struct {
     /// moves the same at 30, 60 and 120 FPS (desktop/frame_rate.zig). With equal dts this is
     /// exactly `encode`.
     pub fn encodeTimes(self: *Theme, cb: mtl.Id, out: mtl.Id, clock_dt: f32, step_dt: ?f32) void {
+        self.frame.frame = self.ticks.forEncode(step_dt != null);
         self.frame.dt = step_dt orelse clock_dt;
         const enc = mtl.msg(mtl.Id, cb, "computeCommandEncoder", .{});
         const fb: *const anyopaque = &self.frame;
@@ -283,7 +302,6 @@ pub const Theme = struct {
         mtl.msg(void, enc, "setTexture:atIndex:", .{ out, @as(usize, 0) });
         self.draw.dispatch(enc, self.frame.width, self.frame.height);
         mtl.msg(void, enc, "endEncoding", .{});
-        self.frame.frame +%= 1;
         self.frame.time = advanceClock(&self.clock, clock_dt);
     }
 
