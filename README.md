@@ -97,10 +97,10 @@ swipes, live reload and open at login. Settings live in `.argus_settings.conf` n
 Argus.app, one `key=value` per line.
 
 <p align="center">
-  <img src="docs/media/popover.png" alt="The Argus menu-bar popover: a strip of seven Space thumbnails, each running its own theme, with Space V (Cygnus A) selected, plus pause and settings buttons" width="680">
+  <img src="docs/media/popover.png" alt="The Argus menu-bar popover: a strip of seven Space thumbnails, six running their own themes and one on the macOS default, with Space III (Cygnus A) selected, plus pause and settings buttons" width="680">
 </p>
 <p align="center">
-  <img src="docs/media/settings.png" alt="The Argus Settings view: Space V's preview and theme stepper set to Cygnus A, a speed slider at 1x, and switches for smooth swipes, live reload and open at login" width="680">
+  <img src="docs/media/settings.png" alt="The Argus Settings view: Space III's preview and theme stepper set to Cygnus A, a speed slider at 1x, and switches for smooth swipes, live reload and open at login" width="680">
 </p>
 
 ## Write your own theme
