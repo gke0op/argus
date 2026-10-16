@@ -71,22 +71,27 @@ they stay in the git history (`git log --all -- themes/<name>`) as reference sub
 | **`J0834.zig`** (history) | Claude Opus | The quasar engine (generated) modelled on the red quasar F2MS J0834+3506: $3.2\times10^9\,M_\odot$, $0.040\,L_{\rm Edd}$, $a/M=0.99$ from radiative-efficiency models (CPU path shown; the app draws it on the GPU by default) | `61,368,016 B` (`58.52 MiB`) | **`5,113–5,133 µs`** | **`195–196 FPS`** | Bronze |
 | **`PG1426.zig`** (history) | Claude Opus | The quasar engine (generated) modelled on the bare quasar PG 1426+015, the most massive reverberation-mapped black hole: $1.0\times10^9\,M_\odot$, $\sim0.024\,L_{\rm Edd}$, $a/M=0.9$ (CPU path shown; the app draws it on the GPU by default) | `61,368,016 B` (`58.52 MiB`) | **`6,017–6,073 µs`** | **`165–166 FPS`** | Bronze |
 
-### GPU (Metal) themes: live cost
+### The six shipped themes: measured cost
 
-Apple GPUs stay at low clocks when Argus paces frames at 30 FPS, so a theme's live cost is 1.4–2.3× its back-to-back cost. Judge GPU themes on the **live** column (`make harness THEME=themes/X.metal` prints it as "Paced 30 FPS"). Measured on an M3 at 1920×1200 into a BGRA8 target; live = median of 45 paced frames, range over 3–4 runs.
+Apple GPUs stay at low clocks when Argus paces frames at 30 FPS, so a theme's live cost is higher than its back-to-back cost. Judge GPU themes on the **paced** column (`make harness THEME=themes/X.metal` prints it as "Paced 30 FPS"). Measured on an M3 with 8 GB, 3 runs per theme; GPU busy, CPU and memory come from `Argus --offscreen --bench-space 0 --perf-log` with the theme on one Space (and on four, for the last column). An empty Argus costs 13 MB, 0.2% CPU and no GPU.
 
-| Theme | Back-to-back | Live (paced 30 FPS) |
-| :--- | ---: | ---: |
-| `themes/Tutorial_Tides.metal` | 0.63 ms | 1.0–1.5 ms |
-| `themes/Ebru_Studio.metal` | 1.02 ms | 2.2–2.6 ms |
-| `themes/Tutorial_Reef.metal` | 1.38 ms | 2.1–2.2 ms |
-| `themes/Orion_Nebula.metal` | 1.77 ms | 3.5–4.1 ms |
-| `themes/Night_Tide.metal` | 2.52 ms | 5.3–6.2 ms |
-| `Cygnus_A` GPU path (HDR10, native 3024×1964, per-frame shade only) | 1.85–2.10 ms | 3.2–3.4 ms |
+| Theme | Back-to-back GPU | Paced 30 FPS GPU | GPU busy in Argus, 30 FPS | Argus CPU | Memory, 1 Space | Memory, 4 Spaces |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `themes/Tutorial_Tides.metal` | 0.63 ms | 1.27–1.36 ms | 7.4% (7.1–9.4) | 1.8–2.9% | 83 MB | 111 MB |
+| `themes/Ebru_Studio.metal` | 1.02 ms | 1.69–1.72 ms | 11.2% (9.2–11.9) | 2.1–2.4% | 114 MB | 215 MB |
+| `themes/Tutorial_Reef.metal` | 1.11–1.17 ms | 1.69–2.06 ms | 15.2% (10.2–15.4) | 1.6–2.2% | 91–100 MB | 139 MB |
+| `themes/Orion_Nebula.metal` | 1.69–1.71 ms | 2.02–2.75 ms | 14.3% (14.3–18.4) | 1.5–2.2% | 93 MB | 152 MB |
+| `themes/Night_Tide.metal` | 2.52 ms | 2.73–2.90 ms | 25.3% (17.9–36.8) | 1.6–1.9% | 89–98 MB | 143 MB |
+| `themes/Cygnus_A.zig` on the GPU (HDR10, native 3024×1964) | 1.57–1.60 ms | 2.58–2.78 ms | 12.0% (11.9–12.3) | 12.5–12.6% | 278–301 MB | 387 MB |
 
-Ebru_Studio and Orion_Nebula were measured later (3 runs, with other jobs on the Mac; Tutorial_Tides and Night_Tide re-measured alongside them matched their back-to-back rows within 3%).
-
-The black holes also run a one-time GPU ray trace at load (about 4 s at native resolution for Cygnus A) plus a small CPU step per frame; `make gpu-bench` reports its paced cost.
+- Metal themes render at 1920×1200; Cygnus_A traces and shades at the display's native size.
+- Cygnus_A also runs a one-time GPU ray trace per load (3.9 s at 3024×1964), shared by every Space
+  showing it; its CPU column is the theme's step() plus frame setup on the main thread.
+- "GPU busy in Argus" is median (range) over 3 runs: the share of GPU time Argus's process used
+  while drawing one Space at 30 FPS. It includes acquiring and presenting the drawable and the low
+  GPU clock between frames, so it is higher than paced cost × 30.
+- Only the Space on screen draws; extra Spaces with the theme cost memory, not GPU (the 4-Space runs'
+  GPU falls inside the 1-Space range).
 
 ---
 

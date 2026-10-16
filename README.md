@@ -151,19 +151,21 @@ the harness gates are spelled out in [BENCHMARK.md](BENCHMARK.md).
 
 ### What it costs
 
-Measured on an M3 with 8 GB at 1920x1200. GPU numbers are the **live** cost at Argus's 30 FPS
-pacing (the GPU clocks down between frames, so this is higher than the back-to-back cost):
+Measured on an M3 with 8 GB: one Space showing the theme at Argus's 30 FPS.
 
-| Theme | GPU per frame, paced 30 FPS |
-| :--- | ---: |
-| `Tutorial_Tides.metal` | 1.0–1.5 ms |
-| `Tutorial_Reef.metal` | 2.1–2.2 ms |
-| `Ebru_Studio.metal` | 2.2–2.6 ms |
-| `Cygnus_A` on the GPU (HDR10, native 3024x1964, per-frame shade) | 3.2–3.4 ms |
-| `Orion_Nebula.metal` | 3.5–4.1 ms |
-| `Night_Tide.metal` | 5.3–6.2 ms |
+| Theme | GPU per frame (paced 30 FPS) | GPU busy | CPU | Memory |
+| :--- | ---: | ---: | ---: | ---: |
+| `Tutorial_Tides.metal` | 1.3 ms | ~7% | ~2% | 83 MB |
+| `Ebru_Studio.metal` | 1.7 ms | ~11% | ~2% | 114 MB |
+| `Tutorial_Reef.metal` | 1.7–2.1 ms | ~15% | ~2% | ~95 MB |
+| `Orion_Nebula.metal` | 2.0–2.8 ms | ~14% | ~2% | 93 MB |
+| `Night_Tide.metal` | 2.7–2.9 ms | ~25% | ~2% | ~94 MB |
+| `Cygnus_A` (GPU, HDR10, native resolution) | 2.6–2.8 ms | ~12% | ~13% | ~290 MB |
 
-The full table, including the CPU themes, is in [BENCHMARK.md](BENCHMARK.md).
+Argus with no theme: 13 MB, 0.2% CPU, no GPU. Hidden Spaces don't draw; each extra Space showing a
+theme adds memory (see BENCHMARK.md), and Spaces showing the same black hole share its traced image.
+
+The full table, with back-to-back figures and memory on four Spaces, is in [BENCHMARK.md](BENCHMARK.md).
 
 ## ARGUS-BENCH: a benchmark for coding models
 
