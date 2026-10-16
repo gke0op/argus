@@ -2576,13 +2576,16 @@ pub fn main(init: std.process.Init) !void {
     const NSStatusBar = objc_getClass("NSStatusBar") orelse return error.NoStatusBar;
     const sys_bar = msg0(NSStatusBar, sel_registerName("systemStatusBar"));
     const status_item = msgStatusItem(sys_bar, sel_registerName("statusItemWithLength:"), -1.0);
-    // AppKit persists each status item's visibility in the app's defaults, keyed by its autosave
-    // name. A measurement instance (--offscreen) hides its item; with the default name that hidden
-    // state was saved for the real app too and hid its eye. Give each mode its own name.
-    if (msgUTF8(NSString, sel_registerName("stringWithUTF8String:"), if (offscreen) "argus-offscreen" else "argus-eye")) |autosave_name| {
-        msgId(status_item, sel_registerName("setAutosaveName:"), autosave_name);
+    // AppKit persists each status item's visibility (and position) in the app's defaults, keyed by
+    // its autosave name. A measurement instance (--offscreen) hides its item; under the default name
+    // that hidden state was saved for the real app too and hid its eye. So only --offscreen gets
+    // its own name; the real app keeps the default one, and with it its menu-bar position.
+    if (offscreen) {
+        if (msgUTF8(NSString, sel_registerName("stringWithUTF8String:"), "argus-offscreen")) |autosave_name| {
+            msgId(status_item, sel_registerName("setAutosaveName:"), autosave_name);
+        }
+        msgBool(status_item, sel_registerName("setVisible:"), false);
     }
-    if (offscreen) msgBool(status_item, sel_registerName("setVisible:"), false);
     _ = msg0(status_item, sel_registerName("retain"));
     const status_button = msg0(status_item, sel_registerName("button"));
     // The glyph image is the whole status item: no title text.
