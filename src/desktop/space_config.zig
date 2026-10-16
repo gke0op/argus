@@ -203,6 +203,171 @@ test "renamed themes: a saved Opus_Black_Hole Space loads Opus_Quasar from the s
     try std.testing.expectEqualStrings("themes/Echo.zig", renamedThemePath("themes/Echo.zig", &buf));
 }
 
+/// Precompiled themes that `make release` ships inside the app, relative to the app's folder
+/// (the working directory). Named like the /tmp cache, by source hash.
+pub const BUNDLED_THEMES_DIR = "Argus.app/Contents/Resources/prebuilt";
+
+/// Why the last Zig theme compile could not run (the app turns it into a note).
+pub const ZigStatus = enum { ok, missing, wrong_version };
+pub var zig_status: ZigStatus = .ok;
+/// `zig version` output when `zig_status` is `.wrong_version`.
+pub var zig_found_buf: [32]u8 = undefined;
+pub var zig_found_len: usize = 0;
+
+/// Wyhash of a theme's whole source file (0 if unreadable or empty); the GPU build of a
+/// Kerr-disk theme gets its own key.
+pub fn themeSourceHash(path: []const u8, gpu_port: bool) u64 {
+    var file = std.Io.Dir.cwd().openFile(g_io, path, .{}) catch return 0;
+    defer file.close(g_io);
+    var reader = file.reader(g_io, &.{});
+    var hasher = std.hash.Wyhash.init(0xA460_5017);
+    var chunk: [16384]u8 = undefined;
+    var total: usize = 0;
+    while (true) {
+        const n = reader.interface.readSliceShort(&chunk) catch return 0;
+        hasher.update(chunk[0..n]);
+        total += n;
+        if (n < chunk.len) break;
+    }
+    if (total == 0) return 0;
+    var h = hasher.final();
+    if (gpu_port) h ^= 0x6770_755F_706F_7274; // separate cache entry for the GPU build
+    return h;
+}
+
+pub fn bundledThemePath(src_hash: u64, buf: []u8) ?[]const u8 {
+    return std.fmt.bufPrint(buf, BUNDLED_THEMES_DIR ++ "/argus_theme_{x}.dylib", .{src_hash}) catch null;
+}
+
+/// The Zig to compile themes with: ./.toolchain/zig (`make zig`), else `zig` on PATH, else
+/// Homebrew's (an app opened from Finder gets launchd's PATH, which has no Homebrew).
+fn zigBin() []const u8 {
+    if (std.Io.Dir.cwd().access(g_io, ZIG_017_BIN, .{})) |_| return ZIG_017_BIN else |_| {}
+    if (onPath()) return "zig";
+    for ([_][]const u8{ "/opt/homebrew/bin/zig", "/usr/local/bin/zig" }) |cand| {
+        if (std.Io.Dir.cwd().access(g_io, cand, .{})) |_| return cand else |_| {}
+    }
+    return "zig";
+}
+
+fn onPath() bool {
+    const path_env = std.mem.span(std.c.getenv("PATH") orelse return false);
+    var it = std.mem.tokenizeScalar(u8, path_env, ':');
+    var buf: [1024]u8 = undefined;
+    while (it.next()) |dir| {
+        const cand = std.fmt.bufPrint(&buf, "{s}/zig", .{dir}) catch continue;
+        if (std.Io.Dir.cwd().access(g_io, cand, .{})) |_| return true else |_| {}
+    }
+    return false;
+}
+
+/// After a failed compile: is Zig missing, or the wrong version? (Sets `zig_status`.)
+fn diagnoseZig(zig_bin: []const u8) void {
+    const alloc = std.heap.page_allocator;
+    const res = std.process.run(alloc, g_io, .{ .argv = &[_][]const u8{ zig_bin, "version" } }) catch {
+        zig_status = .missing;
+        return;
+    };
+    defer alloc.free(res.stdout);
+    defer alloc.free(res.stderr);
+    const v = std.mem.trim(u8, res.stdout, " \n\r\t");
+    if (std.mem.startsWith(u8, v, "0.17.")) return;
+    zig_status = .wrong_version;
+    zig_found_len = @min(v.len, zig_found_buf.len);
+    @memcpy(zig_found_buf[0..zig_found_len], v[0..zig_found_len]);
+}
+
+/// Compiles a `.zig` theme to a `.dylib` at `out_z` with install name `iname` (the Kerr-disk GPU
+/// build when `gpu_port`). Sets `zig_status` when Zig itself is the problem.
+pub fn buildThemeDylib(path: []const u8, out_z: [:0]const u8, iname: []const u8, gpu_port: bool) bool {
+    zig_status = .ok;
+    var emit_buf: [280]u8 = undefined;
+    const emit_arg = std.fmt.bufPrint(&emit_buf, "-femit-bin={s}", .{out_z}) catch return false;
+    var mtheme_buf: [530]u8 = undefined;
+    const mtheme_arg = std.fmt.bufPrint(&mtheme_buf, "-Mtheme={s}", .{path}) catch return false;
+    const zig_bin = zigBin();
+    const cpu_argv = [_][]const u8{ zig_bin, "build-lib", path, "-dynamic", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", emit_arg, "-install_name", iname };
+    const gpu_argv = [_][]const u8{ zig_bin, "build-lib", "-dynamic", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", emit_arg, "-install_name", iname, "--dep", "theme", GPU_PORT_ROOT, "-O", "ReleaseFast", mtheme_arg };
+    const alloc = std.heap.page_allocator;
+    const res = std.process.run(alloc, g_io, .{
+        .argv = if (gpu_port) &gpu_argv else &cpu_argv,
+    }) catch {
+        zig_status = .missing;
+        return false;
+    };
+    defer alloc.free(res.stdout);
+    defer alloc.free(res.stderr);
+    switch (res.term) {
+        .exited => |code| if (code == 0) return true,
+        else => {},
+    }
+    diagnoseZig(zig_bin);
+    return false;
+}
+
+/// Watchdog isolation: if ./argus-desktop or Argus.app/Contents/MacOS/Argus exists, probe the
+/// compiled .dylib in a child process BEFORE dlopen-ing it into Argus.app!
+pub fn verifyInChild(dylib_z: [:0]const u8) bool {
+    const watchdog_bin: ?[]const u8 = if (std.Io.Dir.cwd().access(g_io, "argus-desktop", .{})) |_|
+        "./argus-desktop"
+    else |_| if (std.Io.Dir.cwd().access(g_io, "Argus.app/Contents/MacOS/Argus", .{})) |_|
+        "Argus.app/Contents/MacOS/Argus"
+    else |_|
+        null;
+    const wbin = watchdog_bin orelse return verifyDylibSafety(dylib_z);
+    const alloc = std.heap.page_allocator;
+    const wres = std.process.run(alloc, g_io, .{
+        .argv = &[_][]const u8{ wbin, "--verify-dylib", dylib_z },
+    }) catch return false;
+    defer alloc.free(wres.stdout);
+    defer alloc.free(wres.stderr);
+    return switch (wres.term) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+}
+
+/// `make release`: compiles `path` (and its Kerr-disk GPU build, if it has one) into `out_dir`
+/// under the names the loader looks for, verifying each in a child process. Prints one line
+/// per dylib; false on any failure.
+pub fn precompileTheme(path: []const u8, out_dir: []const u8) bool {
+    std.Io.Dir.cwd().createDirPath(g_io, out_dir) catch return false;
+    const variants = [_]bool{ false, true };
+    for (variants) |gpu_port| {
+        if (gpu_port and !isGpuPortTheme(path)) continue;
+        const h = themeSourceHash(path, gpu_port);
+        if (h == 0) return false;
+        var out_buf: [600]u8 = undefined;
+        const out_z = std.fmt.bufPrintSentinel(&out_buf, "{s}/argus_theme_{x}.dylib", .{ out_dir, h }, 0) catch return false;
+        var iname_buf: [128]u8 = undefined;
+        const iname = std.fmt.bufPrint(&iname_buf, "@rpath/argus_theme_{x}.dylib", .{h}) catch return false;
+        if (!buildThemeDylib(path, out_z, iname, gpu_port)) {
+            std.debug.print("precompile: {s}{s}: build failed (zig: {s})\n", .{ path, if (gpu_port) " [gpu]" else "", @tagName(zig_status) });
+            return false;
+        }
+        if (!verifyInChild(out_z)) {
+            std.debug.print("precompile: {s}{s}: verify failed\n", .{ path, if (gpu_port) " [gpu]" else "" });
+            return false;
+        }
+        std.debug.print("precompile: {s}{s} -> {s}\n", .{ path, if (gpu_port) " [gpu]" else "", std.Io.Dir.path.basename(out_z) });
+    }
+    return true;
+}
+
+test "theme source hash: streams the whole file, equal to one-shot Wyhash" {
+    g_io = std.testing.io;
+    var buf: [200000]u8 = undefined;
+    for (&buf, 0..) |*b, i| b.* = @truncate(i *% 2654435761 >> 7);
+    try std.Io.Dir.cwd().writeFile(g_io, .{ .sub_path = "/tmp/argus_hash_test.zig", .data = &buf });
+    try std.testing.expectEqual(std.hash.Wyhash.hash(0xA460_5017, &buf), themeSourceHash("/tmp/argus_hash_test.zig", false));
+    // Past the old 128 KiB read: an edit at the tail changes the key.
+    buf[buf.len - 1] +%= 1;
+    try std.Io.Dir.cwd().writeFile(g_io, .{ .sub_path = "/tmp/argus_hash_test2.zig", .data = &buf });
+    try std.testing.expect(themeSourceHash("/tmp/argus_hash_test.zig", false) != themeSourceHash("/tmp/argus_hash_test2.zig", false));
+    try std.testing.expect(themeSourceHash("/tmp/argus_hash_test.zig", false) != themeSourceHash("/tmp/argus_hash_test.zig", true));
+    try std.testing.expectEqual(@as(u64, 0), themeSourceHash("/tmp/argus_no_such_theme.zig", false));
+}
+
 pub const SpaceConfig = struct {
     space_id: u64 = 0,
     index_1based: usize = 1,
@@ -302,13 +467,13 @@ pub const SpaceConfig = struct {
     /// first, and then loads its symbols via `dlopen` / `dlsym` at native 1920x1200 Retina resolution.
     pub fn compileAndLoadShader(self: *SpaceConfig, space_idx: usize, path: []const u8) bool {
         if (std.mem.endsWith(u8, path, ".metal")) return self.loadMetalTheme(path);
+        zig_status = .ok;
         if (std.Io.Dir.cwd().statFile(g_io, path, .{})) |st| {
             self.last_mtime = st.mtime.nanoseconds;
         } else |_| {}
 
         self.dylib_gen +%= 1;
         var dylib_buf: [256]u8 = undefined;
-        var emit_buf: [280]u8 = undefined;
         // PID in the path: the live app, tests and harness must never overwrite each other's loaded dylibs.
         const dylib_z = std.fmt.bufPrintSentinel(&dylib_buf, "/tmp/argus_shader_{d}_sp{d}_g{d}.dylib", .{
             std.c.getpid(),
@@ -320,82 +485,44 @@ pub const SpaceConfig = struct {
 
         // Content-addressed verified .dylib cache: hash source content so unchanged shaders
         // across app restarts or multiple Spaces skip `zig build-lib` and `--verify-dylib`!
-        var src_hash: u64 = 0;
+        const src_hash = themeSourceHash(path, gpu_port);
+        // v2: v1 cache entries carry path-derived install names that collide across themes.
         var cache_buf: [256]u8 = undefined;
-        var cache_path: ?[]const u8 = null;
-        var hash_read_buf: [131072]u8 = undefined;
-        if (std.Io.Dir.cwd().readFile(g_io, path, &hash_read_buf)) |src_bytes| {
-            if (src_bytes.len > 0) {
-                src_hash = std.hash.Wyhash.hash(0xA460_5017, src_bytes);
-                if (gpu_port) src_hash ^= 0x6770_755F_706F_7274; // separate cache entry for the GPU build
-                // v2: v1 cache entries carry path-derived install names that collide across themes.
-                if (std.fmt.bufPrint(&cache_buf, "/tmp/argus_cache_v2_{x}.dylib", .{src_hash})) |cp| {
-                    cache_path = cp;
-                } else |_| {}
-            }
-        } else |_| {}
+        const cache_path: ?[]const u8 = if (src_hash != 0)
+            std.fmt.bufPrint(&cache_buf, "/tmp/argus_cache_v2_{x}.dylib", .{src_hash}) catch null
+        else
+            null;
+        var bundled_buf: [256]u8 = undefined;
+        const bundled_path: ?[]const u8 = if (src_hash != 0) bundledThemePath(src_hash, &bundled_buf) else null;
 
-        var loaded_from_cache = false;
-        if (cache_path) |cp| {
-            if (std.Io.Dir.cwd().copyFile(cp, std.Io.Dir.cwd(), dylib_z, g_io, .{})) |_| {
-                loaded_from_cache = true;
+        // A theme shipped precompiled inside the app (`make release`, verified there) needs no
+        // Zig on this Mac; then the verified cache from an earlier run; then a fresh compile.
+        var loaded_prebuilt = false;
+        for ([_]?[]const u8{ bundled_path, cache_path }, [_][]const u8{ "bundled", "cached" }) |maybe, how| {
+            const src = maybe orelse continue;
+            if (std.Io.Dir.cwd().copyFile(src, std.Io.Dir.cwd(), dylib_z, g_io, .{})) |_| {
+                loaded_prebuilt = true;
+                std.debug.print("argus: {s}: {s} dylib\n", .{ path, how });
+                break;
             } else |_| {}
         }
 
-        if (!loaded_from_cache) {
-            const emit_arg = std.fmt.bufPrint(&emit_buf, "-femit-bin={s}", .{dylib_z}) catch return false;
+        if (!loaded_prebuilt) {
             // dyld dedupes dlopen() by LC_ID_DYLIB install name, NOT by file path. The default install
             // name is the emit path, so two different themes built to the same /tmp path would make
             // dlopen() silently return the FIRST theme's image. Make it unique per source content.
             var iname_buf: [128]u8 = undefined;
-            const iname_arg = (if (src_hash != 0)
+            const iname = (if (src_hash != 0)
                 std.fmt.bufPrint(&iname_buf, "@rpath/argus_theme_{x}.dylib", .{src_hash})
             else
                 std.fmt.bufPrint(&iname_buf, "@rpath/argus_theme_p{d}_s{d}_g{d}.dylib", .{ std.c.getpid(), space_idx, self.dylib_gen })) catch return false;
 
-            const zig_bin: []const u8 = if (std.Io.Dir.cwd().access(g_io, ZIG_017_BIN, .{})) |_|
-                ZIG_017_BIN
-            else |_|
-                "zig";
-
-            const alloc = std.heap.page_allocator;
-            var mtheme_buf: [530]u8 = undefined;
-            const mtheme_arg = std.fmt.bufPrint(&mtheme_buf, "-Mtheme={s}", .{path}) catch return false;
-            const cpu_argv = [_][]const u8{ zig_bin, "build-lib", path, "-dynamic", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", emit_arg, "-install_name", iname_arg };
-            const gpu_argv = [_][]const u8{ zig_bin, "build-lib", "-dynamic", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", emit_arg, "-install_name", iname_arg, "--dep", "theme", GPU_PORT_ROOT, "-O", "ReleaseFast", mtheme_arg };
-            const res = std.process.run(alloc, g_io, .{
-                .argv = if (gpu_port) &gpu_argv else &cpu_argv,
-            }) catch return false;
-            defer alloc.free(res.stdout);
-            defer alloc.free(res.stderr);
-
-            switch (res.term) {
-                .exited => |code| if (code != 0) return false,
-                else => return false,
+            if (!buildThemeDylib(path, dylib_z, iname, gpu_port)) {
+                std.debug.print("argus: {s}: compile failed (zig: {s})\n", .{ path, @tagName(zig_status) });
+                return false;
             }
-
-            // Watchdog isolation: if ./argus-desktop or Argus.app/Contents/MacOS/Argus exists,
-            // probe the compiled .dylib in a child process BEFORE dlopen-ing it into Argus.app!
-            const watchdog_bin: ?[]const u8 = if (std.Io.Dir.cwd().access(g_io, "argus-desktop", .{})) |_|
-                "./argus-desktop"
-            else |_| if (std.Io.Dir.cwd().access(g_io, "Argus.app/Contents/MacOS/Argus", .{})) |_|
-                "Argus.app/Contents/MacOS/Argus"
-            else |_|
-                null;
-
-            if (watchdog_bin) |wbin| {
-                const wres = std.process.run(alloc, g_io, .{
-                    .argv = &[_][]const u8{ wbin, "--verify-dylib", dylib_z },
-                }) catch return false;
-                defer alloc.free(wres.stdout);
-                defer alloc.free(wres.stderr);
-                switch (wres.term) {
-                    .exited => |code| if (code != 0) return false,
-                    else => return false,
-                }
-            } else {
-                if (!verifyDylibSafety(dylib_z)) return false;
-            }
+            if (!verifyInChild(dylib_z)) return false;
+            std.debug.print("argus: {s}: compiled\n", .{path});
 
             // Cache the verified .dylib for instant multi-Space & cold-start reuse
             if (cache_path) |cp| {

@@ -16,6 +16,8 @@ const metal_theme = @import("gpu/metal_theme.zig");
 /// GPU frame budget for Metal themes: 120 FPS worth, leaving the GPU nearly idle at 30 FPS.
 const METAL_BUDGET_US: f64 = 8333.0;
 const METAL_DT: f32 = 1.0 / 30.0;
+/// `--no-budget` (CI on shared runners): frame time is reported but not part of the verdict.
+var enforce_budget = true;
 
 const MetalRun = struct { ok: bool, gpu_us_avg: f64 = 0, gpu_us_worst: f64 = 0, err: [*:0]const u8 = "" };
 
@@ -185,7 +187,7 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
     try writePNG(packed_px, width, height, out_png);
 
     const motion_ok = animated_pixels >= 2_000;
-    const pass = wd_ok and !nan_detected and distinct_pixels > 100 and motion_ok and run.gpu_us_avg < METAL_BUDGET_US;
+    const pass = wd_ok and !nan_detected and distinct_pixels > 100 and motion_ok and (!enforce_budget or run.gpu_us_avg < METAL_BUDGET_US);
     const st_desc = if (theme.stateful()) "state texture" else "stateless";
     var out_buf: [2048]u8 = undefined;
     const report = try std.fmt.bufPrint(&out_buf,
@@ -196,7 +198,7 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
         \\ State             : {d}x{d} {s}, {d} step(s) per frame
         \\ Resolution        : {d}x{d} (and 320x200 watchdog)
         \\ Frames Rendered   : {d} (dt = 1/30 s)
-        \\ Avg GPU Frame     : {d:.1} us | Budget: {d:.1} us
+        \\ Avg GPU Frame     : {d:.1} us | Budget: {d:.1} us{s}
         \\ Worst GPU Frame   : {d:.1} us
         \\ Profile (BGRA8)   : {d:.1} us median frame = {d:.1} us init/step + {d:.1} us draw
         \\ Paced 30 FPS      : {d:.1} us median frame (the live cost: the GPU clocks lower between frames)
@@ -217,7 +219,8 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
         if (theme.step != null) theme.dir.steps else 0,
         width,                             height,
         frames,                            run.gpu_us_avg,
-        METAL_BUDGET_US,                   run.gpu_us_worst,
+        METAL_BUDGET_US,                   if (enforce_budget) "" else " (not enforced)",
+        run.gpu_us_worst,
         prof.frame_us,                     @max(0.0, prof.frame_us - prof.draw_us),
         prof.draw_us,
         prof.paced_us,
@@ -317,6 +320,13 @@ pub fn main(init: std.process.Init) !void {
         } else if (std.mem.eql(u8, a, "--height") and i + 1 < args.len) {
             i += 1;
             height = try std.fmt.parseInt(usize, args[i], 10);
+        } else if (std.mem.eql(u8, a, "--no-budget")) {
+            enforce_budget = false;
+        } else if (std.mem.eql(u8, a, "--probe-metal")) {
+            // CI: exit 0 when this machine has a Metal device for the GPU checks, 3 when not.
+            mtl.load() catch std.process.exit(3);
+            _ = mtl.device() catch std.process.exit(3);
+            std.process.exit(0);
         } else if (!std.mem.startsWith(u8, a, "-")) {
             theme_path = a;
         }
@@ -542,7 +552,7 @@ pub fn main(init: std.process.Init) !void {
 
     const alloc_ok = if (is_stateful) (allocs_init == 1 and allocs_after == 0) else (allocs_after == 0);
     const motion_ok = if (n_frames > 1) (animated_pixels >= 2_000) else true;
-    const pass = watchdog_ok and alloc_ok and !nan_detected and !canary_corrupted and distinct_pixels > 100 and bad_alpha_pixels == 0 and motion_ok and avg_us < 16667.0;
+    const pass = watchdog_ok and alloc_ok and !nan_detected and !canary_corrupted and distinct_pixels > 100 and bad_alpha_pixels == 0 and motion_ok and (!enforce_budget or avg_us < 16667.0);
 
     var out_buf: [2048]u8 = undefined;
     const report = try std.fmt.bufPrint(
@@ -553,7 +563,7 @@ pub fn main(init: std.process.Init) !void {
         \\ Theme             : {s} ({s})
         \\ Resolution        : {d}x{d} (tested stride={d}, stride={d}, and 320x200 watchdog)
         \\ Frames Rendered   : {d} (fixed dt = {d:.6})
-        \\ Avg Frame Time    : {d:.1} us ({d:.1} FPS) | Budget: 16667.0 us
+        \\ Avg Frame Time    : {d:.1} us ({d:.1} FPS) | Budget: 16667.0 us{s}
         \\ Worst Frame Time  : {d:.1} us
         \\ Allocs at Init    : {d} ({d} bytes)
         \\ Allocs after Init : {d}
@@ -578,6 +588,7 @@ pub fn main(init: std.process.Init) !void {
             dt,
             avg_us,
             1_000_000.0 / @max(0.1, avg_us),
+            if (enforce_budget) "" else " (not enforced)",
             worst_us,
             allocs_init,
             bytes_live,

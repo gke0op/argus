@@ -1,11 +1,11 @@
-# Zig 0.17.0: ./.toolchain/zig if present (gitignored, e.g. a symlink), otherwise zig on PATH.
+# Zig 0.17.0: ./.toolchain/zig if present (gitignored; `make zig` installs it), otherwise zig on PATH.
 ZIG ?= $(shell if [ -x ./.toolchain/zig ]; then echo ./.toolchain/zig; else command -v zig; fi)
 ZFLAGS = -O ReleaseFast -target aarch64-macos -lc
 THEME ?= themes/Echo.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: quasars all app desktop kronos harness claims ledger test run stop clean gpu-bench gpu-probes metalfx-demo gpu-arch
+.PHONY: quasars all app desktop kronos harness check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch
 
 all: app kronos
 
@@ -23,6 +23,10 @@ kronos:
 
 harness:
 	$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $(THEME) --frames $(FRAMES) --out $(OUT)
+
+# The harness on every theme: CPU for each .zig, GPU for each .metal (skipped without a Metal device).
+check-themes:
+	ZIG=$(ZIG) tools/check_themes.sh --frames $(FRAMES)
 
 claims:
 	$(ZIG) run -lc -O ReleaseFast --dep theme -Mroot=src/claim_check.zig -O ReleaseFast -Mtheme=$(THEME)
@@ -49,7 +53,40 @@ stop:
 	./Stop_Argus_Wallpaper.command
 
 clean:
-	rm -rf argus-desktop kronos-tui Argus.app/Contents/MacOS .zig-cache zig-out *.o
+	rm -rf argus-desktop kronos-tui Argus.app/Contents/MacOS .zig-cache zig-out *.o dist
+
+# Installs the pinned Zig 0.17.0 into .toolchain/ (downloaded from ziglang.org, SHA-256 checked).
+zig:
+	tools/get-zig.sh
+
+# A download for a GitHub Release: dist/Argus-v$(VERSION)-macos-arm64.zip holds one folder with
+# Argus.app (ad-hoc signed) and themes/. Every .zig theme ships precompiled and verified in
+# Argus.app/Contents/Resources/prebuilt, so the app runs them with no Zig installed; a theme
+# that is edited or added later is compiled at runtime and needs Zig 0.17.0.
+VERSION ?= 0.1.0
+RELEASE = Argus-v$(VERSION)-macos-arm64
+STAGE = dist/$(RELEASE)
+release: app
+	python3 -I tools/gen_quasars.py --check
+	@[ "$(ALLOW_DIRTY)" = 1 ] || { git diff --quiet HEAD -- themes src Argus.app docs/INSTALL.md && [ -z "$$(git ls-files --others --exclude-standard themes)" ]; } || \
+		{ echo "release: uncommitted changes in themes/, src/ or Argus.app (ALLOW_DIRTY=1 to ship them anyway)"; exit 1; }
+	@grep -q "<string>$(VERSION)</string>" Argus.app/Contents/Info.plist || { echo "Info.plist CFBundleShortVersionString is not $(VERSION)"; exit 1; }
+	rm -rf $(STAGE) dist/$(RELEASE).zip
+	mkdir -p $(STAGE)
+	cp -R Argus.app $(STAGE)/Argus.app
+	rm -rf $(STAGE)/Argus.app/Contents/_CodeSignature
+	tar -c $$(git ls-files themes) | tar -x -C $(STAGE)
+	cp LICENSE NOTICE.md $(STAGE)/
+	cp docs/INSTALL.md $(STAGE)/INSTALL.md
+	for t in $(STAGE)/themes/*.zig; do \
+		[ "$$(basename $$t)" = argus_theme_sdk.zig ] && continue; \
+		./argus-desktop --precompile $$t $(STAGE)/Argus.app/Contents/Resources/prebuilt || exit 1; \
+	done
+	codesign --force --deep --sign - $(STAGE)/Argus.app
+	codesign --verify --deep --strict $(STAGE)/Argus.app
+	cd dist && COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent $(RELEASE) $(RELEASE).zip
+	@cd dist && shasum -a 256 $(RELEASE).zip | tee $(RELEASE).zip.sha256
+	@du -h dist/$(RELEASE).zip
 
 # GPU prototype: Opus_Quasar's draw() as a Metal compute kernel, timed and diffed against the CPU.
 GPU_FRAMES ?= 240

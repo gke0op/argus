@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # GitHub-hosted Apple silicon (arm64) runner: Argus targets aarch64-macos only.
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Zig 0.17.0
+        uses: actions/cache@v4
+        with:
+          path: .toolchain
+          key: zig-0.17.0-aarch64-macos-${{ hashFiles('tools/get-zig.sh') }}
+
+      - name: Install the pinned Zig (tools/get-zig.sh, SHA-256 checked)
+        run: tools/get-zig.sh
+
+      - name: make test
+        run: make test
+
+      # Every .zig theme through the CPU harness: watchdog, zero allocations after init, stride
+      # canaries, NaN/Inf, alpha, pixel variance and motion. Frame time is reported but not
+      # enforced: a 3-core shared runner is no measure of a desktop Mac.
+      - name: CPU harness, every .zig theme
+        run: tools/check_themes.sh --cpu-only --frames 60 --no-budget
+
+      # The runner is a VM. Its paravirtualized GPU may be missing or lack features the Metal
+      # themes use, so the GPU harness is advisory here: the script skips it, and says so, when
+      # there is no Metal device, and a failure does not fail the build. Run `make check-themes`
+      # on a real Mac for the GPU verdicts.
+      - name: GPU harness, every .metal theme (advisory)
+        continue-on-error: true
+        run: tools/check_themes.sh --gpu-only --frames 60 --no-budget
+
+  release:
+    # Tagged pushes (v*) and manual runs build the release zip as a workflow artifact. Attaching
+    # it to a GitHub Release stays a manual step.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .toolchain
+          key: zig-0.17.0-aarch64-macos-${{ hashFiles('tools/get-zig.sh') }}
+      - run: tools/get-zig.sh
+      - run: make release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: argus-release
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256

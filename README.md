@@ -3,7 +3,6 @@
   Structure and facts are checked; the voice is placeholder. Rewrite it in your own words.
   Every number below comes from the repo (BENCHMARK.md, docs/*_ledger.json, theme headers).
   If you change a number, change it at its source first.
-  Two slots are still open: the hero media (docs/media/) and the install steps (release engineering).
 -->
 
 # Argus
@@ -70,22 +69,26 @@ state).
 
 ## Install
 
-Argus is source-first: there is no notarized download. You build it from this repository.
+Download the release zip and open Argus.app. No Zig is needed: every theme ships precompiled.
+macOS asks you to approve an app that isn't notarized the first time you open it;
+[docs/INSTALL.md](docs/INSTALL.md) has the steps.
 
-<!-- INSTALL SLOT: the release-engineering work owns this section. Paste its tested
-     instructions here: Zig pinning, `make release` / precompiled themes, Gatekeeper steps.
-     Until then, the build-from-source steps below are the ones that work today. -->
+## Build and run
 
-You need a Mac with Apple Silicon (macOS 13 or later) and **Zig 0.17.0** exactly.
-The Makefile uses `./.toolchain/zig` if it exists (a symlink is fine), otherwise `zig` on
-your `PATH`.
+Requires macOS on Apple Silicon and Zig 0.17.0 (`make zig` installs it into `.toolchain/`,
+checksum-verified; `brew install zig` also works).
 
 ```sh
 git clone https://github.com/gke0op/argus.git
 cd argus
-make run      # build Argus.app and start it
-make stop     # quit it
-make test     # run the test suites
+make zig                                  # install the pinned Zig 0.17.0 into .toolchain/
+make run                                  # build Argus.app and start it
+make stop                                 # quit it
+make test                                 # run the test suites
+make harness THEME=themes/Echo.zig        # verify and benchmark a theme headlessly
+make harness THEME=themes/Tutorial_Tides.metal   # same, on the GPU for Metal themes
+make check-themes                         # the harness on every theme
+make release                              # dist/Argus-v0.1.0-macos-arm64.zip for a GitHub Release
 ```
 
 Then click the eye in the menu bar. The Spaces strip shows one thumbnail per Desktop Space:
