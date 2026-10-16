@@ -5,7 +5,7 @@
 // and PNG-export harness for native Zig Argus themes, and (GPU mode) for Metal-only
 // themes, which it compiles with the Argus prelude and renders headless on the GPU:
 //
-//   zig run -O ReleaseFast -lc src/theme_harness.zig -- themes/Echo.zig --frames 120 --out /tmp/echo.png
+//   zig run -O ReleaseFast -lc src/theme_harness.zig -- themes/Cygnus_A.zig --frames 120 --out /tmp/cygnus.png
 //   zig run -O ReleaseFast -lc src/theme_harness.zig -- themes/Tutorial_Tides.metal
 // ============================================================================
 

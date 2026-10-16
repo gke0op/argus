@@ -1,6 +1,6 @@
 # The Quasars
 
-*Four black holes on your desktop: three real quasars and one film star, all of them computed.*
+*A black hole on your desktop: a real quasar, Cygnus A, computed.*
 
 A quasar is a supermassive black hole caught in the middle of a meal. Gas spirals in, rubs
 against itself, heats past 30,000 degrees and outshines its whole galaxy. No telescope can
@@ -41,13 +41,9 @@ falls out of Einstein's equations, solved for every pixel of your screen.
 | Theme | Modelled on | What is real | What is chosen |
 |---|---|---|---|
 | **Cygnus A** | Cygnus A, the hidden quasar inside the most famous radio galaxy | Mass 2.5 billion Suns (gas dynamics), feeding at ~1% | Spin 0.9 (never measured: dust hides it) |
-| **J0834** | F2MS J0834+3506, a young, dust-reddened "red quasar" | Mass 3.2 billion Suns, feeding at 4% | Spin 0.99 from published models, not a direct measurement |
-| **PG1426** | PG 1426+015, the heaviest black hole weighed by light echoes | Mass 1.0 billion Suns, spin above 0.7 (X-ray) | Spin set to 0.9 inside that range |
-| **Gargantua** | The black hole from *Interstellar* | The same computed light paths and spin physics | Its disk is tuned to a cinematic 6,500 K glow |
 
-Each theme's header lists its sources. The three real quasars feed slowly enough (1–4% of
-their limit) that their disks are genuinely razor-thin, which is what makes the edge-on view
-honest.
+The theme's header lists its sources. Cygnus A feeds slowly enough (about 1% of its limit)
+that its disk is genuinely razor-thin, which is what makes the edge-on view honest.
 
 ---
 
@@ -79,8 +75,8 @@ Not everything here is equally exact, and we say which is which.
 - **The disk is a moment in time.** It is a ring of gas caught while still spreading, not the
   steady disk a real quasar keeps for millions of years. This is what gives the outer fade and
   the dark band. A steady disk would fill the frame with glowing gas.
-- **The disk is drawn infinitely thin.** True for the slow eaters (Cygnus A, PG 1426). J0834, at its
-  near-extreme spin, would really be somewhat puffier, enough to change the edge-on view.
+- **The disk is drawn infinitely thin.** True for a slow eater like Cygnus A. A quasar fed faster
+  at a near-extreme spin would really be somewhat puffier, enough to change the edge-on view.
 - **The colour correction is a fit** to the peak of real disk spectra, applied across visible
   light. It slightly overstates how bright one ring of the disk looks.
 - **Not drawn:** the hot corona above the disk, the jets, light the disk shines back onto
@@ -170,7 +166,5 @@ turbulence statistics, the hot spots, every check and every approximation.
   Li et al. 2026, arXiv:2601.18269 (reverberation); Robinson et al. 2010 and Jadhav et al. 2021
   (recoil candidate).
 - Cygnus A: Tadhunter et al. 2003 (mass); Privon et al. 2012 (luminosity).
-- F2MS J0834+3506: Piotrovich, Buliga & Natsvlishvili 2024, arXiv:2410.04851.
-- PG 1426+015: Walton et al. 2025, arXiv:2509.13411.
 
 </details>

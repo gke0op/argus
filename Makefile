@@ -1,7 +1,7 @@
 # Zig 0.17.0: ./.toolchain/zig if present (gitignored; `make zig` installs it), otherwise zig on PATH.
 ZIG ?= $(shell if [ -x ./.toolchain/zig ]; then echo ./.toolchain/zig; else command -v zig; fi)
 ZFLAGS = -O ReleaseFast -target aarch64-macos -lc
-THEME ?= themes/Echo.zig
+THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
@@ -24,7 +24,8 @@ kronos:
 harness:
 	$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $(THEME) --frames $(FRAMES) --out $(OUT) $(if $(SEED),--seed $(SEED))
 
-# The harness on every theme: CPU for each .zig, GPU for each .metal (skipped without a Metal device).
+# The harness on every tracked theme: CPU for each .zig, GPU for each .metal (skipped without a
+# Metal device). tools/check_themes.sh --all also checks untracked local themes.
 check-themes:
 	ZIG=$(ZIG) tools/check_themes.sh --frames $(FRAMES)
 
@@ -37,7 +38,8 @@ LEDGER_OUT ?= docs/cygnus_a_ledger.json
 ledger:
 	ZIG=$(ZIG) tools/ledger.sh $(LEDGER_THEME) $(LEDGER_OUT)
 
-# The quasar family: generated from tools/quasar_template.zig (tools/gen_quasars.py).
+# Quasar themes: generated from tools/quasar_template.zig by tools/gen_quasars.py (Cygnus_A, plus
+# any local configurations in tools/local/*.json, which stay untracked).
 quasars:
 	python3 -I tools/gen_quasars.py
 
@@ -93,7 +95,7 @@ release: app
 
 # GPU prototype: a Kerr-disk theme's draw() as a Metal compute kernel, timed and diffed against the CPU.
 GPU_FRAMES ?= 240
-BH_THEME ?= themes/Cygnus_A.zig # any theme on the Kerr-disk engine (or themes/Gargantua.zig)
+BH_THEME ?= themes/Cygnus_A.zig # any theme on the Kerr-disk engine
 metalfx-demo:
 	$(ZIG) run $(ZFLAGS) src/metalfx_demo.zig -- $(THEME) --out-dir $(dir $(OUT))
 

@@ -13,3 +13,4 @@ Argus.app/Contents/_CodeSignature/
 .toolchain/
 .argus_settings.conf
 dist/
+__pycache__/

@@ -19,8 +19,7 @@
 // near the low end of the radiatively efficient range. Its spin is unmeasured (the torus hides
 // the inner disk's X-ray reflection): a = 0.9 here is a choice. This camera sits at 88 deg.
 // Audited independently (Gemini 4 Argon; Claude Opus with its own code): every item under
-// "computed" was re-derived and checked. Gargantua.zig is the same engine at a chosen,
-// cooler temperature.
+// "computed" was re-derived and checked.
 //
 // What is computed, not chosen:
 //  * Light paths: exact Kerr null geodesics (Hamiltonian form, RK4, with p_r re-solved

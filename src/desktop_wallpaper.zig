@@ -192,7 +192,7 @@ const MacBridge = struct {
     eject_flash_idx: ?usize = null,
     eject_flash_frame: usize = 0,
     msgRetF64: MsgSendRetF64,
-    // One-line note under the selected Space ("Loading Echo…", "Couldn't load …").
+    // One-line note under the selected Space ("Loading Night Tide…", "Couldn't load …").
     note_buf: [96]u8 = undefined,
     note_len: usize = 0,
     note_error: bool = false,
@@ -393,7 +393,7 @@ const MacBridge = struct {
                 for (0..count) |idx| {
                     self.obs.spaces[idx].mode = .passthrough;
                 }
-                _ = self.loadCodeFileIntoSpaceInternal(self.obs.active_space_idx, "themes/Gemini_Wormhole.zig", false);
+                _ = self.loadCodeFileIntoSpaceInternal(self.obs.active_space_idx, "themes/Cygnus_A.zig", false);
             }
             for (0..count) |idx| {
                 if (self.obs.spaces[idx].cg_image == null and self.obs.spaces[idx].mode != .passthrough) {
@@ -1026,7 +1026,7 @@ const MacBridge = struct {
 
     // ---- Settings face --------------------------------------------------------------------
 
-    /// "Coral_Reef.zig" -> "Coral Reef", shortened with an ellipsis to fit `max` bytes.
+    /// "Night_Tide.metal" -> "Night Tide", shortened with an ellipsis to fit `max` bytes.
     fn displayName(file: []const u8, out: []u8) []const u8 {
         const ext = std.Io.Dir.path.extension(file);
         const stem = file[0 .. file.len - ext.len];
@@ -2206,7 +2206,7 @@ pub fn main(init: std.process.Init) !void {
     defer obs.deinit(alloc);
 
     if (headless_test) {
-        const theme_path = "themes/Gemini_Wormhole.zig";
+        const theme_path = "themes/Cygnus_A.zig";
         const loaded = obs.loadShaderIntoSpace(0, theme_path);
         const t0 = std.Io.Clock.awake.now(g_io);
         for (0..20) |f| {
@@ -2681,7 +2681,7 @@ test "eject: a theme Space goes back to macOS Default and saves as passthrough" 
     defer obs.deinit(alloc);
     obs.n_spaces = 3;
     obs.spaces[1].space_id = 42;
-    try std.testing.expect(obs.spaces[1].compileAndLoadShader(1, "themes/Gemini_Wormhole.zig"));
+    try std.testing.expect(obs.spaces[1].compileAndLoadShader(1, "tests/fixtures/Fixture_Stateless.zig"));
     try std.testing.expectEqual(SpaceMode.custom_shader, obs.spaces[1].mode);
 
     obs.spaces[1].resetToDefault();
@@ -2695,7 +2695,7 @@ test "eject: a theme Space goes back to macOS Default and saves as passthrough" 
     const conf = obs.serializeStateConfig(&buf);
     try std.testing.expect(std.mem.indexOf(u8, conf, "1\tpassthrough\tmacOS Default\t\t42\n") != null);
     // Hot reload never brings it back: a passthrough Space has no path to watch.
-    try std.testing.expect(std.mem.indexOf(u8, conf, "Gemini_Wormhole") == null);
+    try std.testing.expect(std.mem.indexOf(u8, conf, "Fixture_Stateless") == null);
 }
 
 test "Observatory multi-Space engine: default Spaces, shader hot-compilation and config parsing" {
@@ -2710,23 +2710,23 @@ test "Observatory multi-Space engine: default Spaces, shader hot-compilation and
 
     // Verify live .zig shader hot-compilation (.dylib via dlopen) and execution on Space 2 (stateless) & Space 3 (stateful SDK)
     obs.n_spaces = 4;
-    const compiled = obs.spaces[2].compileAndLoadShader(2, "themes/Gemini_Wormhole.zig");
+    const compiled = obs.spaces[2].compileAndLoadShader(2, "tests/fixtures/Fixture_Stateless.zig");
     try std.testing.expect(compiled);
     try std.testing.expectEqual(SpaceMode.custom_shader, obs.spaces[2].mode);
     try std.testing.expect(obs.spaces[2].custom_render_fn != null);
 
     @memset(&obs.space_native_pixels[2], 0);
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(2, 0.25));
-    // Verify the wormhole shader populated non-zero RGBA pixels
+    // Verify the stateless fixture populated non-zero RGBA pixels
     try std.testing.expect(obs.space_native_pixels[2][(NATIVE_H / 2) * NATIVE_W + (NATIVE_W / 2 - 240)] != 0);
 
-    // Verify stateful SDK theme hot-compilation (`themes/Echo.zig`)
-    const compiled_sdk = obs.spaces[3].compileAndLoadShader(3, "themes/Echo.zig");
+    // Verify stateful theme hot-compilation (the C ABI the SDK exports; tests/fixtures/Fixture_Stateful.zig)
+    const compiled_sdk = obs.spaces[3].compileAndLoadShader(3, "tests/fixtures/Fixture_Stateful.zig");
     try std.testing.expect(compiled_sdk);
     try std.testing.expect(obs.spaces[3].theme_state != null);
     @memset(&obs.space_native_pixels[3], 0);
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(3, 0.25));
-    // Echo's background is black, so look for any lit (non-black RGB) pixel.
+    // The fixture's sky is black, so look for any lit (non-black RGB) pixel.
     var lit: usize = 0;
     for (obs.space_native_pixels[3]) |p| {
         if (p & 0x00FF_FFFF != 0) lit += 1;
@@ -2736,7 +2736,7 @@ test "Observatory multi-Space engine: default Spaces, shader hot-compilation and
     // Verify persistent state serialization & mode parsing
     var conf_buf: [2048]u8 = undefined;
     const serialized = obs.serializeStateConfig(&conf_buf);
-    try std.testing.expect(std.mem.indexOf(u8, serialized, "2\tcustom_shader\tGemini_Wormhole.zig\tthemes/Gemini_Wormhole.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, serialized, "2\tcustom_shader\tFixture_Stateless.zig\ttests/fixtures/Fixture_Stateless.zig") != null);
     try std.testing.expectEqual(SpaceMode.custom_shader, SpaceMode.fromModeName("custom_shader").?);
     // Configs saved by builds with built-in modes load those Spaces as untouched.
     for ([_][]const u8{ "magnetar_gr", "kronos_wave", "code_terminal" }) |legacy| {
@@ -2745,7 +2745,7 @@ test "Observatory multi-Space engine: default Spaces, shader hot-compilation and
     try std.testing.expect(SpaceMode.fromModeName("bogus") == null);
 }
 
-test "Native 1920x1200 Retina shader rendering (Echo.zig) and Watchdog isolation" {
+test "Native 1920x1200 Retina shader rendering (stateful fixture) and Watchdog isolation" {
     g_io = std.testing.io;
     sc.g_io = std.testing.io;
     const alloc = std.testing.allocator;
@@ -2753,8 +2753,8 @@ test "Native 1920x1200 Retina shader rendering (Echo.zig) and Watchdog isolation
     defer obs.deinit(alloc);
 
     obs.n_spaces = 3;
-    const ok_echo = obs.spaces[1].compileAndLoadShader(1, "themes/Echo.zig");
-    try std.testing.expect(ok_echo);
+    const ok_stateful = obs.spaces[1].compileAndLoadShader(1, "tests/fixtures/Fixture_Stateful.zig");
+    try std.testing.expect(ok_stateful);
     try std.testing.expectEqual(NATIVE_W, obs.spaces[1].render_w);
     try std.testing.expectEqual(NATIVE_H, obs.spaces[1].render_h);
 
@@ -2782,8 +2782,8 @@ test "Native 1920x1200 Retina shader rendering (Echo.zig) and Watchdog isolation
     try std.Io.Dir.cwd().writeFile(g_io, .{ .sub_path = bad_shader_path, .data = bad_src });
     const rejected = obs.spaces[1].compileAndLoadShader(1, bad_shader_path);
     try std.testing.expect(!rejected);
-    // Previous valid Echo.zig shader remains intact on Space 1!
-    try std.testing.expectEqualStrings("Echo.zig", obs.spaces[1].getLabel());
+    // The previous valid shader remains intact on Space 1!
+    try std.testing.expectEqualStrings("Fixture_Stateful.zig", obs.spaces[1].getLabel());
 }
 
 test "Isolated per-Space shader buffers never alias each other" {
@@ -2794,8 +2794,8 @@ test "Isolated per-Space shader buffers never alias each other" {
     defer obs.deinit(alloc);
     obs.n_spaces = 3;
 
-    try std.testing.expect(obs.loadShaderIntoSpace(0, "themes/Gemini_Wormhole.zig"));
-    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Echo.zig"));
+    try std.testing.expect(obs.loadShaderIntoSpace(0, "tests/fixtures/Fixture_Stateless.zig"));
+    try std.testing.expect(obs.loadShaderIntoSpace(1, "tests/fixtures/Fixture_Stateful.zig"));
 
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(0, 0.1));
     const snap = try alloc.dupe(u32, &obs.space_native_pixels[0]);
@@ -2815,19 +2815,19 @@ test "Reloading a shader into a dirty Space repaints instead of inheriting stale
     defer obs.deinit(alloc);
     obs.n_spaces = 3;
 
-    // Space 1: render the wormhole, then plant "previous theme" garbage in the interior while leaving the
+    // Space 1: render the stateless fixture, then plant "previous theme" garbage in the interior while leaving the
     // probe pixels (corners) intact, so a probe-based background-skip heuristic would be fooled.
-    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Gemini_Wormhole.zig"));
+    try std.testing.expect(obs.loadShaderIntoSpace(1, "tests/fixtures/Fixture_Stateless.zig"));
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(1, 0.1));
     const garbage_idx = 100 * NATIVE_W + 100;
     obs.space_native_pixels[1][garbage_idx] = 0xFF00FF00;
 
     // Reload through the production entry point, then render one frame.
-    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Gemini_Wormhole.zig"));
+    try std.testing.expect(obs.loadShaderIntoSpace(1, "tests/fixtures/Fixture_Stateless.zig"));
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(1, 0.1));
 
     // Space 2: the same theme from a clean load, one frame.
-    try std.testing.expect(obs.loadShaderIntoSpace(2, "themes/Gemini_Wormhole.zig"));
+    try std.testing.expect(obs.loadShaderIntoSpace(2, "tests/fixtures/Fixture_Stateless.zig"));
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(2, 0.1));
 
     try std.testing.expect(obs.space_native_pixels[1][garbage_idx] != 0xFF00FF00);
@@ -2848,19 +2848,19 @@ test "Mission Control Space reordering moves themes with space_id and resets mov
         obs.spaces[i].index_1based = i + 1;
     }
 
-    // Slot 1 (space_id = 4) has Gemini_Wormhole.zig; Slot 3 (space_id = 6) has a picture
-    try std.testing.expect(obs.loadShaderIntoSpace(1, "themes/Gemini_Wormhole.zig"));
+    // Slot 1 (space_id = 4) has the stateless fixture; Slot 3 (space_id = 6) has a picture
+    try std.testing.expect(obs.loadShaderIntoSpace(1, "tests/fixtures/Fixture_Stateless.zig"));
     obs.spaces[3].mode = .picture;
     obs.spaces[3].setLabel("Photo.png");
 
-    // Render the wormhole in Slot 1, and plant stale garbage in Slot 3's native buffer while copying
-    // the wormhole's corner probe pixels into Slot 3 so a missing reset on move would be caught.
+    // Render the fixture in Slot 1, and plant stale garbage in Slot 3's native buffer while copying
+    // the fixture's corner probe pixels into Slot 3 so a missing reset on move would be caught.
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(1, 0.1));
     @memcpy(&obs.space_native_pixels[3], &obs.space_native_pixels[1]);
     const garbage_idx = 100 * NATIVE_W + 100;
     obs.space_native_pixels[3][garbage_idx] = 0xFF00FF00;
 
-    // Simulate user dragging Space id=4 (the wormhole) to Slot 3 and Space id=6 (Picture) to Slot 1 in Mission Control
+    // Simulate user dragging Space id=4 (the fixture) to Slot 3 and Space id=6 (Picture) to Slot 1 in Mission Control
     const reordered_ids = [_]u64{ 3, 6, 7, 4 };
     const sync1 = obs.syncSpaceOrderByIds(&reordered_ids, 4);
     try std.testing.expect(sync1.order_changed);
@@ -2872,7 +2872,7 @@ test "Mission Control Space reordering moves themes with space_id and resets mov
     try std.testing.expectEqual(SpaceMode.custom_shader, obs.spaces[3].mode);
     try std.testing.expectEqual(@as(usize, 4), obs.spaces[3].index_1based);
 
-    // Slot 3's native buffer must have been reset on move so rendering the wormhole at Slot 3 wipes the planted garbage
+    // Slot 3's native buffer must have been reset on move so rendering the fixture at Slot 3 wipes the planted garbage
     try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(3, 0.1));
     try std.testing.expect(obs.space_native_pixels[3][garbage_idx] != 0xFF00FF00);
 

@@ -12,7 +12,7 @@
 //   smooth_swipes=0|1            Keep the nearest off-screen theme Spaces warm at 10 FPS. Default 1.
 //   reload_on_edit=0|1           Hot-reload a theme when its file is saved. Default 1.
 //   launch_at_login=0|1          Start Argus at login (desktop/login_item.zig). Default 0.
-//   gpu=0|1                      GPU hybrid themes (the quasars, Gargantua); `--cpu` overrides. Default 1.
+//   gpu=0|1                      GPU hybrid themes (Kerr-disk quasars: Cygnus A); `--cpu` overrides. Default 1.
 // ============================================================================
 
 const std = @import("std");

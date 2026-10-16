@@ -1,8 +1,8 @@
 # The quasar model: physics, checks and choices
 
-*Argus's quasar themes (`themes/Cygnus_A.zig`, `themes/J0834.zig`, `themes/PG1426.zig`) are one
-engine, generated from `tools/quasar_template.zig` with each object's mass, spin and feeding
-rate. This document states what that engine computes, from which equations and numbers, how
+*Argus's quasar theme (`themes/Cygnus_A.zig`; J0834 and PG1426, mentioned below, were built on it
+before this release) is one engine, generated from `tools/quasar_template.zig` with each object's
+mass, spin and feeding rate. This document states what that engine computes, from which equations and numbers, how
 it was checked, and what is chosen rather than computed. It is meant for review: please check
 the physics, not the code style.*
 

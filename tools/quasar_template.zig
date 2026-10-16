@@ -9,8 +9,7 @@
 // microlensing); this is what that physics predicts. The Event Horizon Telescope's images
 // (M87*, Sgr A*) are a different, starving kind of black hole: hot, faint, see-through flows.
 {{OBJECT_PARAGRAPH}}// Audited independently (Gemini 4 Argon; Claude Opus with its own code): every item under
-// "computed" was re-derived and checked. Gargantua.zig is the same engine at a chosen,
-// cooler temperature.
+// "computed" was re-derived and checked.
 //
 // What is computed, not chosen:
 //  * Light paths: exact Kerr null geodesics (Hamiltonian form, RK4, with p_r re-solved

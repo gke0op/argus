@@ -3,7 +3,7 @@
 //
 // Zero-AppKit Native Zig Theme Contract for Argus.app & Headless Harness.
 //
-// Usage in any theme file (e.g. `themes/Echo.zig`):
+// Usage in any theme file (e.g. `themes/Cygnus_A.zig`):
 //
 //   const std = @import("std");
 //   const sdk = @import("argus_theme_sdk.zig");

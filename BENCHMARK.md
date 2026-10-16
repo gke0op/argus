@@ -50,23 +50,26 @@ Submissions that pass all 8 gates are ranked by average frame time across 120 fr
 - **Silver Tier (`240+ FPS`):** `< 4,167 µs / frame`
 - **Bronze Tier (`60+ FPS`):** `< 16,667 µs / frame`
 
-### Reference Baselines in `themes/`
+### Reference Baselines
+
+Of these baselines only `themes/Cygnus_A.zig` ships in this release. The others did not ship;
+they stay in the git history (`git log --all -- themes/<name>`) as reference submissions.
 
 | Theme File | Author / Agent | Physics / Mathematical Simulation | Init Memory (`1 alloc`) | Avg Frame Time (`1920×1200`) | Effective FPS | Tier |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`themes/Claude_Textus.zig`** | Claude Sonnet | A loom that weaves light: mirrored elementary cellular-automaton panels (rules 90, 110, 60, 22, 126, 150, 30, 18) woven row by row at a glowing weaving line, cooling on a thermal ramp from white-hot to violet, with woven 5×7 inscriptions, a star cartouche, shuttle sparks, embers and fringe | `299,608 B` (`292.6 KiB`) | **`572–609 µs`** | **`1,642–1,749 FPS`** | Platinum |
-| **`themes/Textus_Puteus.zig`** | Claude Opus | Textus seen from above: a woven well (staggered tile courses, loose warp down the wall) amid mirrored woven blocks that rise into pillars, re-woven from cellular-automaton motifs as slow heat rings leave the core; fractal lightning in three colours forks from the wall into the core, whose tiles are three interfering Greenberg–Hastings media with strength-limited waves that cascade where fronts cross | `683,648 B` (`667.6 KiB`) | **`671–918 µs`** | **`1,089–1,491 FPS`** | Platinum |
-| **`themes/Argon_Black_Hole.zig`** | Argon (Gemini) | Luminet (1979) / Bardeen (1973) Kerr black hole ($a/M=0.94, i=78.5^\circ$), exact RK4 null-geodesic LUT, Killing-invariant $g^4$ Doppler beaming, Page–Thorne flux & Keplerian spiral turbulence | `9,769,072 B` (`9.32 MiB`) | **`839.9–943.4 µs`** | **`1,060–1,191 FPS`** | Platinum |
-| **`themes/Echo.zig`** | Argon | 120-neuron edge-of-chaos Echo-State Reservoir Network (`RHO = 0.97`) with live Recursive Least Squares (RLS) online readout learning | `133,256 B` (`130.1 KiB`) | **`1,131–1,617 µs`** | **`618–884 FPS`** | Gold |
-| **`themes/Fable_Chimera.zig`** | Claude Fable 5.1 | Kuramoto chimera state on a 480×300 lattice (Shima & Kuramoto 2004): non-local coupling through a three-pass box-blurred mean field, so spiral arms lock in phase around cores that never synchronise | `8,134,320 B` (`7.76 MiB`) | **`1,918–2,276 µs`** | **`439–521 FPS`** | Silver |
-| **`themes/Gemini_Aquarium.zig`** | Claude Opus, from Gemini | An aquarium drift over a wireframe seabed lit by moving caustics: four species of schooling fish (boids), swaying kelp, god rays, rising bubbles and marine snow | `88,656 B` (`86.6 KiB`) | **`3,301–3,374 µs`** | **`296–303 FPS`** | Silver |
-| **`themes/Gemini_Wormhole.zig`** | Google Gemini | Stylised traversable wormhole inspired by Ellis–Bronnikov: rays bent through the throat into an imagined second universe, artistic-palette accretion disks on both sides with density-wave spiral arms and plasma knots | `16,752,944 B` (`15.98 MiB`) | **`3,501–3,578 µs`** | **`280–286 FPS`** | Silver |
-| **`themes/Coral_Reef.zig`** | Claude Opus, species by Claude Haiku | A shallow coral reef seen from a slow drift: a lit voxel-space heightfield of brain corals, barrel sponges and coralline rock with moving caustics, branching staghorn corals, swaying sea fans and anemones, and 12 selectable species (schools via boids; sharks, rays, eels, turtles, seahorses, jellyfish), all depth-tested against the reef | `34,190,144 B` (`32.61 MiB`) | **`9,973–11,115 µs`** | **`90–100 FPS`** | Bronze |
-| **`themes/Lizard_Island.zig`** | Claude Opus, species by Claude Haiku | A real site at metre scale: the Lizard Island lagoon (GBR) from field sources, with knobbly massive-coral bommies at ~25% live cover, patchy seagrass, giant clams, table and branching Acropora, anemones with clownfish, 11-16 m visibility, a day/sunset/dusk light cycle, and 10 sourced species including blacktips that arrive at sunset | `33,749,920 B` (`32.19 MiB`) | **`10,538–10,887 µs`** | **`92–95 FPS`** | Bronze |
-| **`themes/Gargantua.zig`** | Claude Opus | Interstellar-style look on the quasar engine: the same computed Kerr light paths, redshift, beaming, photon rings and shearing hot spots; the disk is chosen for the look (steady Page–Thorne profile scaled to a 6,500 K peak), as its header states (CPU path shown; the app draws it on the GPU by default) | `61,368,016 B` (`58.52 MiB`) | **`11,467–12,227 µs`** | **`82–87 FPS`** | Bronze |
+| **`Claude_Textus.zig`** (history) | Claude Sonnet | A loom that weaves light: mirrored elementary cellular-automaton panels (rules 90, 110, 60, 22, 126, 150, 30, 18) woven row by row at a glowing weaving line, cooling on a thermal ramp from white-hot to violet, with woven 5×7 inscriptions, a star cartouche, shuttle sparks, embers and fringe | `299,608 B` (`292.6 KiB`) | **`572–609 µs`** | **`1,642–1,749 FPS`** | Platinum |
+| **`Textus_Puteus.zig`** (history) | Claude Opus | Textus seen from above: a woven well (staggered tile courses, loose warp down the wall) amid mirrored woven blocks that rise into pillars, re-woven from cellular-automaton motifs as slow heat rings leave the core; fractal lightning in three colours forks from the wall into the core, whose tiles are three interfering Greenberg–Hastings media with strength-limited waves that cascade where fronts cross | `683,648 B` (`667.6 KiB`) | **`671–918 µs`** | **`1,089–1,491 FPS`** | Platinum |
+| **`Argon_Black_Hole.zig`** (history) | Argon (Gemini) | Luminet (1979) / Bardeen (1973) Kerr black hole ($a/M=0.94, i=78.5^\circ$), exact RK4 null-geodesic LUT, Killing-invariant $g^4$ Doppler beaming, Page–Thorne flux & Keplerian spiral turbulence | `9,769,072 B` (`9.32 MiB`) | **`839.9–943.4 µs`** | **`1,060–1,191 FPS`** | Platinum |
+| **`Echo.zig`** (history) | Argon | 120-neuron edge-of-chaos Echo-State Reservoir Network (`RHO = 0.97`) with live Recursive Least Squares (RLS) online readout learning | `133,256 B` (`130.1 KiB`) | **`1,131–1,617 µs`** | **`618–884 FPS`** | Gold |
+| **`Fable_Chimera.zig`** (history) | Claude Fable 5.1 | Kuramoto chimera state on a 480×300 lattice (Shima & Kuramoto 2004): non-local coupling through a three-pass box-blurred mean field, so spiral arms lock in phase around cores that never synchronise | `8,134,320 B` (`7.76 MiB`) | **`1,918–2,276 µs`** | **`439–521 FPS`** | Silver |
+| **`Gemini_Aquarium.zig`** (history) | Claude Opus, from Gemini | An aquarium drift over a wireframe seabed lit by moving caustics: four species of schooling fish (boids), swaying kelp, god rays, rising bubbles and marine snow | `88,656 B` (`86.6 KiB`) | **`3,301–3,374 µs`** | **`296–303 FPS`** | Silver |
+| **`Gemini_Wormhole.zig`** (history) | Google Gemini | Stylised traversable wormhole inspired by Ellis–Bronnikov: rays bent through the throat into an imagined second universe, artistic-palette accretion disks on both sides with density-wave spiral arms and plasma knots | `16,752,944 B` (`15.98 MiB`) | **`3,501–3,578 µs`** | **`280–286 FPS`** | Silver |
+| **`Coral_Reef.zig`** (history) | Claude Opus, species by Claude Haiku | A shallow coral reef seen from a slow drift: a lit voxel-space heightfield of brain corals, barrel sponges and coralline rock with moving caustics, branching staghorn corals, swaying sea fans and anemones, and 12 selectable species (schools via boids; sharks, rays, eels, turtles, seahorses, jellyfish), all depth-tested against the reef | `34,190,144 B` (`32.61 MiB`) | **`9,973–11,115 µs`** | **`90–100 FPS`** | Bronze |
+| **`Lizard_Island.zig`** (history) | Claude Opus, species by Claude Haiku | A real site at metre scale: the Lizard Island lagoon (GBR) from field sources, with knobbly massive-coral bommies at ~25% live cover, patchy seagrass, giant clams, table and branching Acropora, anemones with clownfish, 11-16 m visibility, a day/sunset/dusk light cycle, and 10 sourced species including blacktips that arrive at sunset | `33,749,920 B` (`32.19 MiB`) | **`10,538–10,887 µs`** | **`92–95 FPS`** | Bronze |
+| **`Gargantua.zig`** (history) | Claude Opus | Interstellar-style look on the quasar engine: the same computed Kerr light paths, redshift, beaming, photon rings and shearing hot spots; the disk is chosen for the look (steady Page–Thorne profile scaled to a 6,500 K peak), as its header states (CPU path shown; the app draws it on the GPU by default) | `61,368,016 B` (`58.52 MiB`) | **`11,467–12,227 µs`** | **`82–87 FPS`** | Bronze |
 | **`themes/Cygnus_A.zig`** | Claude Opus | The quasar engine (generated from `tools/quasar_template.zig`) modelled on Cygnus A, the hidden quasar in the archetypal radio galaxy: $2.5\times10^9\,M_\odot$, $0.012\,L_{\rm Edd}$, an honestly thin disk; spin unmeasured, $a/M=0.9$ chosen (CPU path shown; the app draws it on the GPU by default) | `61,368,016 B` (`58.52 MiB`) | **`5,278–5,316 µs`** | **`188–189 FPS`** | Bronze |
-| **`themes/J0834.zig`** | Claude Opus | The quasar engine (generated) modelled on the red quasar F2MS J0834+3506: $3.2\times10^9\,M_\odot$, $0.040\,L_{\rm Edd}$, $a/M=0.99$ from radiative-efficiency models (CPU path shown; the app draws it on the GPU by default) | `61,368,016 B` (`58.52 MiB`) | **`5,113–5,133 µs`** | **`195–196 FPS`** | Bronze |
-| **`themes/PG1426.zig`** | Claude Opus | The quasar engine (generated) modelled on the bare quasar PG 1426+015, the most massive reverberation-mapped black hole: $1.0\times10^9\,M_\odot$, $\sim0.024\,L_{\rm Edd}$, $a/M=0.9$ (CPU path shown; the app draws it on the GPU by default) | `61,368,016 B` (`58.52 MiB`) | **`6,017–6,073 µs`** | **`165–166 FPS`** | Bronze |
+| **`J0834.zig`** (history) | Claude Opus | The quasar engine (generated) modelled on the red quasar F2MS J0834+3506: $3.2\times10^9\,M_\odot$, $0.040\,L_{\rm Edd}$, $a/M=0.99$ from radiative-efficiency models (CPU path shown; the app draws it on the GPU by default) | `61,368,016 B` (`58.52 MiB`) | **`5,113–5,133 µs`** | **`195–196 FPS`** | Bronze |
+| **`PG1426.zig`** (history) | Claude Opus | The quasar engine (generated) modelled on the bare quasar PG 1426+015, the most massive reverberation-mapped black hole: $1.0\times10^9\,M_\odot$, $\sim0.024\,L_{\rm Edd}$, $a/M=0.9$ (CPU path shown; the app draws it on the GPU by default) | `61,368,016 B` (`58.52 MiB`) | **`6,017–6,073 µs`** | **`165–166 FPS`** | Bronze |
 
 ### GPU (Metal) themes: live cost
 
@@ -74,14 +77,14 @@ Apple GPUs stay at low clocks when Argus paces frames at 30 FPS, so a theme's li
 
 | Theme | Back-to-back | Live (paced 30 FPS) |
 | :--- | ---: | ---: |
-| `themes/Gemini_Wormhole.metal` | 0.61 ms | 1.3 ms |
 | `themes/Tutorial_Tides.metal` | 0.63 ms | 1.0–1.5 ms |
+| `themes/Ebru_Studio.metal` | 1.02 ms | 2.2–2.6 ms |
 | `themes/Tutorial_Reef.metal` | 1.38 ms | 2.1–2.2 ms |
-| `themes/Gemini_Aquarium.metal` | 1.70 ms | 3.0–3.3 ms |
-| `themes/Lizard_Island.metal` | 2.50 ms | 4.5–5.6 ms |
+| `themes/Orion_Nebula.metal` | 1.77 ms | 3.5–4.1 ms |
 | `themes/Night_Tide.metal` | 2.52 ms | 5.3–6.2 ms |
-| `themes/Coral_Reef.metal` | 3.23 ms | 4.8–5.9 ms |
 | `Cygnus_A` GPU path (HDR10, native 3024×1964, per-frame shade only) | 1.85–2.10 ms | 3.2–3.4 ms |
+
+Ebru_Studio and Orion_Nebula were measured later (3 runs, with other jobs on the Mac; Tutorial_Tides and Night_Tide re-measured alongside them matched their back-to-back rows within 3%).
 
 The black holes also run a one-time GPU ray trace at load (about 4 s at native resolution for Cygnus A) plus a small CPU step per frame; `make gpu-bench` reports its paced cost.
 
