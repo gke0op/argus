@@ -10,7 +10,7 @@ const std = @import("std");
 const sc = @import("space_config.zig");
 
 /// Matches CFBundleIdentifier in Argus.app/Contents/Info.plist.
-pub const LABEL = "io.github.gke0op.argus";
+pub const LABEL = sc.BUNDLE_ID;
 /// Labels of earlier builds: their LaunchAgents are removed on start (`removeLegacy`), and the
 /// app writes the current one if "Open at login" is on.
 const LEGACY_LABELS = [_][]const u8{"io.egregore.argus"};

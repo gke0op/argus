@@ -64,8 +64,8 @@ matches its precompiled copy, so Argus compiles it. If Zig is missing, the menu 
 ### Uninstall
 
 Quit Argus from its menu and turn off **Open at login** first, or delete
-`~/Library/LaunchAgents/io.github.gke0op.argus.plist`. Then delete the folder. Compiled theme
-caches live in `/tmp/argus_*`, which macOS clears on restart.
+`~/Library/LaunchAgents/io.github.gke0op.argus.plist`. Then delete the folder. Compiled themes are cached in
+`~/Library/Caches/io.github.gke0op.argus`; delete that folder too.
 
 ## Build from source
 
