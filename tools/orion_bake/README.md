@@ -154,6 +154,15 @@ A second audit verified those fixes and found two more, now fixed too:
 It also tightened smaller things: the table check now counts what the compiler sees, and
 each star image's light sums to 1.
 
+Two items both audits left open are fixed as well:
+- **The flow beyond the last step.** It is now sampled at the mean height of that remaining
+  emission (a tabulated E[h | above h]), not at the last step. A slanted ray sees the high
+  gas where it is, and a ray from Earth is unchanged.
+- **Star halo size.** The size cap is raised to 56 px, so the brightest stars' halos follow
+  their brightness rather than the cap.
+
+The R0 clip at 1.5 pc (4.9% of texels) stays: beyond it the layer would reach the Veil.
+
 ## What stays degenerate or uncertain
 
 - **Layer thickness (R0).** This is the least certain fitted quantity. The front's curvature
