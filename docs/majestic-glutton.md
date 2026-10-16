@@ -229,8 +229,8 @@ tests or audits below.
     tolerance is the test's.
   - Values with no bound (r_isco, η, the polar-band maximum, GPU/CPU pixel agreement) are
     reported, not asserted, and marked `"pass": null`.
-  - Current ledger: 62 records; 54 asserted, of which 53 pass and 1 fails (the GPU's polar-band
-    maximum, §3); 8 reported.
+  - Current ledger: 56 records; 49 asserted, of which 48 pass and 1 fails (the GPU's polar-band
+    maximum, §3); 7 reported.
 - **Reviews:** two independent physics reviews by Gemini 4 Argon, and two Claude Opus audits that
   wrote their own code (disk solver re-solved independently to 0.1%; turbulence measured on the
   tables). Every finding was re-derived before fixing; rejected findings are recorded in the
