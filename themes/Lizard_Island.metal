@@ -24,7 +24,13 @@
 //     and vase forms [cited: PCRF].
 //   - Seagrass: Halophila ovalis, Thalassia hemprichii, Halodule uninervis
 //     [atlas]; patchy, sparse on reef tops, denser (>25%) in sheltered sand
-//     [snippet]. Here: patchy meadows on the lagoon sand, never a lawn.
+//     [snippet]. Lizard's lagoon meadows are dominated by Halophila; Halodule
+//     and Thalassia were sampled only in the 0-3 m shallows [cited: York,
+//     Macreadie & Rasheed 2018, Biol. Lett. 14:20180529]. Here: sparse
+//     Halophila (paired oval leaves on short stalks) on the open lagoon sand,
+//     and dense swaying strap meadows (Thalassia, Halodule) in sheltered patches
+//     and the shallows by the fringing reef: the sheltered southern lagoon
+//     meadow is 53.5% Thalassia, 29.3% Halodule [cited: Seagrass-Watch].
 //   - Water "cloudy, not turbid", visibility 11-16 m [cited: PCRF]. Here the
 //     fog closes in at about that range.
 //   - Giant clams on coral heads, five species, crocus clam most abundant
@@ -36,8 +42,9 @@
 //     sunset"; tawny nurse shark seen eating a giant clam [cited: ISRA];
 //     whitetip reef sharks [snippet]; green turtles grazing Halodule [cited:
 //     eAtlas]; parrotfish [snippet]. Here the light runs a slow day / sunset /
-//     dusk / sunrise cycle (960 s), and the blacktips come in around sunset
-//     and sunrise.
+//     dusk / sunrise cycle (960 s); the blacktips come in around sunset and
+//     sunrise and patrol the shallow edge of the fringing reef, toward the
+//     shore; the turtles graze low over the seagrass meadows.
 // Not modelled because not sourced: mangrove genera and layout (mangroves
 // are present at Lizard), zone widths, most day/night habits.
 //
@@ -115,9 +122,9 @@ constant float SP_LEN[10]    = { 0.08f, 0.30f, 0.9f, 0.08f, 0.45f, 0.55f, 1.5f, 
 constant float SP_HD[10]     = { 0.27f, 0.14f, 0.08f, 0.24f, 0.24f, 0.24f, 0.10f, 0.10f, 0.10f, 0.28f };
 constant float SP_EXT[10]    = { 1.4f, 1.3f, 1.6f, 1.3f, 1.4f, 1.6f, 2.6f, 2.4f, 2.2f, 2.4f };
 constant float SP_SPEED[10]  = { 1.2f, 1.5f, 0.5f, 0.9f, 0.8f, 0.4f, 0.6f, 0.35f, 0.2f, 0.35f };
-constant int   SP_SCHOOL[10] = { 1, 1, 1, 1, 0, 0, 0, 0, 0, 0 };
-constant int   SP_HAB[10]    = { 0, 1, 1, 0, 0, 0, 1, 0, 0, 0 };
-constant int   SP_ANCHOR[10] = { 1, 0, 1, 2, 0, 0, 0, 0, 0, 0 };   // 1 bommie, 2 anemone
+constant int   SP_SCHOOL[10] = { 1, 1, 1, 1, 0, 0, 0, 0, 0, 1 };   // turtles share a meadow (anchor 3)
+constant int   SP_HAB[10]    = { 0, 1, 1, 0, 0, 0, 0, 0, 0, 0 };   // blacktips keep low over the reef edge
+constant int   SP_ANCHOR[10] = { 1, 0, 1, 2, 0, 0, 0, 0, 0, 3 };   // 1 bommie, 2 anemone, 3 seagrass meadow
 constant int   SP_DUSK[10]   = { 0, 0, 0, 0, 0, 0, 1, 0, 0, 0 };
 
 // Corals: 90 staghorn, 36 table, 28 anemones, 180 giant clams.
@@ -201,6 +208,17 @@ static float groundBase(float wx, float wz) {
 }
 
 /// Pass 1 of the Zig bake for one texel: sand, fringing reef, patchy seagrass.
+/// 0..1: how much a meadow here is strap-leaved Thalassia/Halodule rather than
+/// Halophila. At Lizard the sheltered lagoon meadow is mostly Thalassia (53.5%)
+/// and Halodule (29.3%), while Halophila dominates the more open, deeper sand
+/// [cited: Seagrass-Watch, via the NbS follow-up]; here sheltered patches (about
+/// half the meadows, ~10 m across) and the shallows by the fringing reef carry
+/// straps, the rest Halophila.
+static float strapness(float wx, float wz) {
+    const float shallows = 1.0f - sstep(-5.5f, -3.5f, lagoonDx(wx, wz));
+    return max(shallows, sstep(0.44f, 0.54f, valueNoise(wx, wz, 6, 31)));
+}
+
 static void groundTexel(uint tu, uint tv, thread float& h, thread float3& c) {
     const float wx = (float(tu) + 0.5f) / TEX, wz = (float(tv) + 0.5f) / TEX;
     const float dx = lagoonDx(wx, wz);
@@ -226,7 +244,13 @@ static void groundTexel(uint tu, uint tv, thread float& h, thread float3& c) {
         // fixed straps that sway; the bake only lays the mat, whose green also tells
         // the draw how dense the blades are.
         if (meadow > 0.0f) {
-            c = mix(mix(c, float3(176, 170, 140), 0.35f * meadow), float3(92, 116, 70), 0.75f * mat);
+            // Halophila meadows in the lagoon are sparser and paler than the strap
+            // meadows in the shallows by the fringing reef (see shallowStraps).
+            const float strap = strapness(wx, wz);
+            // Strap meadows are dense lawns (Halodule ~6,900 shoots/m2 [atlas]);
+            // Halophila a thin scatter (median ~0 g/m2 above ground [atlas]).
+            const float mat2 = mix(mat, max(mat, 0.85f * meadow), strap);
+            c = mix(mix(c, float3(176, 170, 140), 0.35f * meadow), float3(92, 116, 70), mix(0.5f, 0.8f, strap) * mat2);
             h += 0.02f * mat;
         }
     }
@@ -978,6 +1002,21 @@ static float4 anchorFor(int s, int e, float te, texture2d<float, access::read> s
                 a.y = hBilinear(st, b.x, b.z) + 0.4f + 2.0f * SP_LEN[s];
             }
         }
+    } else if (SP_ANCHOR[s] == 3) {
+        // Green turtles graze seagrass at Lizard (eAtlas): find a meadow ahead
+        // (the baked mat is green there) and keep low over it.
+        for (int k = 0; k < 24; k++) {
+            const float cx = cxe + (rnd(h, 20u + uint(k)) - 0.5f) * 14.0f;
+            const float cz = a.z + (rnd(h, 50u + uint(k)) - 0.5f) * 10.0f;
+            const float zz = cz + sc;
+            const float4 m = st.read(uint2(uint(int(floor(wrap64(cx) * TEX)) & (MAP_N - 1)), uint(int(floor(wrap64(zz) * TEX)) & (MAP_N - 1)) + 1u));
+            if (m.a < 0.6f && m.g - max(m.r, m.b * 1.2f) > 0.02f) {
+                a.x = cx;
+                a.z = max(6.0f, cz);
+                a.y = hBilinear(st, cx, zz) + 0.45f;
+                break;
+            }
+        }
     } else if (SP_ANCHOR[s] == 2) {
         for (int i = CORAL_ANEM0; i < CORAL_CLAM0; i++) {
             const float4 d0 = st.read(uint2(CORAL_COL0 + uint(i), BLK_ROW0));
@@ -1000,8 +1039,11 @@ static float3 fishRel(int s, float t, float tau, float4 an, float4 ao, float see
     if (SP_SCHOOL[s] != 0) {
         // Each fish circles the school's anchor on its own phase, plus a fixed
         // place in the cloud and a slow wobble (the Zig's boids, in closed form).
-        const float R = 0.6f + 2.0f * L;
-        const float3 orb = float3(R * sin(ph(t, 0.21f) + seed * 6.0f), 0.4f * sin(ph(t, 0.13f) + float(s)), R * cos(ph(t, 0.17f) + seed * 6.0f));
+        const bool graze = s == 9;   // turtles stay over their meadow, moving slowly side to side
+        const float R = graze ? 2.2f : 0.6f + 2.0f * L;
+        float3 orb = float3(R * sin(ph(t, graze ? 0.12f : 0.21f) + seed * 6.0f), graze ? 0.0f : 0.4f * sin(ph(t, 0.13f) + float(s)),
+                            R * cos(ph(t, graze ? 0.12f : 0.17f) + seed * 6.0f));
+        if (graze) orb = float3(orb.x + (seed < 0.5f ? -1.4f : 1.4f), orb.y, 0.3f * orb.z);
         float3 sp = (float3(rnd(fh, 3), rnd(fh, 4), rnd(fh, 5)) - 0.5f) * float3(1.4f * R, 0.6f * R + 0.3f, 1.4f * R);
         sp += 0.25f * R * float3(sin(ph(t, 0.37f + 0.2f * rnd(fh, 6)) + TWO_PI * rnd(fh, 7)),
                                   0.5f * sin(ph(t, 0.29f) + TWO_PI * rnd(fh, 8)),
@@ -1016,6 +1058,15 @@ static float3 fishRel(int s, float t, float tau, float4 an, float4 ao, float see
         float3 p = mix(po, pn, lam);
         if (lam < 1.0f && p.z < 0.7f) p = pn;
         return p;
+    }
+    if (s == 6) {
+        // Blacktip reef sharks patrol the shallows along the shore (ISRA): here,
+        // the shallow foot of the fringing reef, swimming up and down along it.
+        const float key = seed * 37.0f;
+        const float tz = 10.0f + 6.0f * fract(key * 0.618f) + 6.0f * sin(ph(t, 0.09f + 0.03f * seed) + key);
+        const float sc = scrollAt(t);
+        const float tx = (channelX(sc + tz) - camx) - 3.5f - 2.0f * seed + 0.6f * sin(ph(t, 0.23f) + key);
+        return float3(tx, 0.6f, tz);
     }
     // Loners wander around a station that drifts along with the diver.
     const float key = float(s) * 1.7f + seed * 37.0f;
@@ -1348,7 +1399,7 @@ static inline float snapSlice(float z) {
 // for a pixel fades rather than pops, and beyond ~9 m they fade into the mat.
 constant float GRASS_CELL = 0.06f;
 constant float GRASS_Z = 9.0f;
-constant float GRASS_HMAX = 0.40f;   // tallest blade plus its lean
+constant float GRASS_HMAX = 0.44f;   // tallest blade plus its lean
 
 /// How dense the blades are at a lagoon point, read from the mat's green (0 off the meadows).
 static inline float grassDensity(float4 sm) {
@@ -1391,7 +1442,11 @@ static bool seagrass(texture2d<float> st, Scene S, float rk, float ry, float zhi
             const float bzw = (float(iz) + 0.15f + 0.7f * q2) * GRASS_CELL;  // world z
             const float bz = bzw - S.scroll;
             if (bz < Z_NEAR || bz > zhit + 0.05f) continue;
-            const float H = 0.10f + 0.22f * q3;
+            // Strap-leaved Halodule/Thalassia only in the shallows at the foot of the
+            // fringing reef; Halophila (a pair of small oval leaves on a short stalk)
+            // everywhere else in the lagoon.
+            const bool strap = strapness(bx, bzw) > 0.5f + 0.3f * (q2 - 0.5f);
+            const float H = strap ? 0.12f + 0.24f * q3 : 0.03f + 0.04f * q3;
             // Each blade is planted on the ground at its own spot, and only where
             // that spot is meadow (not rock): near a coral head the ray lands on the
             // rock, and planting blades there stretched them up its face.
@@ -1399,8 +1454,9 @@ static bool seagrass(texture2d<float> st, Scene S, float rk, float ry, float zhi
             if (grassDensity(at) <= 0.0f) continue;
             const float gb = at.a - 0.01f;
             // The surge leans it shoreward and back; a faster wobble on top.
-            const float lean_z = 0.06f * sin(1.25f * t - 0.9f * bzw + 6.0f * q1) + 0.015f * sin(3.3f * t + 9.0f * q2);
-            const float lean_x = 0.035f * sin(0.9f * t + 0.7f * bx + 6.0f * q3);
+            const float lscale = strap ? 1.0f : 0.25f;   // short Halophila barely leans
+            const float lean_z = lscale * (0.06f * sin(1.25f * t - 0.9f * bzw + 6.0f * q1) + 0.015f * sin(3.3f * t + 9.0f * q2));
+            const float lean_x = lscale * 0.035f * sin(0.9f * t + 0.7f * bx + 6.0f * q3);
             // Where the ray meets this blade: solve for the height up it (two passes).
             float z = bz, u = 0.0f;
             for (int k = 0; k < 2; k++) {
@@ -1410,14 +1466,25 @@ static bool seagrass(texture2d<float> st, Scene S, float rk, float ry, float zhi
             }
             u = (S.camy + ry * z - gb) / H;
             if (u < 0.0f || u > 1.0f || z >= zhit || (found && z >= zg)) continue;
-            const float dx = (S.camx + rk * z) - (bx + lean_x * u * u);
-            const float halfw = 0.0055f * (1.0f - 0.6f * u * u);
+            float dx = (S.camx + rk * z) - (bx + lean_x * u * u);
+            float halfw = 0.0055f * (1.0f - 0.6f * u * u);
+            if (!strap) {
+                // A thin stalk, then two oval leaves splayed left and right.
+                const float leaf = sstep(0.35f, 0.55f, u);
+                const float lu = saturate((u - 0.4f) / 0.6f);
+                const float lw = 0.0055f * sqrt(max(0.0f, 1.0f - (2.0f * lu - 1.0f) * (2.0f * lu - 1.0f)));
+                const float off = 0.007f * leaf;
+                const float dl = min(fabs(dx - off), fabs(dx + off));
+                if (leaf > 0.0f && lw > 0.0011f && dl < fabs(dx)) { dx = dl; halfw = lw; } else halfw = 0.0011f;
+            }
             const float c = saturate((halfw - fabs(dx)) / (z * px) + 0.5f) * (1.0f - sstep(GRASS_Z - 2.0f, GRASS_Z, z));
             if (c <= 0.02f) continue;
             found = true;
             zg = z;
             cov = c;
-            const float3 base_c = float3(64, 104, 56) / 255.0f, tip_c = mix(float3(112, 150, 82), float3(126, 128, 76), q2) / 255.0f;
+            const float3 base_c = strap ? float3(64, 104, 56) / 255.0f : float3(86, 128, 70) / 255.0f;
+            const float3 tip_c = strap ? mix(float3(112, 150, 82), float3(126, 128, 76), q2) / 255.0f
+                                       : mix(float3(122, 170, 96), float3(138, 160, 92), q2) / 255.0f;
             cg = mix(base_c, tip_c, u) * (0.85f + 0.3f * q0);
             cg = mix(cg, WATER_HOR, 1.0f - exp(-FOG_K * z));
         }
