@@ -87,6 +87,7 @@ release: app
 	@# plus a visible WRITING_THEMES.md that points people and other agents to them.
 	mkdir -p $(STAGE)/.claude && tar -c $$(git ls-files .claude/skills) | tar -x -C $(STAGE)
 	cp docs/WRITING_THEMES.md $(STAGE)/WRITING_THEMES.md
+	cp NOTE.md $(STAGE)/NOTE.md
 	for t in $$(git ls-files 'themes/*.zig'); do \
 		[ "$$(basename $$t)" = argus_theme_sdk.zig ] && continue; \
 		./argus-desktop --precompile $(STAGE)/$$t $(STAGE)/Argus.app/Contents/Resources/prebuilt || exit 1; \

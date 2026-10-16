@@ -1,7 +1,8 @@
 # Contributing to Argus
 
 Thanks for looking. The most welcome contribution is a **theme**: one file that turns a
-Desktop Space into something worth looking at. Engine fixes are welcome too; see the end.
+Desktop Space into something worth looking at. Engine fixes are welcome too; see the end. Working with a coding agent? Point it at
+[AGENTS.md](AGENTS.md) first.
 
 By contributing you agree that your work is released under the MIT License (see
 [LICENSE](LICENSE)), and that you follow the [Code of Conduct](CODE_OF_CONDUCT.md).
@@ -14,7 +15,7 @@ By contributing you agree that your work is released under the MIT License (see
 | :--- | :--- | :--- |
 | Runs on | the GPU, every pixel in parallel | one CPU core |
 | Good for | fields, ray marching, shading, simulations on a grid | sequential, branchy state (agents, networks, game logic) |
-| Start from | [`themes/Tutorial_Tides.metal`](themes/Tutorial_Tides.metal), then [`themes/Tutorial_Reef.metal`](themes/Tutorial_Reef.metal) | [`themes/argus_theme_sdk.zig`](themes/argus_theme_sdk.zig) (its header shows the whole contract); no small Zig example ships, but the former reference theme is in the history: `git show f566e3a:themes/Echo.zig` |
+| Start from | [`themes/Tutorial_Tides.metal`](themes/Tutorial_Tides.metal), then [`themes/Tutorial_Reef.metal`](themes/Tutorial_Reef.metal) | the skeleton in [BENCHMARK.md](BENCHMARK.md) §3, which passes the harness as it stands; [`themes/argus_theme_sdk.zig`](themes/argus_theme_sdk.zig)'s header shows the whole contract |
 | Full contract | [`.claude/skills/argus-metal-theme/SKILL.md`](.claude/skills/argus-metal-theme/SKILL.md) | [BENCHMARK.md](BENCHMARK.md) §3–4 |
 
 Prefer Metal unless the work really is sequential.

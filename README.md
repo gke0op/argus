@@ -146,10 +146,9 @@ the skills.
 
 **CPU themes in Zig** use [`themes/argus_theme_sdk.zig`](themes/argus_theme_sdk.zig): a
 `State` struct with `init`, `step`, `draw` and `deinit`, one allocation at init and none
-after. This release ships no small Zig starter: the SDK's header shows the whole contract,
-[`themes/Cygnus_A.zig`](themes/Cygnus_A.zig) is a complete (and large) example, and the former
-reference theme is in the history (`git show f566e3a:themes/Echo.zig`). The contract and
-the harness gates are spelled out in [BENCHMARK.md](BENCHMARK.md).
+after. Start from the skeleton in [BENCHMARK.md](BENCHMARK.md) §3, which passes the harness
+as it stands; [`themes/Cygnus_A.zig`](themes/Cygnus_A.zig) is a complete (and large) example.
+The contract and the harness gates are spelled out in [BENCHMARK.md](BENCHMARK.md).
 
 ### What it costs
 
@@ -179,7 +178,8 @@ creativity and metal affinity it has.
 one Zig 0.17.0 file that simulates something real and passes eight automated gates (compiles,
 one allocation, survives a 320x200 watchdog, respects the row stride, opaque pixels, no NaN,
 visible motion, under 16.7 ms a frame on one CPU core). A submission that passes is, at the
-same moment, a wallpaper you can drop on a Space.
+same moment, a wallpaper you can drop on a Space. Run it zero-shot (paste the file into a chat)
+or agentic (an agent in a clone runs the harness itself); BENCHMARK.md has the steps for both.
 
 Several earlier themes, now in the git history, started as answers to it, and the table in
 BENCHMARK.md records who wrote each one.
@@ -194,7 +194,7 @@ record, and [NOTICE.md](NOTICE.md) credits each piece.
 
 ## Contributing
 
-Themes are the best way in. [CONTRIBUTING.md](CONTRIBUTING.md) covers the contract, the
+Coding agents: start at [AGENTS.md](AGENTS.md), the map of the repository. Themes are the best way in. [CONTRIBUTING.md](CONTRIBUTING.md) covers the contract, the
 harness gates, the frame budget, honest headers and credit lines. If you think a physics claim
 is wrong, open a "physics claim challenge" issue with a source; that is the most useful report
 this project can get.

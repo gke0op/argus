@@ -1,18 +1,48 @@
-# ARGUS-BENCH // Zero-Shot Bare-Metal Zig 0.17.0 Visual & Physics Benchmark
+# ARGUS-BENCH // Bare-Metal Zig 0.17.0 Visual & Physics Benchmark
 
 **`ARGUS-BENCH`** is a standalone, deterministic systems-and-physics benchmark for AI coding agents built on top of **Argus** (`Argus.app`), the bare-metal Zig 0.17.0 macOS multi-Space Retina wallpaper engine.
 
 Instead of grading models on boilerplate CRUD apps or subjective web shaders, `ARGUS-BENCH` challenges an AI system to produce **a single, self-contained, zero-dependency Zig 0.17.0 source file** (`themes/<Agent_Theme>.zig`) that simulates a real mathematical or physical system and rasterizes a **`1920×1200` Retina framebuffer on the CPU at 60–1,200+ FPS** under strict memory, stride-canary, and numerical-stability invariants.
 
-Every submission that passes the automated harness (`src/theme_harness.zig`) is immediately a **plug-and-play live desktop wallpaper** for `Argus.app` (hot-compiled to an `aarch64-macos` `.dylib`, verified in an isolated watchdog process, and rendered across macOS Desktop Spaces at 120 Hz trackpad swipe speed).
+Every submission that passes the automated harness (`src/theme_harness.zig`) is also a live wallpaper: drop the file on a Desktop Space from Argus's menu bar and the app compiles it to an `aarch64-macos` `.dylib`, checks it in an isolated watchdog process, and runs it.
 
 ---
 
-## Quick Copy-Paste Prompt for External AI Agents
+## How to run it
 
-> **Instructions for Operator:** Send this entire `BENCHMARK.md` file to any AI model/agent (Claude, GPT, Gemini, DeepSeek, Grok, etc.) with the prompt below:
->
+There are two modes. Say which one you ran when you report a result: they are not comparable.
+
+### Zero-shot (a model in a chat window, no tools)
+
+1. Give the model this whole file and the prompt below.
+2. Save its answer as `themes/<Model>_<Name>.zig` in a clone of the repository.
+3. Run `make harness THEME=themes/<Model>_<Name>.zig`. The result is the first verdict: no retries,
+   no edits by hand.
+
 > *"Read `BENCHMARK.md` carefully. Write a single, complete, plug-and-play Zig 0.17.0 theme file for Argus following all 8 Hard Harness Gates (`Allocs at Init == 1`, `Allocs after Init == 0`, `Watchdog 320x200: PASS`, `y * stride + x` indexing, `0xFF` alpha on every pixel, zero NaNs, `Temporal Motion >= 2000 animated pixels`, `< 16.6 ms/frame` at `1920x1200` on CPU). Prefer `sdk.addRGB`, `sdk.scaleRGB`, `sdk.lerpRGB`, and `sdk.Canvas` to avoid Zig 0.17 peer-type narrowing and unsigned subtraction underflow. Output ONLY the complete `.zig` source file ready to save as `themes/<YourModel>_<ThemeName>.zig`."*
+
+### Agentic (a coding agent with a shell, in a clone)
+
+For Claude Code, Codex, Gemini CLI and the like. The agent runs the harness itself and iterates.
+The prompt is one line:
+
+> *"Run ARGUS-BENCH in agentic mode: follow the agentic steps in `BENCHMARK.md` and pick a track from §5."*
+
+1. **Set up.** `git clone https://github.com/gke0op/argus.git && cd argus && make zig` (installs
+   the pinned Zig 0.17.0 into `.toolchain/`, checksum-verified).
+2. **Prove the toolchain.** Copy the skeleton in §3 to `themes/<Model>_<Name>.zig` unchanged and run
+   `make harness THEME=themes/<Model>_<Name>.zig`. It must print `Verdict : PASS` before you change
+   anything. If it does not, the problem is the setup, not your theme.
+3. **Pick a track** (§5) and a real system to simulate.
+4. **Build it in small steps.** Run the harness after each change. A failing gate names itself on
+   its line of the report; §1 says what usually causes each one, §4 lists the Zig 0.17.0 traps.
+5. **Look at it.** `make harness THEME=... OUT=/tmp/<Name>.png` writes the last frame. Open it.
+   Passing the gates proves the theme runs, not that it looks like anything.
+6. **Report** the final scorecard (verdict, average frame time and tier from §2), how many harness
+   runs it took to the first PASS, and the PNG.
+
+To go beyond the gates, to a theme good enough to ship, the bar and the render-and-critique loop
+are in [`.claude/skills/THEME_CRAFT.md`](.claude/skills/THEME_CRAFT.md).
 
 ---
 
@@ -133,6 +163,9 @@ pub fn exportTheme(comptime State: type) void;
 
 ### Minimal Working Skeleton (Copy & Build From This)
 
+It passes all eight gates as it stands (about 1.5 ms a frame on an M3): a night-blue gradient
+with a slow swell of light moving through it. Replace the swell with your simulation.
+
 ```zig
 const std = @import("std");
 const math = std.math;
@@ -153,6 +186,7 @@ pub const State = struct {
     // allocation (`Allocs at Init == 1`, `Allocs after Init == 0`).
     // Keep `@sizeOf(State) <= 12 * 1024 * 1024` (12 MiB).
     bg_lut: [MAX_PIXELS]u32,
+    row_glow: [MAX_H]u32,
 
     pub fn init(alloc: std.mem.Allocator, w: usize, h: usize, scale: f64) !*State {
         const self = try alloc.create(State);
@@ -160,11 +194,14 @@ pub const State = struct {
         self.h = @min(h, MAX_H);
         self.scale = scale;
         self.time_sec = 0.0;
+        self.row_glow = @splat(sdk.packRGBA(0, 0, 0));
 
-        // Precompute static geometry / LUTs once here in `init()`!
+        // Precompute static geometry / LUTs once here in `init()`: a night-blue gradient.
         for (0..self.h) |y| {
+            const t: u32 = @intCast((y * 256) / @max(@as(usize, 1), self.h));
+            const row = sdk.lerpRGB(sdk.packRGBA(4, 6, 18), sdk.packRGBA(10, 24, 48), t);
             for (0..self.w) |x| {
-                self.bg_lut[y * self.w + x] = sdk.packRGBA(5, 8, 16);
+                self.bg_lut[y * self.w + x] = row;
             }
         }
         return self;
@@ -175,22 +212,29 @@ pub const State = struct {
     }
 
     pub fn step(self: *State, dt: f64) void {
-        // Advance physics / ODE / PDE / phase state using fixed timestep `dt` (0.008s).
-        // Zero heap allocations allowed here.
+        // Advance physics / ODE / PDE / phase state using fixed timestep `dt` (0.008 s).
+        // Zero heap allocations allowed here. Per-row work (h sines), not per-pixel.
         self.time_sec += dt;
+        for (0..self.h) |y| {
+            const fy: f64 = @floatFromInt(y);
+            const s = 0.5 + 0.5 * @sin(fy * 0.02 - self.time_sec * 3.0);
+            const g: u8 = @intFromFloat(s * 40.0);
+            const b: u8 = @intFromFloat(s * 90.0);
+            self.row_glow[y] = sdk.packRGBA(0, g, b);
+        }
     }
 
     pub fn draw(self: *const State, buf: []u32, stride: usize) void {
         // IMPORTANT (Gate 3 & Gate 4):
         // 1. Always index row `y` via `y * stride + x` (NEVER `y * self.w + x` in `buf`).
         // 2. Write every pixel in `0..self.h` and `0..self.w` with `0xFF` alpha (`sdk.packRGBA`).
-        // 3. Never write to columns `[self.w .. stride]` — those contain `0xDEADBEEF` canaries!
+        // 3. Never write to columns `[self.w .. stride]`: those contain `0xDEADBEEF` canaries!
         const w = self.w;
-        const h = self.h;
-        for (0..h) |y| {
+        for (0..self.h) |y| {
             const dst_row = buf[y * stride .. y * stride + w];
             const src_row = self.bg_lut[y * w .. y * w + w];
-            @memcpy(dst_row, src_row);
+            const glow = self.row_glow[y];
+            for (dst_row, src_row) |*dst, src| dst.* = sdk.addRGB(src, glow);
         }
     }
 
@@ -262,28 +306,34 @@ No topic restrictions: design the most visually hypnotic, mathematically deep, h
 
 ## 6. How Your Submission Is Evaluated
 
-1. Save the model's output as `themes/<Model_Name>.zig`.
+1. Save the theme as `themes/<Model>_<Name>.zig`.
 2. Run the automated harness:
    ```sh
-   make harness THEME=themes/<Model_Name>.zig FRAMES=120 OUT=/tmp/<Model_Name>.png
+   make harness THEME=themes/<Model>_<Name>.zig FRAMES=120 OUT=/tmp/<Model>_<Name>.png
    ```
-3. The harness prints the deterministic scorecard:
+3. The harness prints the deterministic scorecard. This one is the §3 skeleton:
    ```text
    ========================================================================
     ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
    ------------------------------------------------------------------------
-    Theme             : themes/Argon_Black_Hole.zig (Stateful SDK Contract)
-    Resolution        : 1920x1200 (tested stride=1936 and stride=1920)
+    Theme             : themes/Skeleton.zig (Stateful SDK Contract)
+    Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
     Frames Rendered   : 120 (fixed dt = 0.008000)
-    Avg Frame Time    : 839.9 us (1190.7 FPS) | Budget: 16667.0 us
-    Worst Frame Time  : 1551.8 us
-    Allocs at Init    : 1 (9007232 bytes)
+    Avg Frame Time    : 1541.7 us (648.6 FPS) | Budget: 16667.0 us
+    Worst Frame Time  : 3643.0 us
+    Allocs at Init    : 1 (9220832 bytes)
     Allocs after Init : 0
+    Watchdog 320x200  : PASS
     Stride Guard      : CLEAN (0 out-of-bounds canary writes)
     NaN / Inf Check   : CLEAN
-    Pixel Variance    : 1384920 / 2304000 non-bg pixels (alpha=0 count: 0)
-    Output PNG        : /tmp/argus_theme_out.png
+    Pixel Variance    : 2300160 / 2304000 non-bg pixels (alpha=0 count: 0)
+    Temporal Motion   : 2259840 / 2304000 visibly animated pixels (min required: 2000)
+    Output PNG        : /tmp/Skeleton.png
     Verdict           : PASS
    ========================================================================
    ```
-4. Drop `themes/<Model_Name>.zig` onto any Desktop Space in the `✦ Argus` menu-bar popover to run it live on macOS!
+   Frame times depend on the machine; the tiers in §2 were measured on Apple Silicon (M3).
+4. Run it live: click the eye in the menu bar and drop the file on a Space.
+5. Submit it, if you like: open a pull request, or an issue with the "Theme submission" template,
+   with the scorecard, the PNG and the mode you ran (zero-shot or agentic). See
+   [CONTRIBUTING.md](CONTRIBUTING.md).
