@@ -166,23 +166,39 @@ pub var gpu_ports = true;
 /// Set by the app: compiles a `.metal` theme source and reports whether it is loadable, so a
 /// broken edit never replaces a working theme. Null (tests, harness) accepts any source.
 pub var metal_validate: ?*const fn (src: []const u8, path: []const u8) bool = null;
-// Themes built on the Kerr-disk engine (src/gpu/bh_*), drawn by its GPU path.
-const GPU_PORT_THEMES = [_][]const u8{ "Majestic_Glutton.zig", "Gargantua.zig", "Cygnus_A.zig", "J0834.zig", "PG1426.zig" };
+// Themes built on the Kerr-disk engine (src/gpu/bh_*), drawn by its GPU path: the shipped ones by
+// name, and any other (a locally generated quasar) by the marker in its first lines.
+const GPU_PORT_THEMES = [_][]const u8{ "Gargantua.zig", "Cygnus_A.zig", "J0834.zig", "PG1426.zig" };
+const GPU_PORT_MARKER = "// @argus-engine: kerr-disk";
 
 fn isGpuPortTheme(path: []const u8) bool {
     const base = std.Io.Dir.path.basename(path);
     for (GPU_PORT_THEMES) |t| if (std.mem.eql(u8, base, t)) return true;
-    return false;
+    if (!std.mem.endsWith(u8, base, ".zig")) return false;
+    var file = std.Io.Dir.cwd().openFile(g_io, path, .{}) catch return false;
+    defer file.close(g_io);
+    var reader = file.reader(g_io, &.{});
+    var head: [256]u8 = undefined;
+    const n = reader.interface.readSliceShort(&head) catch return false;
+    return std.mem.indexOf(u8, head[0..n], GPU_PORT_MARKER) != null;
+}
+test "Kerr-disk themes are found by name or by the marker in their header" {
+    g_io = std.testing.io;
+    try std.testing.expect(isGpuPortTheme("themes/Cygnus_A.zig"));
+    try std.testing.expect(isGpuPortTheme("tools/quasar_template.zig")); // unlisted: by its marker
+    try std.testing.expect(!isGpuPortTheme("themes/Echo.zig"));
+    try std.testing.expect(!isGpuPortTheme("themes/Night_Tide.metal"));
 }
 const GPU_PORT_ROOT = "-Mroot=src/gpu/bh_export.zig";
 
 /// Themes that were renamed: a saved Space that names the old file loads the new one from the
 /// same folder (and is saved under the new name).
 const RENAMED_THEMES = [_][2][]const u8{
-    .{ "Opus_Black_Hole.zig", "Majestic_Glutton.zig" }, // the owner's quasar artwork
+    // The first quasar theme's old names now open the flagship quasar.
+    .{ "Opus_Black_Hole.zig", "Cygnus_A.zig" },
+    .{ "Opus_Quasar.zig", "Cygnus_A.zig" },
+    .{ "H1821.zig", "Cygnus_A.zig" },
     // Model names left the theme names (credits stay in NOTICE.md and the headers).
-    .{ "Opus_Quasar.zig", "Majestic_Glutton.zig" },
-    .{ "H1821.zig", "Majestic_Glutton.zig" }, // the real name stays with the real quasars
     .{ "Opus_Cygnus_A.zig", "Cygnus_A.zig" },
     .{ "Opus_J0834.zig", "J0834.zig" },
     .{ "Opus_PG1426.zig", "PG1426.zig" },
@@ -209,10 +225,10 @@ pub fn renamedThemePath(path: []const u8, buf: []u8) []const u8 {
 
 test "renamed themes: saved Spaces naming an old theme file load the new one from the same folder" {
     var buf: [512]u8 = undefined;
-    try std.testing.expectEqualStrings("/a/b/themes/Majestic_Glutton.zig", renamedThemePath("/a/b/themes/Opus_Black_Hole.zig", &buf));
-    try std.testing.expectEqualStrings("themes/Majestic_Glutton.zig", renamedThemePath("themes/Opus_Black_Hole.zig", &buf));
-    try std.testing.expectEqualStrings("/a/b/themes/Majestic_Glutton.zig", renamedThemePath("/a/b/themes/Opus_Quasar.zig", &buf));
-    try std.testing.expectEqualStrings("/a/b/themes/Majestic_Glutton.zig", renamedThemePath("/a/b/themes/H1821.zig", &buf));
+    try std.testing.expectEqualStrings("/a/b/themes/Cygnus_A.zig", renamedThemePath("/a/b/themes/Opus_Black_Hole.zig", &buf));
+    try std.testing.expectEqualStrings("themes/Cygnus_A.zig", renamedThemePath("themes/Opus_Black_Hole.zig", &buf));
+    try std.testing.expectEqualStrings("/a/b/themes/Cygnus_A.zig", renamedThemePath("/a/b/themes/Opus_Quasar.zig", &buf));
+    try std.testing.expectEqualStrings("/a/b/themes/Cygnus_A.zig", renamedThemePath("/a/b/themes/H1821.zig", &buf));
     try std.testing.expectEqualStrings("/a/b/themes/Cygnus_A.zig", renamedThemePath("/a/b/themes/Opus_Cygnus_A.zig", &buf));
     try std.testing.expectEqualStrings("/a/b/themes/Night_Tide.metal", renamedThemePath("/a/b/themes/Opus_Night_Tide.metal", &buf));
     try std.testing.expectEqualStrings("/a/b/themes/Orion_Nebula.metal", renamedThemePath("/a/b/themes/Opus_Orion_Nebula.metal", &buf));

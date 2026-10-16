@@ -1,31 +1,14 @@
 // @argus-theme: custom_shader
+// @argus-engine: kerr-disk
 // ============================================================================
-// MAJESTIC GLUTTON // themes/Majestic_Glutton.zig
+{{TITLE_BLOCK}}
 //
 // A quasar: a spinning (Kerr) supermassive black hole feeding a luminous thin accretion
 // disk, seen up close, rendered from the physics rather than tuned by eye. No telescope can
 // resolve a real quasar disk (we know them from their light: spectra, variability,
 // microlensing); this is what that physics predicts. The Event Horizon Telescope's images
 // (M87*, Sgr A*) are a different, starving kind of black hole: hot, faint, see-through flows.
-// Majestic Glutton is an artwork: a quasar modelled on H1821+643's measured mass, spin and
-// feeding rate, with its inclination, framing and look chosen by its owner. It is not presented
-// as the real H1821+643 (Cygnus_A, J0834 and PG1426 are the real-named quasars); what its physics
-// computes and what is chosen are listed below.
-// Its source, H1821+643, is the quasar at the centre of the galaxy cluster CL1821+643 (radio-quiet
-// by luminosity, though it drives a weak ~300 kpc-scale FR I radio structure, Blundell & Rawlings
-// 2001: invisible in optical light and far outside this view). Its measured spin, a* = 0.62
-// (+0.22 / -0.37, 90%; Sisk-Reynes, Reynolds, Matthews & Smith 2022, MNRAS 514, 2568, Chandra
-// X-ray reflection); its mass, 4e9 Msun (the centre of the consistent estimates, ~3-6e9; the
-// 2026 H-beta reverberation lag, 83 d, is 5.6x short of R-L but tail-driven, the line core gives
-// 267 d: Li et al., arXiv:2601.18269); its luminosity, ~0.2 of Eddington's
-// (Fukuchi, Ichikawa et al. 2022: lambda = 0.18 from the full SED, 0.59 from X-rays): a
-// radiatively efficient thin disk. From Earth we see its inner disk at 44.6 +- 3.3 deg (90%);
-// this camera sits elsewhere around it, at 88 deg (a choice). It may also be a recoiling black
-// hole: its broad lines move ~1000-2100 km/s against the host and the nucleus looks offset from
-// the host's centre (Robinson et al. 2010; Jadhav et al. 2021, MNRAS 507, 484), as a hole kicked
-// by asymmetric gravitational waves in a merger would be. Unsettled (a binary or a wind could
-// also explain it); up close it would look the same, since the disk moves with the hole.
-// Audited independently (Gemini 4 Argon; Claude Opus with its own code): every item under
+{{OBJECT_PARAGRAPH}}// Audited independently (Gemini 4 Argon; Claude Opus with its own code): every item under
 // "computed" was re-derived and checked. Gargantua.zig is the same engine at a chosen,
 // cooler temperature.
 //
@@ -42,16 +25,16 @@
 //    zero stress at the ISCO, a stress W ~ r^(1/2) independent of Sigma. Near the ISCO it is
 //    in steady inflow and has the Page-Thorne flux shape (within 1% at 1.5 ISCO radii; mass
 //    budget closes to 0.3%); further out the inflow falls to zero at the radius where its mass
-//    flux reverses (5 ISCO radii, 19 M), so the flux drops below Page-Thorne (0.89 at 9 M, 0.55
-//    at 19 M). Its recipe (ring and snapshot) scales with the ISCO (3.75 M at this spin); the
+//    flux reverses (5 ISCO radii, {{R_SNAP}} M), so the flux drops below Page-Thorne ({{PT_25}} at {{R_25}} M, {{PT_5}}
+//    at {{R_SNAP}} M). Its recipe (ring and snapshot) scales with the ISCO ({{R_ISCO}} M at this spin); the
 //    solution itself is recomputed per spin (the Kerr coefficients depend on it). Beyond
 //    it the disk spreads outward, and its dissipation, temperature and opacity fall off
 //    together, so it thins out with no edge. The stress follows the closure, not the local
 //    pressure: W = 1.5 alpha (P/rho) r holds only at the flux peak, where it is set (further
-//    out the closure's stress implies alpha >> 1). Scaled to a 4e9 solar-mass hole whose
-//    ISCO accretion rate is 36% of Eddington's (alpha = 0.1); the snapshot shines at 0.54 of
-//    that (its inflow stops at 5 ISCO radii), i.e. ~0.2 L_Edd as measured. Peak ~50,000 K at
-//    5.7 M (radiation-pressure supported, H/r ~ 0.05 there), blue-white, as real
+//    out the closure's stress implies alpha >> 1). Scaled to a {{MASS}} solar-mass hole whose
+//    ISCO accretion rate is {{EDD_PCT}}% of Eddington's (alpha = 0.1); the snapshot shines at {{LUM}} of
+//    that (its inflow stops at 5 ISCO radii), i.e. ~{{L_EDD}} L_Edd, the object's. Peak ~{{T_PEAK_K}} K at
+//    {{R_PEAK}} M (H/r ~ {{H_OVER_R}} there: thin), as real
 //    thin disks around such holes are. Local structure: scale height from hydrostatic balance with gas +
 //    radiation pressure, midplane temperature from radiative diffusion, electron scattering +
 //    Kramers absorption at that temperature. Where the gas thins it emits as a grey isothermal
@@ -61,7 +44,7 @@
 //  * Color: each point radiates the spectrum of a disk atmosphere: a colour-corrected
 //    blackbody f^-4 B(f T_s), whose electron scattering hardens it to a bluer colour at the
 //    same flux (Done, Davis, Jin, Blaes & Ward 2012: f = 1 below 3e4 K, where hydrogen
-//    absorption thermalises the light; ~1.5 at this disk's 50,000 K peak. Where the gas is thick
+//    absorption thermalises the light; ~{{F_PEAK_1}} at this disk's {{T_PEAK_K}} K peak. Where the gas is thick
 //    to scattering its temperature is T_eff and f alone hardens it; the thin-slab boost of the
 //    source temperature applies only where the gas is thin overall, so it is not counted twice). The observed spectrum is that at g f T_s, with g the full Kerr redshift
 //    (gravitational + Doppler), so color AND brightness come from Planck's law integrated
@@ -78,8 +61,8 @@
 //    (at this steep tilt most crossings graze the gas), and I = B(1 - e^-tau/mu) + I_behind e^-tau/mu.
 //
 // What is chosen (stated honestly):
-//  * Spin a = 0.62 M (H1821+643's measured value, above), inclination 88 deg (nearly edge-on).
-//  * The disk's parameters: mass 4e9 Msun, ISCO accretion rate 36% of Eddington, alpha 0.1, the
+//  * {{SPIN_NOTE}}
+//  * The disk's parameters: mass {{MASS}} Msun, ISCO accretion rate {{EDD_PCT}}% of Eddington, alpha 0.1, the
 //    initial ring (4 ISCO radii, width 0.8) and the snapshot (mass flux reversing at 5 ISCO
 //    radii). The Sigma-independent
 //    stress is what gives the soft outer fade: a stress that grows with Sigma (a pure alpha
@@ -89,8 +72,8 @@
 //    (H-, molecules, dust) is not modelled. Sigma falls an e-fold per ~10 M out there, so the
 //    fade is robust but its exact radius and its colour are not computed physics. The colour
 //    correction and limb darkening are fits to disk-atmosphere models, not computed here.
-//  * Time-lapse: one ISCO orbit takes ~5 s on screen, one at r = 6 M ~10 s (in reality ~11
-//    and ~22 days for this 4e9 solar-mass hole).
+//  * Time-lapse: one ISCO orbit takes ~{{P_ISCO_S}} s on screen, one at r = 6 M ~{{P_6_S}} s (in reality ~{{P_ISCO_D}}
+//    and ~{{P_6_D}} days for this {{MASS}} solar-mass hole).
 //  * Turbulence: procedural noise carrying the measured statistics of magnetorotational
 //    turbulence, not simulated MHD (Guan et al. 2009; Beckwith, Armitage & Simon 2011;
 //    Hirose et al. 2009). As rendered (time-averaged 1/e correlation ellipse, measured on the
@@ -121,9 +104,9 @@
 //    Hotter gas: emissivity x (1 + boost), so T rises as (1 + boost)^(1/4), and its colour
 //    correction follows (FCOL_FOLLOWS: above ~30 kK a spot hardens, bluer and dimmer). Their count,
 //    size and brightness are choices; their motion is not.
-//  * Sky: black, as it would be. From here, at the centre of the giant galaxy hosting
-//    H1821+643 inside its cluster, the sky holds the host's stars and the cluster's galaxies,
-//    but next to a 50,000 K disk they are ~1e12 times fainter, far below any exposure that
+//  * Sky: black, as it would be. From here, in the heart of its host galaxy, the sky holds
+//    the host's stars and its neighbours' galaxies,
+//    but next to a {{T_PEAK_K}} K disk they are ~{{FAINTER}} times fainter, far below any exposure that
 //    shows the disk (or any HDR display's range). Renders that show a sky expose it separately.
 //  * Camera exposure + Reinhard tone mapping (HDR: to the display's EDR headroom).
 //    The CPU fallback composites translucent layers after tone mapping, in display
@@ -138,7 +121,7 @@ const std = @import("std");
 const math = std.math;
 const sdk = @import("argus_theme_sdk.zig");
 
-pub const SPIN: f64 = 0.62; // H1821+643's measured spin (Sisk-Reynes et al. 2022; see header)
+pub const SPIN: f64 = {{SPIN}}; // see header
 pub const INCL: f64 = 88.0 * math.pi / 180.0;
 /// Checked by `make claims` through probeEquatorialRay (equatorial light paths).
 pub const claims = sdk.Claims{ .metric = .kerr, .spin = SPIN, .inclination_deg = 88.0 };
@@ -193,8 +176,8 @@ const LIMB_B: f64 = 2.06; // electron-scattering limb darkening I(mu) ~ 1 + LIMB
 const EXP_N: usize = 1024; // exp table over [-4, 4] for the CPU draw
 const EXPO_TARGET: f64 = 7.0; // 99th-percentile disk luminance maps here before tone mapping
 const STAR_GAIN: f64 = 0.8;
-// The sky is black: next to a 50,000 K disk everything else (the host galaxy's stars, the cluster's
-// galaxies) is ~1e12 times fainter, far below any exposure that shows the disk (see header).
+// The sky is black: next to a {{T_PEAK_K}} K disk everything else (the host galaxy's stars, its
+// neighbours) is ~{{FAINTER}} times fainter, far below any exposure that shows the disk (see header).
 const SKY_VISIBLE: f64 = 0.0;
 const STAR_CELL: f64 = 8.0e-3; // star grid spacing on the sky, radians (resolution-independent)
 const STAR_FLUX: f64 = 60.0; // intrinsic star brightness; lensing then dims or brightens each one
@@ -279,21 +262,21 @@ pub fn pageThorne(a: f64, r_in: f64, r_max: f64, out: *[PT_N]f64) void {
 // Inside the mass-flux reversal radius it relaxes to the Page-Thorne flux; beyond it the disk is
 // spreading outward and its surface density, dissipation and opacity fall off together.
 
-pub const BH_MASS_SUN: f64 = 4.0e9; // a quasar-class supermassive hole
-pub const EDD_RATIO: f64 = 0.36; // ISCO accretion rate / (L_Edd / (eta c^2)): a thin disk (>~ 0.01)
+pub const BH_MASS_SUN: f64 = {{MASS}}; // {{MASS_NOTE}}
+pub const EDD_RATIO: f64 = {{EDD}}; // ISCO accretion rate / (L_Edd / (eta c^2)): a thin disk (>~ 0.01)
 /// The computed values the header quotes (rounded as quoted there); the "computed disk" test
 /// checks each against the solution, so the prose cannot drift from the physics.
 /// tools/gen_quasars.py writes this block (and the matching header text) for each generated theme.
 pub const HEADER = struct {
-    pub const r_isco: f64 = 3.75; // M
-    pub const pt_25: f64 = 0.89; // F / F_PT at 2.5 ISCO radii
-    pub const pt_5: f64 = 0.55; // F / F_PT at 5 ISCO radii
-    pub const lum: f64 = 0.54; // snapshot L / steady Page-Thorne L at the same inflow
-    pub const l_edd: f64 = 0.2; // L / L_Edd ("~")
-    pub const t_peak: f64 = 50_000.0; // K ("~")
-    pub const r_peak: f64 = 5.7; // M
-    pub const h_over_r: f64 = 0.05; // at the peak ("~")
-    pub const f_peak: f64 = 1.5; // colour correction at the peak ("~")
+    pub const r_isco: f64 = {{R_ISCO}}; // M
+    pub const pt_25: f64 = {{PT_25}}; // F / F_PT at 2.5 ISCO radii
+    pub const pt_5: f64 = {{PT_5}}; // F / F_PT at 5 ISCO radii
+    pub const lum: f64 = {{LUM}}; // snapshot L / steady Page-Thorne L at the same inflow
+    pub const l_edd: f64 = {{L_EDD}}; // L / L_Edd
+    pub const t_peak: f64 = {{T_PEAK}}; // K
+    pub const r_peak: f64 = {{R_PEAK_EXACT}}; // M
+    pub const h_over_r: f64 = {{H_OVER_R}}; // at the peak
+    pub const f_peak: f64 = {{F_PEAK}}; // colour correction at the peak
 };
 pub const ALPHA_VISC: f64 = 0.1; // Shakura-Sunyaev alpha
 pub const RING_R0: f64 = 4.0 * R_ISCO; // where the gas was deposited
@@ -2286,8 +2269,8 @@ comptime {
 
 const testing = std.testing;
 
-pub const LEDGER_PREFIX = "majestic_glutton."; // gpu_bench uses it for its records too
-const LEDGER_SRC = "zig test themes/Majestic_Glutton.zig";
+pub const LEDGER_PREFIX = "{{ID}}."; // gpu_bench uses it for its records too
+const LEDGER_SRC = "zig test themes/{{FILE}}";
 
 fn claim(id: []const u8, text: []const u8, reference: []const u8, conditions: []const u8, quantity: []const u8, measured: f64, lo: ?f64, hi: ?f64) !void {
     try testing.expect(sdk.ledger(.{ .id = id, .claim = text, .reference = reference, .conditions = conditions, .quantity = quantity, .measured = measured, .lo = lo, .hi = hi, .source = LEDGER_SRC }));
@@ -2295,20 +2278,20 @@ fn claim(id: []const u8, text: []const u8, reference: []const u8, conditions: []
 
 test "ISCO: 6M without spin, -> 1M at extreme spin, and energy is minimal there" {
     const ref = "Bardeen, Press & Teukolsky 1972 closed form";
-    try claim("majestic_glutton.isco.schwarzschild", "ISCO is 6 M without spin", ref, "a = 0", "r_isco (M)", isco(0.0), 6.0 - 1e-12, 6.0 + 1e-12);
-    try claim("majestic_glutton.isco.extreme", "ISCO approaches 1 M at extreme prograde spin", ref, "a = 0.999999", "r_isco (M)", isco(0.999999), null, 1.05);
+    try claim("{{ID}}.isco.schwarzschild", "ISCO is 6 M without spin", ref, "a = 0", "r_isco (M)", isco(0.0), 6.0 - 1e-12, 6.0 + 1e-12);
+    try claim("{{ID}}.isco.extreme", "ISCO approaches 1 M at extreme prograde spin", ref, "a = 0.999999", "r_isco (M)", isco(0.999999), null, 1.05);
     const a = SPIN;
     const r = isco(a);
     const e = 1e-5;
     const dE = (orbit(a, r * (1 + e)).E - orbit(a, r * (1 - e)).E) / (2 * r * e);
-    try claim("majestic_glutton.isco.energy_min", "Circular-orbit energy is stationary at the ISCO", "dE/dr = 0 at the marginally stable orbit", "a = 0.62, central difference dr = 1e-5 r", "|dE/dr| at r_isco", @abs(dE), null, 1e-6);
-    try claim("majestic_glutton.isco.energy_rises", "Energy rises outside the ISCO", "dE/dr > 0 outside the marginally stable orbit", "a = 0.62, r = 1.01 r_isco", "E(1.01 r_isco) - E(r_isco)", orbit(a, r * 1.01).E - orbit(a, r).E, 0.0, null);
-    _ = sdk.ledger(.{ .id = "majestic_glutton.isco.value", .claim = "ISCO radius and efficiency used by the disk (reported)", .reference = "Bardeen, Press & Teukolsky 1972", .conditions = "a = 0.62", .quantity = "r_isco (M)", .measured = r, .source = LEDGER_SRC });
-    _ = sdk.ledger(.{ .id = "majestic_glutton.isco.efficiency", .claim = "Radiative efficiency 1 - E_isco (reported)", .reference = "Bardeen, Press & Teukolsky 1972", .conditions = "a = 0.62", .quantity = "eta = 1 - E_isco", .measured = 1.0 - orbit(a, r).E, .source = LEDGER_SRC });
+    try claim("{{ID}}.isco.energy_min", "Circular-orbit energy is stationary at the ISCO", "dE/dr = 0 at the marginally stable orbit", "a = {{SPIN}}, central difference dr = 1e-5 r", "|dE/dr| at r_isco", @abs(dE), null, 1e-6);
+    try claim("{{ID}}.isco.energy_rises", "Energy rises outside the ISCO", "dE/dr > 0 outside the marginally stable orbit", "a = {{SPIN}}, r = 1.01 r_isco", "E(1.01 r_isco) - E(r_isco)", orbit(a, r * 1.01).E - orbit(a, r).E, 0.0, null);
+    _ = sdk.ledger(.{ .id = "{{ID}}.isco.value", .claim = "ISCO radius and efficiency used by the disk (reported)", .reference = "Bardeen, Press & Teukolsky 1972", .conditions = "a = {{SPIN}}", .quantity = "r_isco (M)", .measured = r, .source = LEDGER_SRC });
+    _ = sdk.ledger(.{ .id = "{{ID}}.isco.efficiency", .claim = "Radiative efficiency 1 - E_isco (reported)", .reference = "Bardeen, Press & Teukolsky 1972", .conditions = "a = {{SPIN}}", .quantity = "eta = 1 - E_isco", .measured = 1.0 - orbit(a, r).E, .source = LEDGER_SRC });
 }
 
 test "photon orbits and Schwarzschild shadow radius sqrt(27)" {
-    try claim("majestic_glutton.photon_orbit.schwarzschild", "Photon orbit is 3 M without spin", "Bardeen 1973 closed form", "a = 0", "r_ph (M)", photonOrbit(0.0, true), 3.0 - 1e-12, 3.0 + 1e-12);
+    try claim("{{ID}}.photon_orbit.schwarzschild", "Photon orbit is 3 M without spin", "Bardeen 1973 closed form", "a = 0", "r_ph (M)", photonOrbit(0.0, true), 3.0 - 1e-12, 3.0 + 1e-12);
     const g = Geo.init(0.0, INCL, R_OUT);
     var lo: f64 = 4.0;
     var hi: f64 = 7.0;
@@ -2316,7 +2299,7 @@ test "photon orbits and Schwarzschild shadow radius sqrt(27)" {
         const mid = 0.5 * (lo + hi);
         if (traceRay(&g, 0.0, mid, false).kind == .hole) lo = mid else hi = mid;
     }
-    try claim("majestic_glutton.shadow.schwarzschild_radius", "Traced Schwarzschild shadow radius is sqrt(27) M", "sqrt(27) M (Synge 1966; Luminet 1979)", "a = 0, i = 88 deg, r_obs = 1000 M, CPU f64, 40 bisections along alpha = 0", "|b_traced - sqrt(27)| (M)", @abs(0.5 * (lo + hi) - @sqrt(27.0)), null, 2e-3);
+    try claim("{{ID}}.shadow.schwarzschild_radius", "Traced Schwarzschild shadow radius is sqrt(27) M", "sqrt(27) M (Synge 1966; Luminet 1979)", "a = 0, i = 88 deg, r_obs = 1000 M, CPU f64, 40 bisections along alpha = 0", "|b_traced - sqrt(27)| (M)", @abs(0.5 * (lo + hi) - @sqrt(27.0)), null, 2e-3);
 }
 
 /// Bardeen (1973) critical curve: screen point (alpha, beta^2) of the photon orbit at radius r.
@@ -2473,15 +2456,15 @@ test "Kerr shadow edge matches Bardeen's analytic critical curve over the whole 
     std.debug.print("\n  Bardeen contour (CPU f64): {d} points, max |offset| {e:.2} M at (alpha {d:.4}, beta {d:.3}); off-axis max {e:.2} M, polar-band max {e:.2} M; rms {e:.2} M ({e:.2} M off-axis); {d} bracket failures\n", .{ pts.len, s.max, s.max_at[0], s.max_at[1], s.max_off_axis, s.max_polar, s.rms, s.rms_off_axis, s.bad });
 
     var cond_buf: [512]u8 = undefined;
-    const cond = try std.fmt.bufPrint(&cond_buf, "a = 0.62, i = 88 deg, r_obs = 1000 M; {d} points on the full critical curve (both halves, clustered toward the equatorial ends) + {d} in the polar band |alpha| < {d} M; CPU f64; {d} bisections along rays from the shadow centre", .{ 2 * CONTOUR_N - 2, 2 * POLAR_N, POLAR_BAND, CONTOUR_ITERS });
+    const cond = try std.fmt.bufPrint(&cond_buf, "a = {{SPIN}}, i = 88 deg, r_obs = 1000 M; {d} points on the full critical curve (both halves, clustered toward the equatorial ends) + {d} in the polar band |alpha| < {d} M; CPU f64; {d} bisections along rays from the shadow centre", .{ 2 * CONTOUR_N - 2, 2 * POLAR_N, POLAR_BAND, CONTOUR_ITERS });
     const text = "Traced shadow edge lies on the Kerr critical curve over the whole contour";
     const ref = "Bardeen 1973 analytic critical curve";
-    try claim("majestic_glutton.shadow.contour.cpu.max", text, ref, cond, "max |radial offset| over all points (M); tolerance 1/4 pixel", s.max, null, 1e-2);
-    try claim("majestic_glutton.shadow.contour.cpu.rms", text, ref, cond, "rms radial offset over the curve sweep (M)", s.rms, null, 1e-3);
-    try claim("majestic_glutton.shadow.contour.cpu.max_off_axis", text, ref, cond, "max |radial offset| outside the polar band (M)", s.max_off_axis, null, 1e-4);
-    try claim("majestic_glutton.shadow.contour.cpu.rms_off_axis", text, ref, cond, "rms radial offset over the curve sweep outside the polar band (M)", s.rms_off_axis, null, 1e-4);
-    _ = sdk.ledger(.{ .id = "majestic_glutton.shadow.contour.cpu.max_polar", .claim = "Shadow-edge error of rays passing over the spin axis (L ~ 0; reported)", .reference = ref, .conditions = cond, .quantity = "max |radial offset| in the polar band (M)", .measured = s.max_polar, .source = LEDGER_SRC });
-    try claim("majestic_glutton.shadow.contour.cpu.brackets", "Every contour sample brackets the edge (inside at 0.9 d, outside at 1.1 d)", ref, cond, "bracket failures (count)", @floatFromInt(s.bad), null, 0.0);
+    try claim("{{ID}}.shadow.contour.cpu.max", text, ref, cond, "max |radial offset| over all points (M); tolerance 1/4 pixel", s.max, null, 1e-2);
+    try claim("{{ID}}.shadow.contour.cpu.rms", text, ref, cond, "rms radial offset over the curve sweep (M)", s.rms, null, 1e-3);
+    try claim("{{ID}}.shadow.contour.cpu.max_off_axis", text, ref, cond, "max |radial offset| outside the polar band (M)", s.max_off_axis, null, 1e-4);
+    try claim("{{ID}}.shadow.contour.cpu.rms_off_axis", text, ref, cond, "rms radial offset over the curve sweep outside the polar band (M)", s.rms_off_axis, null, 1e-4);
+    _ = sdk.ledger(.{ .id = "{{ID}}.shadow.contour.cpu.max_polar", .claim = "Shadow-edge error of rays passing over the spin axis (L ~ 0; reported)", .reference = ref, .conditions = cond, .quantity = "max |radial offset| in the polar band (M)", .measured = s.max_polar, .source = LEDGER_SRC });
+    try claim("{{ID}}.shadow.contour.cpu.brackets", "Every contour sample brackets the edge (inside at 0.9 d, outside at 1.1 d)", ref, cond, "bracket failures (count)", @floatFromInt(s.bad), null, 0.0);
 }
 
 test "geodesic invariants: null condition and Carter constant are conserved" {
@@ -2502,9 +2485,9 @@ test "geodesic invariants: null condition and Carter constant are conserved" {
         worst_q = @max(worst_q, @abs(carter(a, L, y) - q0) / q0);
     }
     std.debug.print("\n  invariants: max |H|/r^2 = {e:.2}, max |dQ/Q| = {e:.2}\n", .{ worst_h, worst_q });
-    const cond = "a = 0.62, i = 88 deg, ray (alpha, beta) = (-2.4, 3.9) M, production stepper (RK4 + p_r projection), up to 4000 steps";
-    try claim("majestic_glutton.geodesic.null", "Rays stay null along the integration", "Kerr Hamiltonian H = 0 (Carter 1968)", cond, "max |H| / r^2", worst_h, null, 1e-4);
-    try claim("majestic_glutton.geodesic.carter", "Carter constant is conserved along the integration", "Carter 1968 constant Q", cond, "max |dQ / Q|", worst_q, null, 1e-4);
+    const cond = "a = {{SPIN}}, i = 88 deg, ray (alpha, beta) = (-2.4, 3.9) M, production stepper (RK4 + p_r projection), up to 4000 steps";
+    try claim("{{ID}}.geodesic.null", "Rays stay null along the integration", "Kerr Hamiltonian H = 0 (Carter 1968)", cond, "max |H| / r^2", worst_h, null, 1e-4);
+    try claim("{{ID}}.geodesic.carter", "Carter constant is conserved along the integration", "Carter 1968 constant Q", cond, "max |dQ / Q|", worst_q, null, 1e-4);
 }
 
 fn nullB(a: f64, L: f64, y: V6) f64 {
@@ -2528,8 +2511,8 @@ test "Page-Thorne flux: zero at the ISCO, positive outside, Newtonian at large r
     pageThorne(0.3, r_in, 1.0e5, &f);
     const ref = "Page & Thorne 1974";
     const cond = "a = 0.3, r from r_isco to 1e5 M, 4096 log-spaced nodes";
-    try claim("majestic_glutton.page_thorne.isco_zero", "Page-Thorne flux vanishes at the ISCO (zero-torque edge)", ref, cond, "F(r_isco)", f[0], 0.0, 0.0);
-    try claim("majestic_glutton.page_thorne.positive", "Page-Thorne flux is positive outside the ISCO", ref, cond, "min F(r > r_isco)", std.mem.min(f64, f[1..]), math.floatMin(f64), null);
+    try claim("{{ID}}.page_thorne.isco_zero", "Page-Thorne flux vanishes at the ISCO (zero-torque edge)", ref, cond, "F(r_isco)", f[0], 0.0, 0.0);
+    try claim("{{ID}}.page_thorne.positive", "Page-Thorne flux is positive outside the ISCO", ref, cond, "min F(r > r_isco)", std.mem.min(f64, f[1..]), math.floatMin(f64), null);
     // far out F -> C (1 - sqrt(r_*/r)) / r^3 ; F r^3 must flatten to a constant
     const dl = @log(1.0e5 / r_in) / @as(f64, PT_N - 1);
     const k1: usize = @intFromFloat(@log(2.0e4 / r_in) / dl);
@@ -2537,7 +2520,7 @@ test "Page-Thorne flux: zero at the ISCO, positive outside, Newtonian at large r
     const ra = r_in * @exp(dl * @as(f64, @floatFromInt(k1)));
     const rb = r_in * @exp(dl * @as(f64, @floatFromInt(k2)));
     const ratio = (f[k1] * ra * ra * ra) / (f[k2] * rb * rb * rb);
-    try claim("majestic_glutton.page_thorne.newtonian", "Page-Thorne flux becomes Newtonian (F r^3 -> const) far out", "Shakura & Sunyaev 1973 F ~ r^-3", cond, "(F r^3)(2e4 M) / (F r^3)(1e5 M)", ratio, 0.98, 1.02);
+    try claim("{{ID}}.page_thorne.newtonian", "Page-Thorne flux becomes Newtonian (F r^3 -> const) far out", "Shakura & Sunyaev 1973 F ~ r^-3", cond, "(F r^3)(2e4 M) / (F r^3)(1e5 M)", ratio, 0.98, 1.02);
 }
 
 test "blackbody colours: 6500 K is near white, 3000 K is warm, 20000 K is blue" {
@@ -2545,11 +2528,11 @@ test "blackbody colours: 6500 K is near white, 3000 K is warm, 20000 K is blue" 
     const w = blackbodyRGB(6500.0);
     const mx = @max(w[0], @max(w[1], w[2]));
     const mn = @min(w[0], @min(w[1], w[2]));
-    try claim("majestic_glutton.blackbody.white", "A 6500 K blackbody is near white", ref, "T = 6500 K, linear sRGB", "max / min channel", mx / mn, null, 1.15);
+    try claim("{{ID}}.blackbody.white", "A 6500 K blackbody is near white", ref, "T = 6500 K, linear sRGB", "max / min channel", mx / mn, null, 1.15);
     const c = blackbodyRGB(3000.0);
-    try claim("majestic_glutton.blackbody.warm", "A 3000 K blackbody is warm (R > G > B)", ref, "T = 3000 K, linear sRGB", "min(R - G, G - B)", @min(c[0] - c[1], c[1] - c[2]), math.floatMin(f64), null);
+    try claim("{{ID}}.blackbody.warm", "A 3000 K blackbody is warm (R > G > B)", ref, "T = 3000 K, linear sRGB", "min(R - G, G - B)", @min(c[0] - c[1], c[1] - c[2]), math.floatMin(f64), null);
     const hot = blackbodyRGB(20000.0);
-    try claim("majestic_glutton.blackbody.blue", "A 20000 K blackbody is blue (B > R)", ref, "T = 20000 K, linear sRGB", "B / R", hot[2] / hot[0], 1.0, null);
+    try claim("{{ID}}.blackbody.blue", "A 20000 K blackbody is blue (B > R)", ref, "T = 20000 K, linear sRGB", "B / R", hot[2] / hot[0], 1.0, null);
 }
 
 test "redshift: approaching side is the prograde-photon side, and the shadow is flattened there" {
@@ -2558,10 +2541,10 @@ test "redshift: approaching side is the prograde-photon side, and the shadow is 
     const g_left = redshift(a, r, 6.0 * @sin(INCL)); // alpha = -6
     const g_right = redshift(a, r, -6.0 * @sin(INCL)); // alpha = +6
     const ref = "g = 1 / (u^t (1 - Omega L)), prograde circular Kerr orbit";
-    try claim("majestic_glutton.redshift.approaching", "Gas on the prograde-photon side (alpha < 0) approaches: blueshift", ref, "a = 0.62, i = 88 deg, r = 6 M, alpha = -6 M", "g", g_left, 1.0, null);
-    try claim("majestic_glutton.redshift.receding", "Gas on the other side recedes: redshift", ref, "a = 0.62, i = 88 deg, r = 6 M, alpha = +6 M", "g", g_right, null, 1.0);
+    try claim("{{ID}}.redshift.approaching", "Gas on the prograde-photon side (alpha < 0) approaches: blueshift", ref, "a = {{SPIN}}, i = 88 deg, r = 6 M, alpha = -6 M", "g", g_left, 1.0, null);
+    try claim("{{ID}}.redshift.receding", "Gas on the other side recedes: redshift", ref, "a = {{SPIN}}, i = 88 deg, r = 6 M, alpha = +6 M", "g", g_right, null, 1.0);
     const flat = bardeen(a, INCL, photonOrbit(a, true) + 0.05) orelse return error.TestUnexpectedResult;
-    try claim("majestic_glutton.redshift.flat_side", "The shadow's flattened (prograde) side is the approaching side", "Bardeen 1973 critical curve", "a = 0.62, i = 88 deg, r_ph(prograde) + 0.05 M", "alpha (M)", flat[0], null, 0.0);
+    try claim("{{ID}}.redshift.flat_side", "The shadow's flattened (prograde) side is the approaching side", "Bardeen 1973 critical curve", "a = {{SPIN}}, i = 88 deg, r_ph(prograde) + 0.05 M", "alpha (M)", flat[0], null, 0.0);
 }
 
 test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, translucent tail" {
@@ -2584,13 +2567,13 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
         const v = at(&d, r_in, dl, rr);
         std.debug.print("  r {d:>4}: T_s {d:>7.0} K  tau_ext {e:.3}  tau_* {e:.3}\n", .{ rr, v[0], v[1], v[2] });
     }
-    const cond = "a = 0.62, 4e9 Msun, alpha = 0.1, ISCO inflow 0.36 Mdot_Edd, ring at 4 r_isco evolved to flux reversal at 5 r_isco";
+    const cond = "a = {{SPIN}}, {{MASS}} Msun, alpha = 0.1, ISCO inflow {{EDD}} Mdot_Edd, ring at 4 r_isco evolved to flux reversal at 5 r_isco";
     const mb = "Mummery & Balbus 2019 GR thin-disk equation";
-    try claim("majestic_glutton.disk.mass_budget", "The evolved disk conserves mass (accreted + remaining = initial)", mb, cond, "mass budget", d.mass_budget, 0.99, 1.01);
-    try claim("majestic_glutton.disk.page_thorne_inner", "Near the ISCO the snapshot is steady inflow (Page-Thorne)", "Page & Thorne 1974, at the snapshot's ISCO inflow", cond, "F/F_PT spread inside 1.25 r_isco (SNAP_RREV / 4)", d.pt_ratio_spread, null, 1.15);
-    try claim("majestic_glutton.disk.t_peak", "Peak disk temperature is quasar-like", "H1821+643: L ~ 0.2 L_Edd at 4e9 Msun (Fukuchi, Ichikawa et al. 2022)", cond, "T_peak (K)", d.t_peak, 40_000.0, 60_000.0);
-    try claim("majestic_glutton.disk.eddington", "The snapshot shines at H1821+643's measured Eddington ratio", "lambda_Edd = 0.18 (full SED; Fukuchi, Ichikawa et al. 2022)", cond, "L / L_Edd: cgs flux integrated over both faces (flat area)", d.l_edd_abs, 0.17, 0.23);
-    try claim("majestic_glutton.disk.opaque_10", "The disk is opaque at 10 ISCO radii", "electron scattering + Kramers opacity", cond, "tau_ext at 10 r_isco", at(&d, r_in, dl, 10.0 * R_ISCO)[1], 10.0, null);
+    try claim("{{ID}}.disk.mass_budget", "The evolved disk conserves mass (accreted + remaining = initial)", mb, cond, "mass budget", d.mass_budget, 0.99, 1.01);
+    try claim("{{ID}}.disk.page_thorne_inner", "Near the ISCO the snapshot is steady inflow (Page-Thorne)", "Page & Thorne 1974, at the snapshot's ISCO inflow", cond, "F/F_PT spread inside 1.25 r_isco (SNAP_RREV / 4)", d.pt_ratio_spread, null, 1.15);
+    try claim("{{ID}}.disk.t_peak", "Peak disk temperature is quasar-like", "{{LAM_REF}}", cond, "T_peak (K)", d.t_peak, {{T_LO}}, {{T_HI}});
+    try claim("{{ID}}.disk.eddington", "The snapshot shines at the object's Eddington ratio", "{{LAM_REF}}", cond, "L / L_Edd: cgs flux integrated over both faces (flat area)", d.l_edd_abs, {{LAM_LO}}, {{LAM_HI}});
+    try claim("{{ID}}.disk.opaque_10", "The disk is opaque at 10 ISCO radii", "electron scattering + Kramers opacity", cond, "tau_ext at 10 r_isco", at(&d, r_in, dl, 10.0 * R_ISCO)[1], 10.0, null);
     // The header's quoted numbers (HEADER) are the computed ones, to their quoted rounding.
     const near = struct {
         fn f(got: f64, quoted: f64, rel: f64) bool {
@@ -2606,16 +2589,16 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
     try std.testing.expect(near(d.r_peak, HEADER.r_peak, 0.03));
     try std.testing.expect(near(d.h_over_r_peak, HEADER.h_over_r, 0.12));
     try std.testing.expect(near(colourFactor(d.t_peak), HEADER.f_peak, 0.03));
-    try claim("majestic_glutton.disk.thin_45", "The disk has faded to nothing by 45 ISCO radii (no edge)", "electron scattering + Kramers opacity", cond, "tau_ext at 45 r_isco", at(&d, r_in, dl, 45.0 * R_ISCO)[1], null, 1e-2);
+    try claim("{{ID}}.disk.thin_45", "The disk has faded to nothing by 45 ISCO radii (no edge)", "electron scattering + Kramers opacity", cond, "tau_ext at 45 r_isco", at(&d, r_in, dl, 45.0 * R_ISCO)[1], null, 1e-2);
 }
 
 test "colour correction and limb darkening: continuity, flux conservation, thin limit" {
     // Done et al. 2012: f = 1 below 3e4 K; their published branches meet to 1.6% at 1e5 K
     // (the 0.82 exponent of their eq. 2 against the (72 keV/kT)^(1/9) Compton branch).
     const done = "Done, Davis, Jin, Blaes & Ward 2012 colour correction";
-    try claim("majestic_glutton.fcol.cold", "No colour correction below 3e4 K", done, "T = 2.9e4 K", "f_col", colourFactor(2.9e4), 1.0, 1.0);
-    try claim("majestic_glutton.fcol.continuous", "Colour-correction branches meet within 2% at 1e5 K (published fits: 1.6%)", done, "T = 1e5 K +- 0.01%", "f(0.9999e5) / f(1.0001e5) - 1", colourFactor(0.9999e5) / colourFactor(1.0001e5) - 1.0, -2e-2, 2e-2);
-    try claim("majestic_glutton.fcol.mid", "Colour correction on the (T/3e4)^0.82 branch", done, "T = 3.7e4 K", "f_col", colourFactor(3.7e4), 1.15, 1.2);
+    try claim("{{ID}}.fcol.cold", "No colour correction below 3e4 K", done, "T = 2.9e4 K", "f_col", colourFactor(2.9e4), 1.0, 1.0);
+    try claim("{{ID}}.fcol.continuous", "Colour-correction branches meet within 2% at 1e5 K (published fits: 1.6%)", done, "T = 1e5 K +- 0.01%", "f(0.9999e5) / f(1.0001e5) - 1", colourFactor(0.9999e5) / colourFactor(1.0001e5) - 1.0, -2e-2, 2e-2);
+    try claim("{{ID}}.fcol.mid", "Colour correction on the (T/3e4)^0.82 branch", done, "T = 3.7e4 K", "f_col", colourFactor(3.7e4), 1.15, 1.2);
     // Limb darkening on a thick atmosphere conserves the flux of an isotropic emitter:
     // 2 int_0^1 I(mu) mu dmu = 1; and it switches off where the gas is thin.
     var flux: f64 = 0.0;
@@ -2625,8 +2608,8 @@ test "colour correction and limb darkening: continuity, flux conservation, thin 
         flux += 2.0 * limbFactor(-@log(mu), 1e6) * mu / n;
     }
     const limb = "Chandrasekhar H-function, linear fit 1 + 2.06 mu (Laor 1991)";
-    try claim("majestic_glutton.limb.flux", "Limb darkening conserves an isotropic emitter's flux", limb, "tau_ext = 1e6, midpoint rule over 20000 mu", "2 int I(mu) mu dmu", flux, 1.0 - 1e-6, 1.0 + 1e-6);
-    try claim("majestic_glutton.limb.thin", "Limb darkening switches off where the gas is thin", limb, "tau_ext = 1e-6, mu = 0.1", "I(mu) / I_iso", limbFactor(-@log(0.1), 1e-6), 1.0 - 1e-5, 1.0 + 1e-5);
-    try claim("majestic_glutton.limb.grazing", "A grazing view of the thick disk is dimmer", limb, "tau_ext = 1e6, mu = 0.2", "I(mu) / I_iso", limbFactor(-@log(0.2), 1e6), null, 0.6);
+    try claim("{{ID}}.limb.flux", "Limb darkening conserves an isotropic emitter's flux", limb, "tau_ext = 1e6, midpoint rule over 20000 mu", "2 int I(mu) mu dmu", flux, 1.0 - 1e-6, 1.0 + 1e-6);
+    try claim("{{ID}}.limb.thin", "Limb darkening switches off where the gas is thin", limb, "tau_ext = 1e-6, mu = 0.1", "I(mu) / I_iso", limbFactor(-@log(0.1), 1e-6), 1.0 - 1e-5, 1.0 + 1e-5);
+    try claim("{{ID}}.limb.grazing", "A grazing view of the thick disk is dimmer", limb, "tau_ext = 1e6, mu = 0.2", "I(mu) / I_iso", limbFactor(-@log(0.2), 1e6), null, 0.6);
 }
 

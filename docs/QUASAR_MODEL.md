@@ -1,22 +1,46 @@
-# Majestic Glutton: an artwork modelled on the quasar H1821+643
+# The quasar model: physics, checks and choices
 
-*Majestic Glutton (`themes/Majestic_Glutton.zig`) is the owner's artwork: a quasar modelled on
-H1821+643's measured mass, spin and feeding rate, with its inclination, framing and look chosen.
-It is not presented as the real H1821+643. This document
-states what the renderer computes, from which equations and numbers, how it was checked, and
-what is chosen rather than computed. It is meant for review: please check the physics, not
-the code style. Numbers are from the code and its tests at commit `dd1cbf6`; §3 and §9 are from
-the test ledger [`docs/majestic_glutton_ledger.json`](majestic_glutton_ledger.json), which names its own
-commit.*
+*Argus's quasar themes (`themes/Cygnus_A.zig`, `themes/J0834.zig`, `themes/PG1426.zig`) are one
+engine, generated from `tools/quasar_template.zig` with each object's mass, spin and feeding
+rate. This document states what that engine computes, from which equations and numbers, how
+it was checked, and what is chosen rather than computed. It is meant for review: please check
+the physics, not the code style.*
 
-Units: G = c = M = 1 unless stated. M = mass of the black hole. For M = 4e9 Msun:
-1 M of length = 5.91e12 m (39.5 AU), 1 M of time = 19,700 s.
+*The derivations and the independent audits were carried out on a reference build with the
+parameters of the quasar H1821+643 (4e9 Msun, a* = 0.62, ~0.2 L_Edd), so the worked numbers in
+§1–§12 are for that reference case, from the code and its tests at commit `dd1cbf6`. Every
+shipped quasar states its own computed values in its header (its tests check them against the
+solution) and in its test ledger; the flagship, Cygnus A, is summarised in §0.*
+
+Units: G = c = M = 1 unless stated. M = mass of the black hole. For the reference case,
+M = 4e9 Msun: 1 M of length = 5.91e12 m (39.5 AU), 1 M of time = 19,700 s.
 
 ---
 
-## 1. The object
+## 0. The flagship: Cygnus A
 
-H1821+643 (also E 1821+643) is a luminous quasar at z = 0.297, at the centre of the cool-core
+The hidden quasar in the radio galaxy Cygnus A, generated from the same engine. Its own numbers,
+computed by its disk solution and recorded in [`docs/cygnus_a_ledger.json`](cygnus_a_ledger.json)
+(56 records: 49 asserted, all pass):
+
+| Quantity | Value | Source or status |
+|---|---|---|
+| Mass | 2.5e9 Msun (1 M of time = 12,300 s) | gas dynamics, Tadhunter et al. 2003 |
+| Spin | a = 0.9 | unmeasured (the torus hides the inner disk): a choice |
+| Feeding rate | L = 0.0125 L_Edd (computed from the disk) | L_bol ~1e12 Lsun (Privon et al. 2012) / L_Edd |
+| ISCO, efficiency | 2.32 M, η = 0.156 | Bardeen, Press & Teukolsky 1972 |
+| Peak temperature | 37,700 K at 3.41 M, H/r = 0.004 | computed: a genuinely thin disk |
+| Shadow edge vs Bardeen's curve (766 points) | 8.9e-6 M (CPU f64), 1.8e-5 M (GPU f32) | under 1/2000 of a pixel |
+| CPU vs GPU frame | 98.3% of pixels within 8 levels | `make gpu-bench` |
+
+At λ ≈ 0.012 its photosphere stands ~0.6° above the plane, under the camera's 2° sightline, so
+drawing it thin at 88° is honest; the reference case below (λ ≈ 0.2) would be puffier (§10).
+
+---
+
+## 1. The reference object
+
+The reference case. H1821+643 (also E 1821+643) is a luminous quasar at z = 0.297, at the centre of the cool-core
 galaxy cluster CL1821+643. We render it up close, as no telescope can: a supermassive Kerr
 black hole fed by a thin, hot accretion disk.
 
@@ -56,7 +80,7 @@ black hole fed by a thin, hot accretion disk.
   - Each edge is bisected along the ray from the shadow's centre (the shadow is convex), 32
     times, to 2e-10 M. The error is the radial offset along that ray, an upper bound on the
     distance to the curve.
-  - The same samples run on the CPU (f64, `zig test themes/Majestic_Glutton.zig`) and the GPU
+  - The same samples run on the CPU (f64, the theme's `zig test`) and the GPU
     (f32, the Metal probe kernel, `make gpu-bench`). Tolerances were set before measuring.
 
   | Path | max, all points | max off-axis | RMS, curve sweep | RMS off-axis | max, polar band |
@@ -272,7 +296,8 @@ tests or audits below.
   (null condition, Carter constant); Page-Thorne limits; blackbody colours; the redshift sign;
   the disk solution's mass budget, Page-Thorne limit, temperature and luminosity;
   colour-correction continuity and limb-darkening flux conservation.
-- **Test ledger:** `make ledger` writes [`docs/majestic_glutton_ledger.json`](majestic_glutton_ledger.json),
+- **Test ledger:** `make ledger` writes the flagship's [`docs/cygnus_a_ledger.json`](cygnus_a_ledger.json)
+  (`make ledger LEDGER_THEME=themes/X.zig LEDGER_OUT=...` for any other quasar),
   one record per checked claim, from the theme's tests, `make claims` and `make gpu-bench`.
   - Each record holds: the claim, the reference and its source, the test conditions, the
     measured quantity and its units, the bounds, pass/fail, and the command that produced it.

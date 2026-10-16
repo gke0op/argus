@@ -128,7 +128,7 @@ The engine is `src/`: the app (`src/desktop_wallpaper.zig`, `src/desktop/`), the
 - Run `make test` before you open a PR. It also checks that the generated quasar themes match
   their source.
 - The quasar family (`Cygnus_A`, `J0834`, `PG1426`) is generated: edit
-  `themes/Majestic_Glutton.zig` or `tools/gen_quasars.py`, then `make quasars`.
+  `tools/quasar_template.zig` or `tools/gen_quasars.py`, then `make quasars`.
 - Keep it lean: no new dependencies, no allocations in the frame loop, nothing that runs when
   no Space is visible.
 - Changes that affect frame cost: give before and after numbers, paced at 30 FPS for the GPU.

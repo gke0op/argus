@@ -1,7 +1,8 @@
 // @argus-theme: custom_shader
+// @argus-engine: kerr-disk
 // ============================================================================
 // CYGNUS A // themes/Cygnus_A.zig
-// GENERATED from themes/Majestic_Glutton.zig by tools/gen_quasars.py: edit the source, then
+// GENERATED from tools/quasar_template.zig by tools/gen_quasars.py: edit the template, then
 // `make quasars`. Same engine; this object's paragraph, spin, mass and Eddington ratio.
 //
 // A quasar: a spinning (Kerr) supermassive black hole feeding a luminous thin accretion

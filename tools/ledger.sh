@@ -8,8 +8,8 @@
 #
 # Exits non-zero if any run failed or any asserted record failed; the file is written anyway.
 set -u
-THEME=${1:-themes/Majestic_Glutton.zig}
-OUT=${2:-docs/majestic_glutton_ledger.json}
+THEME=${1:-themes/Cygnus_A.zig}
+OUT=${2:-docs/cygnus_a_ledger.json}
 ZIG=${ZIG:-$(if [ -x ./.toolchain/zig ]; then echo ./.toolchain/zig; else command -v zig; fi)}
 GPU_FRAMES=${GPU_FRAMES:-30}
 tmp=$(mktemp -d)
