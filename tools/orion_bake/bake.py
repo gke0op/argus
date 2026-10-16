@@ -37,7 +37,7 @@ MUSE_FILES = {  # all reddening-corrected by Weilbacher+2015 (Cardelli 1989 as r
     # Blagrave+2007, R_V = 5.5, intrinsic Halpha/Hbeta = 2.89) except where noted
     "hb": "emhbeta_fluxcorr", "oiii": "emoiii5007_fluxcorr", "nii": "emnii6584_fluxcorr",
     "sii": "emsii6731_fluxcorr", "oi": "emoi6300_fluxcorr_cor", "c": "c_Halpha_Hbeta",
-    "ne": "den_sii_median33", "v_ha": "emhalpha_velos", "v_nii": "emnii6584_velos",
+    "ne": "den_sii_median33", "ne_cl": "den_cliii_median55", "v_ha": "emhalpha_velos", "v_nii": "emnii6584_velos",
     "v_sii": "emsii6731_velos",
 }
 EDEN = "https://zenodo.org/records/8187943/files/mean_and_std_healpix.fits?download=1"
@@ -155,7 +155,7 @@ def fetch_muse(cache):
     out = {}
     for key, name in MUSE_FILES.items():
         p = os.path.join(cache, name + ".fits")
-        want = 1766 * 1476 * (4 if name == "den_sii_median33" else 8)
+        want = 1766 * 1476 * (4 if name.startswith("den_") else 8)
         if not os.path.exists(p) or os.path.getsize(p) < want:
             log("download", name)
             for _ in range(6):
@@ -269,6 +269,8 @@ def clean(m, stripes=None):
         a = m[k]; out[k] = destripe(masked_fill(a, stars | ~np.isfinite(a) | (a <= 0)), stripes, k)
     out["c"] = nd.gaussian_filter(masked_fill(m["c"], stars | edge | ~np.isfinite(m["c"]) | (m["c"] <= 0)), 8)
     out["ne"] = nd.gaussian_filter(masked_fill(m["ne"], stars | edge | (m["ne"] < 50) | ~np.isfinite(m["ne"])), 4)
+    bad_cl = stars | edge | (m["ne_cl"] < 100) | ~np.isfinite(m["ne_cl"])
+    out["ne_cl"] = nd.gaussian_filter(masked_fill(m["ne_cl"], bad_cl), 4); out["ne_cl_ok"] = ~bad_cl
     for k in ("v_ha", "v_nii", "v_sii"):
         out[k] = masked_fill(m[k], stars | edge | ~np.isfinite(m[k]) | (m[k] == 0))
     out["stars"] = stars
@@ -452,10 +454,18 @@ def main():
     Rgeom = np.median(1 / kappa[core][concave])
     phi = Rgeom / np.median(R0raw[core])
     R0 = np.clip(phi * R0raw, 0.005, 1.5)
+    # An independent check: [Cl III] traces denser gas nearer the front than [S II] does.
+    ncl = down(c["ne_cl"], F); okcl = down(c["ne_cl_ok"].astype(float), F) > 0.9
+    sel = np.zeros_like(okcl); sel[core] = True
+    sel &= okcl & (ha > np.percentile(ha[core], 50))
+    phi_cl = float(np.median(((ne / ncl) ** 2)[sel]))
     R(f"\nR0 from EM_perp / (g n_e^2) with n_e from [S II]: median {np.median(R0raw[core]):.3f} pc. Mean curvature radius of the "
       f"fitted front where concave ({concave.mean() * 100:.0f}% of the field): median {Rgeom:.3f} pc.")
     R(f"Fitted clumping factor phi = {phi:.3f} (R0 = phi R0_raw; equivalently the flow's front density is n_[S II] / sqrt(phi) "
       f"= {1 / math.sqrt(phi):.2f} n_[S II]). R0 used: median {np.median(R0):.3f} pc, 5-95% {np.percentile(R0, 5):.3f} .. {np.percentile(R0, 95):.3f}.")
+    R(f"Check: using the [Cl III] density instead (bright half of the field, {sel.sum()} texels with good [Cl III]): n_[Cl III] / n_[S II] = "
+      f"{np.median((ncl / ne)[sel]):.2f} (16-84% {np.percentile((ncl / ne)[sel], 16):.2f}-{np.percentile((ncl / ne)[sel], 84):.2f}), i.e. phi = {phi_cl:.3f}. "
+      f"The two independent estimates of the layer thickness differ by {phi_cl / phi:.2f}x: R0 is known to within that factor.")
 
     # --- [S II] doublet from density (Sanders+2016 eq. 6, 10^4 K) -------------------------------
     r_sii = 0.4315 * (2107 + ne) / (627.1 + ne)
