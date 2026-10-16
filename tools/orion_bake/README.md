@@ -75,8 +75,8 @@ in numpy from the shipped data and compares the two.
 ## Fit quality (bake of 2026-10-16)
 
 - **Earth view reproduces the data.** A GPU frame with the orbit frozen, against an
-  independent numpy rebuild from the shipped file: median 0.26 / 255 display levels, 99th
-  percentile 1.2, over 94% of pixels (stars masked).
+  independent numpy rebuild from the shipped file: median 0.25 / 255 display levels, 99th
+  percentile 0.8, over the pixels away from stars.
 - **Resolution.** The shipped maps are 0.6″ texels (`--downsample 3`). A 0.4″ bake
   (`--downsample 2`, 5.2 MB instead of 2.3 MB) gives the same fit to three digits (0.041
   dex; φ 0.198; R0 0.81 pc). It also looks nearly identical on screen, because the data are
@@ -143,7 +143,16 @@ all now fixed:
   are now reported.
 
 The audit confirmed the units, extinction convention, orientation, texel centres, flow
-equations, Earth-view integral, Sanders coefficients, Q, and the cluster normalisation.
+equations, Earth-view integral, Sanders coefficients, Q, and Da Rio's N(<2 pc) = 4323.
+
+A second audit verified those fixes and found two more, now fixed too:
+- Hot stars were dimmed too red, because one wavelength per CIE channel misses X's blue
+  lobe. Each star now carries its own X, Y, Z extinction, computed from its spectrum.
+- At the widest yaw the Veil was sampled up to 0.06 pc beyond the data, on 4–10% of the
+  screen. The view is now 0.51 pc wide and centred so the Veil stays inside the data.
+
+It also tightened smaller things: the table check now counts what the compiler sees, and
+each star image's light sums to 1.
 
 ## What stays degenerate or uncertain
 

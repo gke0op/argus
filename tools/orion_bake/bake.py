@@ -44,7 +44,7 @@ EDEN = "https://zenodo.org/records/8187943/files/mean_and_std_healpix.fits?downl
 
 DIST_PC = 400.0            # ONC: 388 +- 5 (Kounkel+2017), 414 +- 7 (Menten+2007); chosen 400
 SPAXEL_AS = 0.2            # MUSE mosaic sampling (FITS CD matrix)
-VIEW_GUESS = (-0.035, -0.045)   # view centre in the theme (pc west, north of theta1 Ori C): star box
+VIEW_GUESS = (-0.015, -0.045)   # view centre in the theme (pc west, north of theta1 Ori C): star box
 F = 3                      # downsampling of the shipped maps: 0.6" texels
 HA_HB = 2.89               # Weilbacher+2015's intrinsic ratio (Case B, 9000 K): keeps their dereddening
 T4 = 0.9                   # Te ~ 9000 K (Weilbacher+2015 [N II] map; O'Dell & Harris 2010)
@@ -538,6 +538,13 @@ def main():
     def planck_all(T):
         x = 1.4387769e7 / (lam_all * T)
         return 1 / (lam_all ** 5 * np.expm1(np.minimum(x, 700)))
+    k_lam = np.array([ccm89(l) for l in lam]) / ccm89(486.1333)      # A_lambda / A_Hb, Orion law
+    def k_eff(T, c_ref=0.8):
+        """Per-channel extinction of this star's own spectrum: X, Y, Z each dim by
+        10^(-c K) with K the CMF- and spectrum-weighted k (X has a blue lobe, so one
+        wavelength per channel reddens hot stars too much)."""
+        b = planck(T)[:, None] * cmf
+        return -np.log10((b * 10 ** (-c_ref * k_lam)[:, None]).sum(0) / b.sum(0)) / c_ref
     def xyz_from_V(V, T):    # F_lambda(550 nm) = 3.63e-9 10^(-0.4 V) erg/s/cm^2/A (Bessell 1998)
         b = planck(T); b *= 3.63e-8 * 10 ** (-0.4 * V) / np.interp(550.0, lam, b)
         return (b[:, None] * cmf).sum(0)                              # erg/s/cm^2 x CMF (1 nm grid)
@@ -554,7 +561,7 @@ def main():
         # by the reddening it samples there, so ship the star undimmed by that same reddening.
         c_star = float(cmap[int(round(min(max(ty, 0), NY - 1))), int(round(min(max(tx, 0), NX - 1)))])
         V0 = V - 2.5 * c_star * k550
-        stars.append(((tx - cx) * sp, (ty - cy) * sp, 0.0, xyz_from_V(V0, T), name))
+        stars.append(((tx - cx) * sp, (ty - cy) * sp, 0.0, xyz_from_V(V0, T), name, k_eff(T)))
         R(f"  {name:13s} V {V:5.2f}, c(Hb) there {c_star:.2f} -> A_V {2.5 * c_star * k550:.2f}, V0 {V0:5.2f}")
     # The cluster's fainter members: statistical (see the theme header). Fixed seed.
     rng_ = np.random.default_rng(135)
@@ -582,7 +589,7 @@ def main():
     Lsun = 1.6 * mass ** 1.5                                           # ~1 Myr pre-main sequence (rough, assumed)
     Teff = np.interp(mass, [0.08, 0.1, 0.3, 0.5, 1.0, 2.0, 3.0], [2700, 2900, 3400, 3700, 4300, 5000, 7000])
     for (x, y, zz), Ls, T in zip(P3[idx], Lsun, Teff):
-        stars.append((x, y, zz, xyz_from_L(Ls, T), "cluster"))
+        stars.append((x, y, zz, xyz_from_L(Ls, T), "cluster", k_eff(T)))
     R(f"{len(STARS)} real (SIMBAD) + {idx.size} statistical cluster members in the box (ONC model normalised to N(<2 pc) = 4323).")
     if len(stars) > 1024: raise SystemExit("too many stars for one threadgroup pass")
 
@@ -606,7 +613,6 @@ def main():
     W(f"constant float EXPOSURE = {exposure:.6g}f;                   // chosen: Earth-view p99.95 luminance = white")
     W(f"constant float STRETCH = {stretch:.6g}f;                     // chosen: asinh knee at 2.5 x the median luminance")
     W(f"constant float3 SHO_NORM = float3({sho[0]:.6g}f, {sho[1]:.6g}f, {sho[2]:.6g}f);   // Hubble palette channel scales")
-    W("constant float3 STAR_K = float3(" + ", ".join(f"{k_line(l)[1]:.4f}f" for l in (600.0, 555.0, 450.0)) + ");   // A/A_Hb for star light in X, Y, Z")
     W(f"constant float2 STAR_C_TEX = float2({cx:.3f}f, {cy:.3f}f);   // theta1 Ori C, texels from the west-south corner")
     W(f"constant float FLOW_G = {g:.6f}f;")
     W(f"constant float FRONT_ZMIN = {zf.min():.4f}f, FRONT_ZMAX = {zf.max():.4f}f;   // pc, over the field")
@@ -631,16 +637,23 @@ def main():
     W(f"constant float A_V_PER_A_HB = {1 / ccm89(486.1333):.4f}f;   // CCM89 R_V = 5.5")
     W(f"constant uint N_STARS = {len(stars)}u;")
     W("constant float4 STARS[N_STARS] = {   // x, y, z (pc from theta1 Ori C: west, north, toward us); first 12 real")
-    for x, y, zz, _, nm in stars[:len(STARS)]:
+    for x, y, zz, _, nm, _k in stars[:len(STARS)]:
         W(f"    float4({x:.4f}f, {y:.4f}f, {zz:.4f}f, 0),   // {nm}")       # one per line: a comment ends the line
     for i in range(len(STARS), len(stars), 4):
-        W("    " + " ".join(f"float4({x:.4f}f, {y:.4f}f, {zz:.4f}f, 0)," for x, y, zz, _, nm in stars[i:i + 4]))
+        W("    " + " ".join(f"float4({x:.4f}f, {y:.4f}f, {zz:.4f}f, 0)," for x, y, zz, _, nm, _k in stars[i:i + 4]))
     W("};")
     W("constant float4 STAR_XYZ[N_STARS] = {   // CIE XYZ flux, erg/s/cm2 x CMF, before extinction")
     for i in range(0, len(stars), 4):
-        W("    " + " ".join(f"float4({v[0]:.4e}f, {v[1]:.4e}f, {v[2]:.4e}f, 0)," for _, _, _, v, _ in stars[i:i + 4]))
+        W("    " + " ".join(f"float4({v[0]:.4e}f, {v[1]:.4e}f, {v[2]:.4e}f, 0)," for _, _, _, v, _, _k in stars[i:i + 4]))
     W("};")
-    assert "".join(out).count("float4(") >= 2 * len(stars), "star tables are short"
+    W("constant float4 STAR_K[N_STARS] = {   // each star's own A/A_Hb in X, Y, Z (its spectrum through the CMFs)")
+    for i in range(0, len(stars), 4):
+        W("    " + " ".join(f"float4({k[0]:.4f}f, {k[1]:.4f}f, {k[2]:.4f}f, 0)," for *_, k in stars[i:i + 4]))
+    W("};")
+    code = "\n".join(l.split("//")[0] for l in out)                    # what the compiler sees
+    for tbl in ("STARS", "STAR_XYZ", "STAR_K"):
+        body = re.search(tbl + r"\[N_STARS\] = \{(.*?)\};", code, re.S).group(1)
+        assert body.count("float4(") == len(stars), f"{tbl} has {body.count('float4(')} entries, not {len(stars)}"
     W("// END BAKED")
     src = open(THEME).read()
     new = re.sub(r"// BEGIN BAKED.*?// END BAKED", "\n".join(out), src, flags=re.S)
