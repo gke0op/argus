@@ -121,6 +121,7 @@ struct Static {
     float foot_cr[N_OCT];       // footprint filter cell constants, from the theme
     float foot_cp[N_OCT];
     float sky_gain;             // 0 = black sky, from the theme (SKY_VISIBLE)
+    float fcol_follow;          // 1 = f_col follows the turbulence/spot temperature (FCOL_FOLLOWS)
     uchar srgb[4096];
 };
 
@@ -406,6 +407,13 @@ static float emitFrac(constant TraceParams& P, device const float* ttab, float a
     const float lmu = lnInvMu(P, alpha, h);
     const float te = tauExt(P, ttab, h.r);
     return (1.0f - exp(-tauEm(P, ttab, h.r) * exp(lmu))) * limbFactor(lmu, te) * dilution(P, ttab, h.r);
+}
+
+// Done et al. 2012 colour correction (the theme's colourFactor), for FCOL_FOLLOWS.
+static float colourFactor(float T) {
+    if (!(T > 3.0e4f)) return 1.0f;
+    if (T < 1.0e5f) return pow(T / 3.0e4f, 0.82f);
+    return pow(72.0f / (T * 8.617333e-8f), 1.0f / 9.0f);
 }
 
 static float temperature(constant TraceParams& P, device const float* ttab, float r) {
@@ -929,7 +937,14 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     }
     // Log-normal dissipation with its mean kept at 1; the gas's temperature follows it, T ~ eps^(1/4).
     const float eps = exp(st.turb_sigma * G - 0.5f * st.turb_sigma * st.turb_sigma * var);
-    const float tturb = tobs * sqrt(sqrt(eps));
+    // T ~ eps^(1/4); with FCOL_FOLLOWS the colour correction is re-evaluated at the perturbed
+    // T_s (f0 from the dilution table, f^-4), so a hotter patch also hardens.
+    const float m1 = sqrt(sqrt(eps));
+    const bool fol = st.fcol_follow > 0.0f;
+    const float f0 = fol ? pow(max(dilution(P, ttab, r), 1e-30f), -0.25f) : 1.0f;
+    const float ts0 = temperature(P, ttab, r) / f0;
+    const float f1 = fol ? colourFactor(ts0 * m1) : f0;
+    const float tturb = tobs * m1 * f1 / f0;
     float k = exposure;
 
     // The gas emits 1 - e^(-tau_*/mu) of a blackbody at its source temperature and lets
@@ -941,7 +956,7 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     const float emit = oneMinusExpExp(st, st.lnem_tab[rb] + lmu_f) * limbFactor(lmu_f, exp(st.lntau_tab[rb])) * dilution(P, ttab, r) *
         (float(ftrq[i]) / 255.0f);
     const float trans = 1.0f - oneMinusExpExp(st, lt_los);
-    k *= emit;
+    k *= emit * (fol ? pow(f0 / f1, 4.0f) : 1.0f);
 
     float3 spot_rgb = float3(0.0f);
     float spot_scale = 0.0f;
@@ -968,7 +983,9 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
             if (q < 1.0f) boost += fr.spot_amp[j] * (1.0f - q) * (1.0f - q) * fr.spot_wr[j] * fr.spot_wp[j] / sqrt(wr2 * wp2);
         }
         if (boost > 1e-3f && tobs > 0.0f) {
-            spot_rgb = bbLookup(st, tturb * sqrt(sqrt(1.0f + boost)));
+            const float m2 = sqrt(sqrt(1.0f + boost));
+            const float f2 = fol ? colourFactor(ts0 * m1 * m2) : f1;
+            spot_rgb = bbLookup(st, tobs * m1 * m2 * f2 / f0) * (fol ? pow(f1 / f2, 4.0f) : 1.0f);
             spot_scale = 1.0f;
         } else {
             k *= 1.0f + boost;

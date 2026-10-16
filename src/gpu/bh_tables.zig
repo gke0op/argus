@@ -61,6 +61,7 @@ pub const Static = extern struct {
     foot_cr: [N_OCT]f32, // footprint filter cell constants (box average of the rendered field)
     foot_cp: [N_OCT]f32,
     sky_gain: f32, // 0 = black sky (the theme's SKY_VISIBLE)
+    fcol_follow: f32, // 1 = f_col re-evaluated at the turbulence/spot temperature (FCOL_FOLLOWS)
     srgb: [4096]u8,
 };
 
@@ -124,6 +125,7 @@ pub fn fillStatic(st: anytype, out: *Static) void {
     out.foot_cr = st.foot_cr;
     out.foot_cp = st.foot_cp;
     out.sky_gain = st.sky_gain;
+    out.fcol_follow = st.fcol_follow;
     out.srgb = st.srgb;
 }
 

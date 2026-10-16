@@ -109,7 +109,8 @@
 //    are not drawn in higher-order rings or in images seen through translucent gas).
 //    They shear as they age: every radius of the clump keeps its own Omega(r), so after
 //    an age a the part at r has moved Omega(r) a and the clump draws out into an arc.
-//    Hotter gas: emissivity x (1 + boost), so T rises as (1 + boost)^(1/4). Their count,
+//    Hotter gas: emissivity x (1 + boost), so T rises as (1 + boost)^(1/4), and its colour
+//    correction follows (FCOL_FOLLOWS: above ~30 kK a spot hardens, bluer and dimmer). Their count,
 //    size and brightness are choices; their motion is not.
 //  * Sky: black, as it would be. From here, in the heart of its host galaxy, the sky holds
 //    the host's stars and its neighbours' galaxies,
@@ -132,6 +133,10 @@ pub const SPIN: f64 = 0.99; // see header
 pub const INCL: f64 = 88.0 * math.pi / 180.0;
 /// Checked by `make claims` through probeEquatorialRay (equatorial light paths).
 pub const claims = sdk.Claims{ .metric = .kerr, .spin = SPIN, .inclination_deg = 88.0 };
+/// Colour correction under turbulence and hot spots: re-evaluated at the hotter gas's own
+/// temperature (Done et al. 2012's law applied locally), so above ~30 kK a hot patch hardens and
+/// reads bluer and a little dimmer in the visible; false holds the smooth disk's f_col.
+pub const FCOL_FOLLOWS: bool = true;
 pub const R_OUT: f64 = 48.0 * R_ISCO; // geometry only: the computed disk has faded to nothing here
 /// The disk recipe's radii scale with the ISCO (the solution is recomputed per spin).
 pub const R_ISCO: f64 = isco(SPIN);
@@ -959,6 +964,7 @@ pub const State = struct {
     turb_sigma: f32, // TURB_SIGMA, for the GPU path
     spot_rmax: f64, // SPOT_RMAX, for the GPU path
     sky_gain: f32, // SKY_VISIBLE, for the GPU path
+    fcol_follow: f32, // FCOL_FOLLOWS, for the GPU path
     rho_row: [N_OCT]f32, // measured neighbour correlation of each noise plane: rows, phase cells
     rho_ph: [N_OCT]f32,
     foot_cr: [N_OCT]f32, // GPU footprint filter: cell constants of the box-averaged rendered field
@@ -1097,6 +1103,7 @@ pub const State = struct {
         self.turb_sigma = TURB_SIGMA;
         self.spot_rmax = SPOT_RMAX;
         self.sky_gain = @floatCast(SKY_VISIBLE);
+        self.fcol_follow = if (FCOL_FOLLOWS) 1.0 else 0.0;
         for (0..N_OCT) |oct| {
             const sc = math.pow(f64, 2.0, @floatFromInt(oct));
             const gr: usize = @max(1, @as(usize, @intFromFloat(@round(@as(f64, NR) / (cell_rows / sc)))));
@@ -2150,9 +2157,20 @@ pub const State = struct {
                         // Hotter gas is a hotter blackbody (T ~ emission^(1/4)): Planck gives its
                         // new color and brightness; ratio carries this pixel's coverage/normalisation.
                         const t0: f64 = @as(f64, @floatCast(@as(f32, rc.tobs))) * 1000.0; // stored in kK
-                        const hot = self.bbLookup(t0 * @sqrt(@sqrt(1.0 + @as(f64, boost))));
+                        // FCOL_FOLLOWS: f_col at the spot's own T_s (f0 from the dilution table).
+                        const m2 = @sqrt(@sqrt(1.0 + @as(f64, boost)));
+                        var tf: f64 = 1.0; // colour-temperature factor f2 / f0
+                        var df: f64 = 1.0; // dilution change (f0 / f2)^4
+                        if (FCOL_FOLLOWS) {
+                            const r_px = @exp(self.lnr_in + self.lnr_span * @as(f64, rbf) / @as(f64, @floatFromInt(R_BINS)));
+                            const f0 = @exp(-0.25 * self.lnTable(&self.dtab[3], r_px));
+                            const f2 = colourFactor(self.temperature(r_px) / f0 * m2);
+                            tf = f2 / f0;
+                            df = math.pow(f64, f0 / f2, 4);
+                        }
+                        const hot = self.bbLookup(t0 * m2 * tf);
                         const lum0 = luma(.{ rc.rgb[0], rc.rgb[1], rc.rgb[2] });
-                        spot_scale = @floatCast(lum0 / @max(luma(self.bbLookup(t0)), 1e-12));
+                        spot_scale = @floatCast(lum0 / @max(luma(self.bbLookup(t0)), 1e-12) * df);
                         spot_rgb = .{ @floatCast(hot[0]), @floatCast(hot[1]), @floatCast(hot[2]) };
                     } else k *= 1.0 + boost;
                 }
