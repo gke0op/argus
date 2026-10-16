@@ -159,7 +159,7 @@ const TIME_LAPSE: f64 = 10.0; // M of coordinate time per unit of Argus dt
 // simulations (Guan et al. 2009, ApJ 694, 1010; Beckwith, Armitage & Simon 2011, MNRAS 416, 361).
 const TURB_SIGMA: f32 = 0.2; // rms of ln(dissipation) at the photosphere: thermal thin disk
 const NOISE_STD: f32 = 40.0; // noise table byte levels per standard deviation
-pub const H_OVER_R: f64 = 0.01; // disk scale height (this disk: 0.006-0.012 at the peak depending on convention)
+pub const H_OVER_R: f64 = 0.01; // turbulence scale height, a choice (this disk: ~0.05 at the peak, radiation-supported)
 pub const NR: usize = 2048; // turbulence rows across the radial span (eddies are smaller than a radial bin)
 pub const N_OCT: usize = 2; // octaves, amplitude 2^(-5j/6): a k^(-11/3) per-mode spectrum (Beckwith 2011). A third
 // (0.03 H radially) would be finer than a table row, and than a Retina pixel's footprint on the disk.
