@@ -11,7 +11,8 @@ using namespace metal;
 
 // Everything Argus tells a theme about the current frame (buffer 0 in every kernel).
 struct ArgusFrame {
-    float time;         // seconds of animation; advances 1/30 s per 30 FPS frame
+    float time;         // seconds of animation, 1/30 s per 30 FPS frame; wraps to 0 every
+                        // ARGUS_TIME_PERIOD (4 h) so it stays precise on a Space that runs for weeks
     float dt;           // seconds since this Space's previous frame
     uint  frame;        // frames drawn since the theme was loaded
     uint  width;        // output size in pixels (1920 x 1200)
@@ -20,6 +21,10 @@ struct ArgusFrame {
     uint  state_height;
     uint  seed;         // random per load: vary it to vary the theme
 };
+
+// f.time wraps to 0 after this many seconds. A cycle whose period divides it (a whole number of
+// minutes that divides 240: 1-6, 8, 10, 12, 15, 16, 20, 30, 60 ...) runs on seamlessly.
+constant float ARGUS_TIME_PERIOD = 14400.0f;
 
 // Pixel -> centred coordinates: (0,0) mid-screen, y up, the short side spans -1..1.
 static inline float2 argus_uv(uint2 gid, constant ArgusFrame& f) {

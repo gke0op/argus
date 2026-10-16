@@ -22,7 +22,7 @@ kronos:
 	$(ZIG) build-exe $(ZFLAGS) src/kronos_tui.zig -femit-bin=kronos-tui
 
 harness:
-	$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $(THEME) --frames $(FRAMES) --out $(OUT)
+	$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $(THEME) --frames $(FRAMES) --out $(OUT) $(if $(SEED),--seed $(SEED))
 
 # The harness on every theme: CPU for each .zig, GPU for each .metal (skipped without a Metal device).
 check-themes:
