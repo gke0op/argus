@@ -35,7 +35,7 @@ in numpy from the shipped data and compares the two.
 | Measured | Positions and V magnitudes of 12 bright stars | SIMBAD |
 | Measured (reconstructed) | Dust in front of Orion, out to 360 pc | Edenhofer et al. 2024 (CC BY 4.0) |
 | **Fitted** | The ionisation front's 3D shape (15 x 13 B-spline control points) | photoionisation balance vs the Hα emission measure |
-| Fitted | Flow scale R0 per texel (one clumping factor φ) | emission measure, [S II] density, curvature of the fitted front |
+| Fitted | Flow scale R0 per texel (one density factor φ) | emission measure, [S II] density, curvature of the fitted front |
 | Fitted | Where the ions shine ([N II], [S II], [O I] on the front; Hα, [O III] in the flow) | the measured velocity offsets |
 | Fitted | Foreground ISM vs Veil split of c(Hβ) | Edenhofer map vs MUSE c(Hβ) |
 | **Assumed** | Distance 400 pc; Te = 9000 K; c_s = 11 km/s; Q(θ¹ Ori C) = 1.7e49 s⁻¹, Q(θ² Ori A) = 1e48 s⁻¹ at θ¹ C's depth | literature (see the theme header) |
@@ -59,8 +59,9 @@ in numpy from the shipped data and compares the two.
 2. **The flow.** The ionised gas leaves the front as an isothermal flow, divergent and sonic
    at the front: n M R² = const, M²/2 + ln n = const (Henney, Arthur & García-Díaz 2005).
    Its n² profile has a fixed shape in h/R0, with ∫(n/n₀)² dh = g·R0, g = 0.121. R0 per texel
-   is EM_⊥/(g n₀²). n₀ is the [S II] density times one clumping factor, fitted so that R0
-   matches the fitted front's own mean curvature radius.
+   is EM_⊥/(g n₀²). n₀ is the [S II] density divided by √φ. φ is one density factor, fitted
+   so that R0 matches the mean curvature radius of the fitted front where it is convex,
+   which is where a diverging flow law applies.
 3. **The ions.** The flow predicts the emission-weighted speeds. If [N II] came from the
    front itself, Hα would lead it by (17.7 − 11.0) km/s × n_z. The bake compares that with
    the measured [N II] − Hα centroid offset; see the numbers below.
@@ -78,7 +79,7 @@ in numpy from the shipped data and compares the two.
   percentile 1.2, over 94% of pixels (stars masked).
 - **Resolution.** The shipped maps are 0.6″ texels (`--downsample 3`). A 0.4″ bake
   (`--downsample 2`, 5.2 MB instead of 2.3 MB) gives the same fit to three digits (0.041
-  dex; φ 0.221; R0 0.90 pc). It also looks nearly identical on screen, because the data are
+  dex; φ 0.198; R0 0.81 pc). It also looks nearly identical on screen, because the data are
   seeing-limited and the true-colour image is dominated by smooth [O III]. So the smaller
   file ships.
 - **Encoding.** The 8-bit log encoding errs by 0.002–0.003 dex rms per line (< 1%).
@@ -89,9 +90,12 @@ in numpy from the shipped data and compares the two.
   - Depth below θ¹ Ori C: 0.165 pc. The published value is ~0.2 pc at 440 pc, i.e. 0.18 pc
     at 400 pc. This is an independent check: the fit never saw that number.
   - Front depth range 0.12–0.35 pc. Median tilt 23° from the line of sight; it curves up
-    toward us, a concave bowl around the Trapezium. No part faces away from the stars.
-- **Velocity test.** [N II] − Hα predicted +6.31 km/s, measured +6.04 km/s (brightest 40%).
-  Per texel: median residual −0.21 km/s, rms 2.2 km/s (`vel_resid_nii_ha.png`).
+    toward us away from the star: it is domed toward the Trapezium (mean curvature −2.0
+    pc⁻¹ beneath θ¹ Ori C; 58% of the field convex). That matches the "mildly convex
+    ionization front" Henney et al. 2005 found reproduces Orion. No part faces away from the
+    stars.
+- **Velocity test.** [N II] − Hα predicted +6.31 km/s, measured +6.03 km/s (brightest 40%).
+  Per texel: median residual −0.20 km/s, rms 2.2 km/s (`vel_resid_nii_ha.png`).
   - An N⁺ zone thicker than 0.011 R0 would miss by more than 1 km/s.
   - [S II] is a further +1.1 km/s toward the cloud's velocity. It shines partly inside the
     accelerating front, below the sonic point. The model draws it on the front sheet; it
@@ -101,7 +105,7 @@ in numpy from the shipped data and compares the two.
   the Trapezium: [O I] −26 mpc, [N II] −9, [S II] 0, Hβ +28, [O III] +29. That is the
   model's layering. The whole span is 55 mpc; drawing the low ions as one sheet misplaces
   them by at most 4 mpc (3.6 texels) at the widest yaw. Toward the star, Hα doesn't drop to
-  half within 46 mpc of its peak, so R0 ≳ 0.13 pc, consistent with the fit (0.29–1.5 pc).
+  half within 46 mpc of its peak, so R0 ≳ 0.13 pc, consistent with the fit (0.26–1.5 pc).
 - **Dust.** Edenhofer's map toward θ¹ Ori C puts almost nothing in front of 360 pc
   (A_V ≈ 0.08 mag, uniform over all 64 sightlines). So 93% of the median measured
   reddening is the Veil.
@@ -109,21 +113,47 @@ in numpy from the shipped data and compares the two.
     and 436 pc): the molecular cloud whose surface is our front, just beyond the stars'
     388–414 pc.
   - Veil encoding error: < 0.7% in Hβ transmission. No texel needs clipping.
-- **Clumping.** φ = 0.22: the flow needs a front density 2.1 times the [S II] density. An
-  independent check comes from [Cl III], which traces the denser gas nearer the front, in
-  the same data. Over the bright half of the field it reads 1.64 times the [S II] density
-  (16–84%: 1.33–2.04), i.e. φ = 0.37. So the two estimates of the layer thickness agree
-  within a factor of 1.7. R0 median 0.9 pc, so half of Hα lies within
-  0.12 pc of the front. Classic estimates of the layer are 0.07–0.2 pc.
+- **Density factor.** φ = 0.198: the flow needs a front density 2.25 times the [S II]
+  density. This is not clumping, which would thin the gas; it means the gas at the front is
+  denser than [S II] reports.
+  - [Cl III] traces denser gas nearer the front, in the same data. Over the bright half of
+    the field it reads 1.64 times the [S II] density (16–84%: 1.33–2.04), i.e. φ = 0.37.
+  - So the two estimates of the layer thickness differ by a factor of 1.9.
+  - R0: median 0.81 pc; clipped at 1.5 pc in 4.9% of texels. Half of Hα lies within
+    0.11 pc of the front. Classic estimates of the layer are 0.07–0.2 pc.
+
+## Audit (2026-10-16)
+
+An independent audit (notes: `orion-audit.md` in the session's shared notes) found these,
+all now fixed:
+
+- **The star tables were short.** The bake wrote four stars per line with a `//` comment
+  after the first, which commented out the rest of the line: 9 positions were lost and the
+  fluxes shifted. The bake now writes the named stars one per line and asserts both tables
+  are full.
+- **Real stars were dimmed twice.** SIMBAD's V is observed; they are now dereddened with the
+  measured c(Hβ) before the draw re-applies it.
+- **Cluster stars were 2–9× too bright.** Their bolometric flux had been put entirely into
+  360–830 nm; it is now normalised over the whole Planck spectrum.
+- **A sign error in the stars' Veil lookup.** Off Earth's line of sight only.
+- **"A concave bowl" was wrong.** The fitted front is domed toward the Trapezium (mildly
+  convex, as Henney et al. 2005 found). The flow's curvature closure now uses the convex
+  part of the front, where a diverging flow applies. φ is a density factor, not clumping.
+- **θ² Ori B's temperature** is now Simón-Díaz's 29000 K. The fit status and R0 clipping
+  are now reported.
+
+The audit confirmed the units, extinction convention, orientation, texel centres, flow
+equations, Earth-view integral, Sanders coefficients, Q, and the cluster normalisation.
 
 ## What stays degenerate or uncertain
 
 - **Layer thickness (R0).** This is the least certain fitted quantity. The front's curvature
-  gives R0 ≈ 0.9 pc; the [Cl III] density gives 1.6 times that. Older 2e17 cm estimates of
+  gives R0 ≈ 0.8 pc; the [Cl III] density gives 1.9 times that. Older 2e17 cm estimates of
   the layer point the other way, to about half. So R0 is known to within roughly a factor
-  of 2. What that changes on screen: at the orbit's widest yaw, 0.6× or 1.7× R0 moves the
-  median pixel by 3/255 and the 99th percentile by 11–12/255. From Earth it changes nothing. It changes only the off-Earth views: from Earth the
-  image is the data either way.
+  of 2.
+  - On screen, at the orbit's widest yaw, 0.6× or 1.7× R0 moves the median pixel by 3/255
+    and the 99th percentile by 11–12/255.
+  - From Earth it changes nothing: the image is the data either way.
 - **Absolute depth.** The depth scales as √Q (Q itself is ±10%) and with the assumed
   distance. The dust absorbing ionising photons inside the gas (Henney et al. 2005:
   f_d ≈ 0.5) is not modelled; including it would pull the front ~30% closer.

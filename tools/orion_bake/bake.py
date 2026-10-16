@@ -61,7 +61,7 @@ OMEGA = (SPAXEL_AS * math.pi / 180 / 3600) ** 2   # sr per spaxel; maps are erg/
 # (name, RA deg, Dec deg, V, Teff K, Teff source)
 STARS = [
     ("theta1 Ori C", 83.8186095697, -5.3897005033, 5.13, 39000, "Simon-Diaz+2006"),
-    ("theta2 Ori B", 83.86000314065, -5.41688715766, 6.38, 26000, "Pecaut & Mamajek B1V (B0.7V)"),
+    ("theta2 Ori B", 83.86000314065, -5.41688715766, 6.38, 29000, "Simon-Diaz+2006"),
     ("theta2 Ori A", 83.84542183261, -5.41606462003, 6.39, 35000, "Simon-Diaz+2006"),
     ("theta1 Ori D", 83.82190603333, -5.38793631614, 6.70, 32000, "Simon-Diaz+2006"),
     ("theta1 Ori A", 83.81593917292, -5.3873151943, 6.73, 30000, "Simon-Diaz+2006"),
@@ -326,7 +326,7 @@ def fit_front(EM, sp, cx, cy, ax, ay, lam=0.3):
     sol = op.least_squares(res, p0, bounds=(-2.5, -0.02), x_scale=0.05, max_nfev=600)
     P = sol.x.reshape(KY, KX)
     lp, z, n = front_model(P, geo)
-    return P, {"resid": lp - lEM, "z": z, "n": n, "X": X, "Y": Y, "G": G, "nfev": sol.nfev}
+    return P, {"resid": lp - lEM, "z": z, "n": n, "X": X, "Y": Y, "G": G, "nfev": sol.nfev, "status": f"{sol.status} ({sol.message})"}
 
 # ---------------------------------------------------------------------------------------------
 # The photoevaporation flow off the front: isothermal, divergent, sonic at the front
@@ -410,7 +410,7 @@ def main():
     z = fr["z"]; nrm = fr["n"]
     rr = np.stack([-fr["X"], -fr["Y"], -z]); rr /= np.linalg.norm(rr, axis=0); lit = (nrm * rr).sum(0)
     resid = fr["resid"] / math.log(10)
-    R(f"\n## Ionisation front (fitted)\nB-spline {KX} x {KY} control points, {fr['nfev']} evaluations. log EM residual "
+    R(f"\n## Ionisation front (fitted)\nB-spline {KX} x {KY} control points, {fr['nfev']} evaluations, status {fr['status']}. log EM residual "
       f"(8\" smoothing): rms {resid.std():.3f} dex, 5-95% {np.percentile(resid, 5):.3f} .. {np.percentile(resid, 95):.3f} dex.")
     zc = float(np.interp(0, fr["Y"][:, 0], z[:, np.argmin(abs(fr['X'][0]))]))
     R(f"Front below theta1 Ori C: {-zc:.3f} pc (published: ~0.2 pc at 440 pc, Wen & O'Dell 1995 / O'Dell+2009 -> "
@@ -446,25 +446,29 @@ def main():
     vres = (vel["v_nii"] - vel["v_ha"]) - pix_pred
     R(f"Per-texel [N II]-Halpha residual (measured - predicted): median {np.median(vres[core]):+.2f}, rms {vres[core].std():.2f} km/s.")
 
-    # R0 from the emission measure and the [S II] density, with one clumping factor fitted to the
+    # R0 from the emission measure and the [S II] density, with one density factor fitted to the
     # geometric curvature of the fitted front.
     EMperp = EM * nz
     R0raw = EMperp / (g * ne ** 2) / PCCM                              # pc
     zxx = By @ P @ (bspline_second(NX, KX)).T * (sxx / sp) ** 2
     zyy = bspline_second(NY, KY) @ P @ Bx.T * (syy / sp) ** 2
     kappa = 0.5 * (zxx + zyy) * nz ** 3                                 # mean curvature (small-slope form)
+    convex = kappa[core] < -1e-3       # domed toward the stars: the flow off it diverges, as the flow law assumes
     concave = kappa[core] > 1e-3
-    Rgeom = np.median(1 / kappa[core][concave])
+    Rgeom = np.median(1 / np.abs(kappa[core][convex]))
+    kc = float(np.mean(kappa[int(round(cy)) - 3:int(round(cy)) + 4, int(round(cx)) - 3:int(round(cx)) + 4]))
     phi = Rgeom / np.median(R0raw[core])
     R0 = np.clip(phi * R0raw, 0.005, 1.5)
+    R(f"R0 clipped at 1.5 pc in {(phi * R0raw > 1.5).mean() * 100:.1f}% of texels, at 0.005 pc in {(phi * R0raw < 0.005).mean() * 100:.1f}%.")
     # An independent check: [Cl III] traces denser gas nearer the front than [S II] does.
     ncl = down(c["ne_cl"], F); okcl = down(c["ne_cl_ok"].astype(float), F) > 0.9
     sel = np.zeros_like(okcl); sel[core] = True
     sel &= okcl & (ha > np.percentile(ha[core], 50))
     phi_cl = float(np.median(((ne / ncl) ** 2)[sel]))
     R(f"\nR0 from EM_perp / (g n_e^2) with n_e from [S II]: median {np.median(R0raw[core]):.3f} pc. Mean curvature radius of the "
-      f"fitted front where concave ({concave.mean() * 100:.0f}% of the field): median {Rgeom:.3f} pc.")
-    R(f"Fitted clumping factor phi = {phi:.3f} (R0 = phi R0_raw; equivalently the flow's front density is n_[S II] / sqrt(phi) "
+      f"fitted front where convex (domed toward the stars: {convex.mean() * 100:.0f}% of the field; concave {concave.mean() * 100:.0f}%): median {Rgeom:.3f} pc. "
+      f"Mean curvature under theta1 Ori C: {kc:+.2f} /pc (negative = domed toward the star).")
+    R(f"Fitted density factor phi = {phi:.3f} (R0 = phi R0_raw; equivalently the flow's front density is n_[S II] / sqrt(phi) "
       f"= {1 / math.sqrt(phi):.2f} n_[S II]). R0 used: median {np.median(R0):.3f} pc, 5-95% {np.percentile(R0, 5):.3f} .. {np.percentile(R0, 95):.3f}.")
     R(f"Check: using the [Cl III] density instead (bright half of the field, {sel.sum()} texels with good [Cl III]): n_[Cl III] / n_[S II] = "
       f"{np.median((ncl / ne)[sel]):.2f} (16-84% {np.percentile((ncl / ne)[sel], 16):.2f}-{np.percentile((ncl / ne)[sel], 84):.2f}), i.e. phi = {phi_cl:.3f}. "
@@ -523,7 +527,6 @@ def main():
         png(os.path.join(rep, "vel_resid_nii_ha.png"), 0.5 + vres / 12)
         png(os.path.join(rep, "R0.png"), (np.log10(R0) + 2.3) / 2.5)
         png(os.path.join(rep, "c_veil.png"), c_veil / 1.4)
-        open(os.path.join(rep, "report.md"), "w").write("\n".join(lines) + "\n")
 
     # --- stars ---------------------------------------------------------------------------------
     lam = np.arange(360.0, 831.0, 1.0)
@@ -531,17 +534,28 @@ def main():
     def planck(T):                                                    # B_lambda, nm
         x = 1.4387769e7 / (lam * T)
         return 1 / (lam ** 5 * np.expm1(np.minimum(x, 700)))
+    lam_all = np.geomspace(50.0, 2e5, 20000)                          # nm: for bolometric normalisation
+    def planck_all(T):
+        x = 1.4387769e7 / (lam_all * T)
+        return 1 / (lam_all ** 5 * np.expm1(np.minimum(x, 700)))
     def xyz_from_V(V, T):    # F_lambda(550 nm) = 3.63e-9 10^(-0.4 V) erg/s/cm^2/A (Bessell 1998)
         b = planck(T); b *= 3.63e-8 * 10 ** (-0.4 * V) / np.interp(550.0, lam, b)
-        return (b[:, None] * cmf).sum(0)                              # erg/s/cm^2 x CMF
+        return (b[:, None] * cmf).sum(0)                              # erg/s/cm^2 x CMF (1 nm grid)
     def xyz_from_L(Lsun, T):
         Fbol = Lsun * 3.828e33 / (4 * math.pi * (DIST_PC * PCCM) ** 2)
-        b = planck(T); b *= Fbol / (b.sum())
+        b = planck(T); b *= Fbol / np.trapezoid(planck_all(T), lam_all)   # all of the light, not just 360-830 nm
         return (b[:, None] * cmf).sum(0)
+    k550 = ccm89(550.0) / ccm89(486.1333)
+    R("\n## Stars")
     stars = []
     for name, ra, dec, V, T, _ in STARS:
         col, row = sky_to_pix(ra, dec); tx, ty = tex(col, row)
-        stars.append(((tx - cx) * sp, (ty - cy) * sp, 0.0, xyz_from_V(V, T), name))
+        # SIMBAD's V is observed, i.e. already dimmed by the dust in front; the theme dims star light
+        # by the reddening it samples there, so ship the star undimmed by that same reddening.
+        c_star = float(cmap[int(round(min(max(ty, 0), NY - 1))), int(round(min(max(tx, 0), NX - 1)))])
+        V0 = V - 2.5 * c_star * k550
+        stars.append(((tx - cx) * sp, (ty - cy) * sp, 0.0, xyz_from_V(V0, T), name))
+        R(f"  {name:13s} V {V:5.2f}, c(Hb) there {c_star:.2f} -> A_V {2.5 * c_star * k550:.2f}, V0 {V0:5.2f}")
     # The cluster's fainter members: statistical (see the theme header). Fixed seed.
     rng_ = np.random.default_rng(135)
     rgrid = np.linspace(0, 4.0, 4001); rc = 0.2
@@ -569,7 +583,7 @@ def main():
     Teff = np.interp(mass, [0.08, 0.1, 0.3, 0.5, 1.0, 2.0, 3.0], [2700, 2900, 3400, 3700, 4300, 5000, 7000])
     for (x, y, zz), Ls, T in zip(P3[idx], Lsun, Teff):
         stars.append((x, y, zz, xyz_from_L(Ls, T), "cluster"))
-    R(f"\n## Stars\n{len(STARS)} real (SIMBAD) + {idx.size} statistical cluster members in the box (ONC model normalised to N(<2 pc) = 4323).")
+    R(f"{len(STARS)} real (SIMBAD) + {idx.size} statistical cluster members in the box (ONC model normalised to N(<2 pc) = 4323).")
     if len(stars) > 1024: raise SystemExit("too many stars for one threadgroup pass")
 
     # --- exposure: the nebula as seen from Earth -------------------------------------------------
@@ -617,19 +631,23 @@ def main():
     W(f"constant float A_V_PER_A_HB = {1 / ccm89(486.1333):.4f}f;   // CCM89 R_V = 5.5")
     W(f"constant uint N_STARS = {len(stars)}u;")
     W("constant float4 STARS[N_STARS] = {   // x, y, z (pc from theta1 Ori C: west, north, toward us); first 12 real")
-    for i in range(0, len(stars), 4):
-        W("    " + " ".join(f"float4({x:.4f}f, {y:.4f}f, {zz:.4f}f, 0),{'  // ' + nm if nm != 'cluster' else ''}" for x, y, zz, _, nm in stars[i:i + 4]))
+    for x, y, zz, _, nm in stars[:len(STARS)]:
+        W(f"    float4({x:.4f}f, {y:.4f}f, {zz:.4f}f, 0),   // {nm}")       # one per line: a comment ends the line
+    for i in range(len(STARS), len(stars), 4):
+        W("    " + " ".join(f"float4({x:.4f}f, {y:.4f}f, {zz:.4f}f, 0)," for x, y, zz, _, nm in stars[i:i + 4]))
     W("};")
     W("constant float4 STAR_XYZ[N_STARS] = {   // CIE XYZ flux, erg/s/cm2 x CMF, before extinction")
     for i in range(0, len(stars), 4):
         W("    " + " ".join(f"float4({v[0]:.4e}f, {v[1]:.4e}f, {v[2]:.4e}f, 0)," for _, _, _, v, _ in stars[i:i + 4]))
     W("};")
+    assert "".join(out).count("float4(") >= 2 * len(stars), "star tables are short"
     W("// END BAKED")
     src = open(THEME).read()
     new = re.sub(r"// BEGIN BAKED.*?// END BAKED", "\n".join(out), src, flags=re.S)
     new = re.sub(r"// @argus state \d+x\d+", f"// @argus state {NX}x{3 * NY + 1}", new)
     new = re.sub(r"// @argus data (\S+) \d+x\d+", lambda m: f"// @argus data {m.group(1)} {NX}x{2 * NY}", new)
     open(THEME, "w").write(new)
+    if rep: open(os.path.join(rep, "report.md"), "w").write("\n".join(lines) + "\n")
     log("wrote", THEME, "and", DATA)
 
 def bspline_second(n, k):
