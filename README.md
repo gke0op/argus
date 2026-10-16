@@ -14,7 +14,7 @@ for a few milliseconds of GPU a frame, or really anything you can write a pixel 
 ## What it is
 
 Argus is a bare-metal macOS app that gives every Desktop Space its own live theme. Swipe from
-one Space to the next and you swipe from a black hole to a night beach to a marbling bath.
+one Space to the next and you swipe from a quasar to a night beach to a marbling bath.
 
 A theme is a single source file in `themes/`:
 
