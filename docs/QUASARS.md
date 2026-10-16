@@ -90,9 +90,10 @@ Not everything here is equally exact, and we say which is which.
 ### 4. Chosen, for the picture
 - The camera: 88° from the spin axis (nearly edge-on), 1000 mass units away, the zoom.
 - Time is sped up so the motion is visible: each second on screen is 10 light-crossing times
-  of the hole, about two days for H1821+643 (~200,000× real time).
+  of the hole: about a day and a half for Cygnus A, two days for H1821+643 (~100,000–200,000×
+  real time).
 - The hot spots' number, size and brightness (their motion is computed).
-- Exposure and tone mapping, so a 50,000-degree disk fits on a screen.
+- Exposure and tone mapping, so a disk at tens of thousands of degrees fits on a screen.
 
 ---
 

@@ -124,6 +124,7 @@ const math = std.math;
 const sdk = @import("argus_theme_sdk.zig");
 
 pub const SPIN: f64 = 0.94;
+pub const LEDGER_PREFIX = "opus_gargantua."; // gpu_bench record ids
 pub const INCL: f64 = 80.0 * math.pi / 180.0;
 pub const R_OUT: f64 = 48.0; // geometry only: Gargantua's chosen column is tau ~ 2e-3 here
 pub const GARG_RC: f64 = 5.0; // M: roll-off scale of Gargantua's chosen outer column

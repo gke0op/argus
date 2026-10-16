@@ -17,6 +17,9 @@
 
 const std = @import("std");
 const theme = @import("theme");
+// Ledger id prefix and camera inclination of the theme under test (generated quasars carry their own).
+const ID = if (@hasDecl(theme, "LEDGER_PREFIX")) theme.LEDGER_PREFIX else "opus_quasar.";
+const INCL_DEG: f64 = if (@hasDecl(theme, "INCL")) theme.INCL * 180.0 / std.math.pi else 88.0;
 const mtl = @import("gpu/metal.zig");
 const bt = @import("gpu/bh_tables.zig");
 const bg = @import("gpu/bh_gpu.zig");
@@ -203,8 +206,8 @@ fn contourSweep(st: *theme.State) !bool {
             if (path[0] == 'g') "GPU" else "CPU", if (path[0] == 'g') "f32" else "f64", N, s.max, s.max_off_axis, s.max_polar, s.rms, s.rms_off_axis, s.bad,
         });
         if (path[0] == 'c') continue; // the theme's test records the CPU path (same samples)
-        const cond = try std.fmt.bufPrint(cb, "a = {d}, i = 88 deg, r_obs = 1000 M; {d} points on the full critical curve (both halves, clustered toward the equatorial ends) + {d} in the polar band |alpha| < {d} M; {s}; {d} bisections along rays from the shadow centre", .{
-            theme.SPIN, 2 * theme.CONTOUR_N - 2, 2 * theme.POLAR_N, theme.POLAR_BAND, "GPU f32 (bh_gpu probe kernel)", theme.CONTOUR_ITERS,
+        const cond = try std.fmt.bufPrint(cb, "a = {d}, i = {d} deg, r_obs = 1000 M; {d} points on the full critical curve (both halves, clustered toward the equatorial ends) + {d} in the polar band |alpha| < {d} M; {s}; {d} bisections along rays from the shadow centre", .{
+            theme.SPIN, INCL_DEG, 2 * theme.CONTOUR_N - 2, 2 * theme.POLAR_N, theme.POLAR_BAND, "GPU f32 (bh_gpu probe kernel)", theme.CONTOUR_ITERS,
         });
         const text = "Traced shadow edge lies on the Kerr critical curve over the whole contour";
         const ref = "Bardeen 1973 analytic critical curve";
@@ -217,13 +220,13 @@ fn contourSweep(st: *theme.State) !bool {
             .{ "brackets", "bracket failures (count)", @floatFromInt(s.bad), 0.0 },
         };
         for (recs, &id_buf) |r, *ib| {
-            ok = ledger.emit(.{ .id = try std.fmt.bufPrint(ib, "opus_quasar.shadow.contour.{s}.{s}", .{ path, r[0] }), .claim = text, .reference = ref, .conditions = cond, .quantity = r[1], .measured = r[2], .hi = r[3], .source = LEDGER_SRC }) and ok;
+            ok = ledger.emit(.{ .id = try std.fmt.bufPrint(ib, "{s}shadow.contour.{s}.{s}", .{ ID, path, r[0] }), .claim = text, .reference = ref, .conditions = cond, .quantity = r[1], .measured = r[2], .hi = r[3], .source = LEDGER_SRC }) and ok;
         }
         var polar_id: [64]u8 = undefined;
-        _ = ledger.emit(.{ .id = try std.fmt.bufPrint(&polar_id, "opus_quasar.shadow.contour.{s}.max_polar", .{path}), .claim = "Shadow-edge error of rays passing over the spin axis (L ~ 0; reported)", .reference = ref, .conditions = cond, .quantity = "max |radial offset| in the polar band (M)", .measured = s.max_polar, .source = LEDGER_SRC });
+        _ = ledger.emit(.{ .id = try std.fmt.bufPrint(&polar_id, "{s}shadow.contour.{s}.max_polar", .{ ID, path }), .claim = "Shadow-edge error of rays passing over the spin axis (L ~ 0; reported)", .reference = ref, .conditions = cond, .quantity = "max |radial offset| in the polar band (M)", .measured = s.max_polar, .source = LEDGER_SRC });
     }
     std.debug.print(" shadow contour GPU vs CPU    : max |offset_GPU - offset_CPU| = {e:.2} M per sample\n", .{diff});
-    _ = ledger.emit(.{ .id = "opus_quasar.shadow.contour.gpu_vs_cpu", .claim = "The GPU (f32) and CPU (f64) paths find the same shadow edge (reported)", .reference = "the CPU f64 path on the same samples", .conditions = "the samples of opus_quasar.shadow.contour.gpu.* and .cpu.*", .quantity = "max |offset_GPU - offset_CPU| per sample (M)", .measured = diff, .source = LEDGER_SRC });
+    _ = ledger.emit(.{ .id = ID ++ "shadow.contour.gpu_vs_cpu", .claim = "The GPU (f32) and CPU (f64) paths find the same shadow edge (reported)", .reference = "the CPU f64 path on the same samples", .conditions = "the samples of shadow.contour.gpu.* and .cpu.*", .quantity = "max |offset_GPU - offset_CPU| per sample (M)", .measured = diff, .source = LEDGER_SRC });
     return ok;
 }
 
@@ -279,7 +282,7 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    std.debug.print("========================================================================\n ARGUS GPU // Opus_Quasar GPU trace vs CPU\n------------------------------------------------------------------------\n", .{});
+    std.debug.print("========================================================================\n ARGUS GPU // {s} GPU trace vs CPU\n------------------------------------------------------------------------\n", .{ID});
     var t0 = std.Io.Clock.awake.now(io);
     const st = try theme.State.init(alloc, W, H, 1.0);
     defer st.deinit(alloc);
@@ -313,8 +316,8 @@ pub fn main(init: std.process.Init) !void {
     saveRgba("/tmp/argus_bh_gpu.rgba", gpu);
     std.debug.print(" exposure CPU / GPU          : {d:.4} / {d:.4}\n", .{ st.exposure, g1.exposure });
     const frame_cond = "1920x1200, same step() state, CPU draw() vs GPU meter + trace + shade (sRGB)";
-    _ = ledger.emit(.{ .id = "opus_quasar.gpu.pixels_within_8", .claim = "The GPU frame reproduces the CPU reference frame (reported)", .reference = "the theme's CPU draw()", .conditions = frame_cond, .quantity = "% of pixels with every channel within 8 levels", .measured = @as(f64, @floatFromInt(close)) / @as(f64, W * H) * 100.0, .source = LEDGER_SRC });
-    _ = ledger.emit(.{ .id = "opus_quasar.gpu.exposure_ratio", .claim = "The GPU meters the same exposure as the CPU (reported)", .reference = "the theme's CPU exposure meter", .conditions = frame_cond, .quantity = "exposure GPU / CPU", .measured = g1.exposure / st.exposure, .source = LEDGER_SRC });
+    _ = ledger.emit(.{ .id = ID ++ "gpu.pixels_within_8", .claim = "The GPU frame reproduces the CPU reference frame (reported)", .reference = "the theme's CPU draw()", .conditions = frame_cond, .quantity = "% of pixels with every channel within 8 levels", .measured = @as(f64, @floatFromInt(close)) / @as(f64, W * H) * 100.0, .source = LEDGER_SRC });
+    _ = ledger.emit(.{ .id = ID ++ "gpu.exposure_ratio", .claim = "The GPU meters the same exposure as the CPU (reported)", .reference = "the theme's CPU exposure meter", .conditions = frame_cond, .quantity = "exposure GPU / CPU", .measured = g1.exposure / st.exposure, .source = LEDGER_SRC });
     std.debug.print(" 1920x1200 GPU meter / trace : {d:.1} ms / {d:.1} ms   (CPU draw {d:.2} ms)\n", .{ g1.meter_ms, g1.trace_ms, cpu_draw_ms });
     std.debug.print(" CPU vs GPU pixels within 8  : {d:.3}%, mean |diff| {d:.3} levels/channel\n", .{
         @as(f64, @floatFromInt(close)) / @as(f64, W * H) * 100.0, sum_abs / @as(f64, W * H * 3),

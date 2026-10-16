@@ -8,6 +8,7 @@ Edit the source, then run `make quasars`; `make test` runs `--check` and fails o
     python3 tools/gen_quasars.py          # write every generated theme
     python3 tools/gen_quasars.py --check  # exit 1 if any generated theme differs
 """
+import math
 import os
 import sys
 
@@ -23,6 +24,8 @@ QUASARS = [
         "file": "Opus_Cygnus_A.zig",
         "title": "OPUS CYGNUS A",
         "slug": "cygnus_a",
+        # Computed by this theme's disk solution; its "computed disk" test checks them (HEADER).
+        "computed": {"pt_25": 0.87, "pt_5": 0.51, "lum": 0.55, "l_edd": 0.0125, "t_peak": 37_700.0, "r_peak": 3.41, "h_over_r": 0.004},
         "spin": "0.9",
         "spin_note": "Spin a = 0.9 M (unmeasured for Cygnus A: a choice), inclination 88 deg (nearly edge-on).",
         "mass": "2.5e9",
@@ -47,6 +50,8 @@ QUASARS = [
         "file": "Opus_J0834.zig",
         "title": "OPUS J0834",
         "slug": "j0834",
+        # Computed by this theme's disk solution; its "computed disk" test checks them (HEADER).
+        "computed": {"pt_25": 0.82, "pt_5": 0.47, "lum": 0.57, "l_edd": 0.040, "t_peak": 64_600.0, "r_peak": 1.96, "h_over_r": 0.021},
         "spin": "0.99",
         "spin_note": "Spin a = 0.99 M (Piotrovich et al. 2024's models), inclination 88 deg (nearly edge-on).",
         "mass": "3.2e9",
@@ -70,6 +75,8 @@ QUASARS = [
         "file": "Opus_PG1426.zig",
         "title": "OPUS PG 1426",
         "slug": "pg1426",
+        # Computed by this theme's disk solution; its "computed disk" test checks them (HEADER).
+        "computed": {"pt_25": 0.87, "pt_5": 0.51, "lum": 0.55, "l_edd": 0.0244, "t_peak": 56_000.0, "r_peak": 3.41, "h_over_r": 0.008},
         "spin": "0.9",
         "spin_note": "Spin a = 0.9 M (inside PG 1426+015's a* >~ 0.7), inclination 88 deg (nearly edge-on).",
         "mass": "1.0e9",
@@ -101,6 +108,59 @@ def rep(s, a, b, count=1):
     return s.replace(a, b)
 
 
+def isco(a):
+    z1 = 1 + (1 - a * a) ** (1 / 3) * ((1 + a) ** (1 / 3) + (1 - a) ** (1 / 3))
+    z2 = math.sqrt(3 * a * a + z1 * z1)
+    return 3 + z2 - math.sqrt((3 - z1) * (3 + z1 + 2 * z2))
+
+
+def colour_factor(t):
+    return 1.0 if t <= 3.0e4 else (t / 3.0e4) ** 0.82 if t < 1.0e5 else (72.0 / (t * 8.617333e-8)) ** (1 / 9)
+
+
+def mfmt(x):
+    """A radius in M as the header quotes it."""
+    return f"{x:.0f}" if x >= 10 else f"{x:.1f}"
+
+
+def computed_text(s, q):
+    """Replace every value the source header quotes from H1821+643's solution with this object's."""
+    c = q["computed"]
+    a = float(q["spin"])
+    m = float(q["mass"])
+    ri = isco(a)
+    f_peak = colour_factor(c["t_peak"])
+    t_m = 4.925491e-6 * m  # seconds per M
+    p_isco = 2 * math.pi * (ri ** 1.5 + a)  # prograde orbit period, M
+    p_6 = 2 * math.pi * (6 ** 1.5 + a)
+    tk = f"{round(c['t_peak'], -3):,.0f}"
+    s = rep(s, "flux reverses (5 ISCO radii, 19 M), so the flux drops below Page-Thorne (0.89 at 9 M, 0.55\n//    at 19 M). Its recipe (ring and snapshot) scales with the ISCO (3.75 M at this spin); the",
+            f"flux reverses (5 ISCO radii, {mfmt(5 * ri)} M), so the flux drops below Page-Thorne ({c['pt_25']:.2f} at {mfmt(2.5 * ri)} M, {c['pt_5']:.2f}\n//    at {mfmt(5 * ri)} M). Its recipe (ring and snapshot) scales with the ISCO ({ri:.2f} M at this spin); the")
+    s = rep(s, "Scaled to a 4e9 solar-mass hole whose\n//    ISCO accretion rate is 36% of Eddington's (alpha = 0.1); the snapshot shines at 0.54 of\n//    that (its inflow stops at 5 ISCO radii), i.e. ~0.2 L_Edd as measured. Peak ~50,000 K at\n//    5.7 M (radiation-pressure supported, H/r ~ 0.05 there), blue-white, as real\n//    thin disks around such holes are.",
+            f"Scaled to a {q['mass']} solar-mass hole whose\n//    ISCO accretion rate is {round(float(q['edd']) * 100, 1)}% of Eddington's (alpha = 0.1); the snapshot shines at {c['lum']:.2f} of\n//    that (its inflow stops at 5 ISCO radii), i.e. ~{c['l_edd']:g} L_Edd, the object's. Peak ~{tk} K at\n//    {c['r_peak']:.1f} M (H/r ~ {c['h_over_r']:g} there: thin), as real\n//    thin disks around such holes are.")
+    s = rep(s, "~1.5 at this disk's 50,000 K peak", f"~{f_peak:.1f} at this disk's {tk} K peak")
+    s = rep(s, "one ISCO orbit takes ~5 s on screen, one at r = 6 M ~10 s (in reality ~11\n//    and ~22 days for this 4e9 solar-mass hole).",
+            f"one ISCO orbit takes ~{p_isco / 10:.0f} s on screen, one at r = 6 M ~{p_6 / 10:.0f} s (in reality ~{p_isco * t_m / 86400:.0f}\n//    and ~{p_6 * t_m / 86400:.0f} days for this {q['mass']} solar-mass hole).")
+    fainter = 1e12 * (c["t_peak"] / 49935.0) ** 4
+    s = rep(s, "but next to a 50,000 K disk they are ~1e12 times fainter,",
+            f"but next to a {tk} K disk they are ~{fainter:.0e} times fainter,".replace("e+", "e"))
+    s = rep(s, "// The sky is black: next to a 50,000 K disk everything else (the host galaxy's stars, the cluster's\n// galaxies) is ~1e12 times fainter,",
+            f"// The sky is black: next to a {tk} K disk everything else (the host galaxy's stars, its\n// neighbours) is ~{fainter:.0e} times fainter,".replace("e+", "e"))
+    hdr_old = s[s.index("pub const HEADER = struct {"):s.index("};", s.index("pub const HEADER = struct {")) + 2]
+    hdr_new = ("pub const HEADER = struct {\n"
+               f"    pub const r_isco: f64 = {ri:.2f}; // M\n"
+               f"    pub const pt_25: f64 = {c['pt_25']}; // F / F_PT at 2.5 ISCO radii\n"
+               f"    pub const pt_5: f64 = {c['pt_5']}; // F / F_PT at 5 ISCO radii\n"
+               f"    pub const lum: f64 = {c['lum']}; // snapshot L / steady Page-Thorne L at the same inflow\n"
+               f"    pub const l_edd: f64 = {c['l_edd']}; // L / L_Edd\n"
+               f"    pub const t_peak: f64 = {c['t_peak']:.1f}; // K\n"
+               f"    pub const r_peak: f64 = {c['r_peak']}; // M\n"
+               f"    pub const h_over_r: f64 = {c['h_over_r']}; // at the peak\n"
+               f"    pub const f_peak: f64 = {f_peak:.2f}; // colour correction at the peak\n"
+               "};")
+    return s.replace(hdr_old, hdr_new)
+
+
 def generate(src, q):
     i = src.index(PARA_START)
     j = src.index(PARA_END)
@@ -129,7 +189,7 @@ def generate(src, q):
     s = s.replace('"zig test themes/Opus_Quasar.zig"', f'"zig test themes/{q["file"]}"')
     s = s.replace('"opus_quasar.', f'"opus_{q["slug"]}.')
     s = s.replace("a = 0.62", f"a = {q['spin']}")
-    return s
+    return computed_text(s, q)
 
 
 def main():

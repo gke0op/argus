@@ -277,6 +277,20 @@ pub fn pageThorne(a: f64, r_in: f64, r_max: f64, out: *[PT_N]f64) void {
 
 pub const BH_MASS_SUN: f64 = 4.0e9; // a quasar-class supermassive hole
 pub const EDD_RATIO: f64 = 0.36; // ISCO accretion rate / (L_Edd / (eta c^2)): a thin disk (>~ 0.01)
+/// The computed values the header quotes (rounded as quoted there); the "computed disk" test
+/// checks each against the solution, so the prose cannot drift from the physics.
+/// tools/gen_quasars.py writes this block (and the matching header text) for each generated theme.
+pub const HEADER = struct {
+    pub const r_isco: f64 = 3.75; // M
+    pub const pt_25: f64 = 0.89; // F / F_PT at 2.5 ISCO radii
+    pub const pt_5: f64 = 0.55; // F / F_PT at 5 ISCO radii
+    pub const lum: f64 = 0.54; // snapshot L / steady Page-Thorne L at the same inflow
+    pub const l_edd: f64 = 0.2; // L / L_Edd ("~")
+    pub const t_peak: f64 = 50_000.0; // K ("~")
+    pub const r_peak: f64 = 5.7; // M
+    pub const h_over_r: f64 = 0.05; // at the peak ("~")
+    pub const f_peak: f64 = 1.5; // colour correction at the peak ("~")
+};
 pub const ALPHA_VISC: f64 = 0.1; // Shakura-Sunyaev alpha
 pub const RING_R0: f64 = 4.0 * R_ISCO; // where the gas was deposited
 const RING_D: f64 = 0.8 * R_ISCO; // initial ring width
@@ -2268,6 +2282,7 @@ comptime {
 
 const testing = std.testing;
 
+pub const LEDGER_PREFIX = "opus_quasar."; // gpu_bench uses it for its records too
 const LEDGER_SRC = "zig test themes/Opus_Quasar.zig";
 
 fn claim(id: []const u8, text: []const u8, reference: []const u8, conditions: []const u8, quantity: []const u8, measured: f64, lo: ?f64, hi: ?f64) !void {
@@ -2572,6 +2587,21 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
     try claim("opus_quasar.disk.t_peak", "Peak disk temperature is quasar-like", "H1821+643: L ~ 0.2 L_Edd at 4e9 Msun (Fukuchi, Ichikawa et al. 2022)", cond, "T_peak (K)", d.t_peak, 40_000.0, 60_000.0);
     try claim("opus_quasar.disk.eddington", "The snapshot shines at H1821+643's measured Eddington ratio", "lambda_Edd = 0.18 (full SED; Fukuchi, Ichikawa et al. 2022)", cond, "L / L_Edd: cgs flux integrated over both faces (flat area)", d.l_edd_abs, 0.17, 0.23);
     try claim("opus_quasar.disk.opaque_10", "The disk is opaque at 10 ISCO radii", "electron scattering + Kramers opacity", cond, "tau_ext at 10 r_isco", at(&d, r_in, dl, 10.0 * R_ISCO)[1], 10.0, null);
+    // The header's quoted numbers (HEADER) are the computed ones, to their quoted rounding.
+    const near = struct {
+        fn f(got: f64, quoted: f64, rel: f64) bool {
+            return @abs(got - quoted) <= rel * @abs(quoted);
+        }
+    }.f;
+    try std.testing.expect(near(R_ISCO, HEADER.r_isco, 0.01));
+    try std.testing.expect(near(d.pt_ratio_at[1], HEADER.pt_25, 0.02));
+    try std.testing.expect(near(d.pt_ratio_at[3], HEADER.pt_5, 0.02));
+    try std.testing.expect(near(d.lum_ratio, HEADER.lum, 0.02));
+    try std.testing.expect(near(d.l_edd_abs, HEADER.l_edd, 0.1));
+    try std.testing.expect(near(d.t_peak, HEADER.t_peak, 0.03));
+    try std.testing.expect(near(d.r_peak, HEADER.r_peak, 0.03));
+    try std.testing.expect(near(d.h_over_r_peak, HEADER.h_over_r, 0.12));
+    try std.testing.expect(near(colourFactor(d.t_peak), HEADER.f_peak, 0.03));
     try claim("opus_quasar.disk.thin_45", "The disk has faded to nothing by 45 ISCO radii (no edge)", "electron scattering + Kramers opacity", cond, "tau_ext at 45 r_isco", at(&d, r_in, dl, 45.0 * R_ISCO)[1], null, 1e-2);
 }
 
