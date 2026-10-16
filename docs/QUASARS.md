@@ -56,8 +56,9 @@ Not everything here is equally exact, and we say which is which.
 - **Every light path.** Each pixel's light is traced backward through the curved spacetime of a
   spinning black hole (the Kerr solution), with no shortcuts.
 - **The shadow's outline.** Compared at 766 points against the analytic curve Bardeen derived in
-  1973: the largest error is 1.1×10⁻⁵ of the black hole's mass unit. On a Retina screen that
-  is **under 1/2000 of a pixel**.
+  1973. For Cygnus A the largest error is 8.9×10⁻⁶ of the black hole's mass unit on the CPU
+  and 1.8×10⁻⁵ on the GPU ([`cygnus_a_ledger.json`](cygnus_a_ledger.json)). On a Retina screen
+  that is **under 1/2000 of a pixel**.
 - **Redshift, beaming, the innermost stable orbit, the photon rings, frame dragging.** These
   come out of the same equations; none is drawn by hand.
 
