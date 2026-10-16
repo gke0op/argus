@@ -37,7 +37,7 @@ constant float OCT_NORM = 1.1467259f; // sqrt(sum of OCT_AMP^2)
 // variance-preserving interpolation) come from the theme (Static.foot_* / rho_*).
 constant uint BB_N = 1024;
 constant float BB_TMIN = 300.0f;
-constant float BB_TMAX = 80000.0f;
+constant float BB_TMAX = 200000.0f; // as the theme: above the hottest observed colour temperature
 constant uint PT_N = 4096;
 
 constant float OBS_R = 1000.0f;

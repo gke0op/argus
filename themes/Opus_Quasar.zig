@@ -550,8 +550,6 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
         // the sign that neither Kramers nor electron scattering applies there (see header).
         const ta_f = 2.0 * lk.ta;
         const tem_slab = @min(ta_f * (1.0 + tes_f), @sqrt(ta_f * (ta_f + tes_f)));
-        const emiss = 1.0 - 2.0 * expE3(tem_slab); // grey isothermal slab: flux out = sigma T_s^4 (1 - 2 E3)
-        const ts_slab = @min(@sqrt(@sqrt(fphys / (SIGMA_SB * @max(emiss, 1e-300)))), T_MAX_SOURCE);
         // Where the gas is thick to scattering (tau_ext >~ 10) it is a scattering atmosphere: its
         // spectrum harder than T_eff is what the colour correction f (buildTables) describes, at
         // T_eff and with full emission. The slab's own boost of T_s (energy through a thin
@@ -559,9 +557,11 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
         // thin overall; blended in log tau_ext between 1 and 10.
         const tau_ext = tes_f + ta_f;
         const w_atm = math.clamp(@log10(@max(tau_ext, 1e-30)), 0.0, 1.0);
-        const t_eff = @sqrt(@sqrt(fphys / SIGMA_SB));
-        const ts = @exp((1.0 - w_atm) * @log(ts_slab) + w_atm * @log(t_eff));
+        // The emission depth is blended; the source temperature then follows from energy
+        // conservation with it (a grey isothermal slab: flux out = sigma T_s^4 (1 - 2 E3(tau_em)) = F), so the band neither over- nor
+        // under-emits (T_eff where thick, the slab's T_s where thin).
         const tem = @exp((1.0 - w_atm) * @log(@max(tem_slab, 1e-30)) + w_atm * @log(@max(tem_slab, tau_ext)));
+        const ts = @min(@sqrt(@sqrt(fphys / (SIGMA_SB * @max(1.0 - 2.0 * expE3(tem), 1e-300)))), T_MAX_SOURCE);
         out.T[k] = @floatCast(ts);
         out.lt_ext[k] = @floatCast(@max(@log(tau_ext), -60.0));
         out.lt_em[k] = @floatCast(@max(@log(tem), -60.0));
@@ -791,7 +791,7 @@ pub fn redshift(a: f64, r: f64, L: f64) f64 {
 
 pub const BB_N: usize = 1024;
 pub const BB_TMIN: f64 = 300.0;
-pub const BB_TMAX: f64 = 80_000.0;
+pub const BB_TMAX: f64 = 200_000.0; // above the hottest observed colour temperature (~105 kK: g f T on the approaching inner disk)
 
 fn lobe(l: f64, mu: f64, s1: f64, s2: f64) f64 {
     const t = (l - mu) / (if (l < mu) s1 else s2);
@@ -891,7 +891,7 @@ const Rec = extern struct {
     phi: u16, // emission azimuth + Omega * travel time, Q16 of 2 pi
     cov: u8, // disk coverage 0..255
     fr: u8 = 0, // pixel footprint on the disk: radial extent in quarter r-bins (saturating)
-    tobs: f16 = 0, // observed blackbody temperature g*T, for re-coloring hotter gas
+    tobs: f16 = 0, // observed colour temperature g*f*T in kK, for re-coloring hotter gas
     fp: u8 = 0, // pixel footprint: azimuthal extent in units of 64/65536 turn (saturating)
     bf: u8 = 0, // share of bg (luminance, /255) that lies behind this pixel's translucent gas
     resp: u8 = 0, // CPU turbulence: d ln(luminance) / d ln(eps) at tobs (T ~ eps^(1/4)), * RESP_SCALE
@@ -1740,7 +1740,7 @@ pub const State = struct {
                                 .rbin = first.rbin,
                                 .phi = first.phi,
                                 .cov = @intCast(nd * 255 / nsamp),
-                                .tobs = @floatCast(@min(first.tobs, 60000.0)),
+                                .tobs = @floatCast(first.tobs / 1000.0), // kK: f16 tops out at 65504
                                 .tq = first.tq,
                                 .bf = bf,
                                 .resp = self.respByte(first.tobs),
@@ -2143,7 +2143,7 @@ pub const State = struct {
                     if (boost > 1e-3 and rc.tobs > 0) {
                         // Hotter gas is a hotter blackbody (T ~ emission^(1/4)): Planck gives its
                         // new color and brightness; ratio carries this pixel's coverage/normalisation.
-                        const t0: f64 = @floatCast(@as(f32, rc.tobs));
+                        const t0: f64 = @as(f64, @floatCast(@as(f32, rc.tobs))) * 1000.0; // stored in kK
                         const hot = self.bbLookup(t0 * @sqrt(@sqrt(1.0 + @as(f64, boost))));
                         const lum0 = luma(.{ rc.rgb[0], rc.rgb[1], rc.rgb[2] });
                         spot_scale = @floatCast(lum0 / @max(luma(self.bbLookup(t0)), 1e-12));
@@ -2207,10 +2207,11 @@ pub fn turbSeed(j: u32, n: u32, k: u32) u32 {
 
 /// Colour-correction factor of an accretion-disk atmosphere at effective temperature T (Done,
 /// Davis, Jin, Blaes & Ward 2012, MNRAS 420, 1848): 1 below 3e4 K (hydrogen neutral, absorption
-/// thermalises), (T / 3e4 K)^0.83 to 1e5 K, (72 keV / kT)^(1/9) above (electron scattering).
+/// thermalises), (T / 3e4 K)^0.82 to 1e5 K (their eq. 2), (72 keV / kT)^(1/9) above (electron
+/// scattering). The published branches meet to 1.6% at 1e5 K; this disk never reaches it.
 pub fn colourFactor(T: f64) f64 {
     if (!(T > 3.0e4)) return 1.0;
-    if (T < 1.0e5) return math.pow(f64, T / 3.0e4, 0.83);
+    if (T < 1.0e5) return math.pow(f64, T / 3.0e4, 0.82);
     return math.pow(f64, 72.0 / (T * 8.617333e-8), 1.0 / 9.0);
 }
 
@@ -2546,12 +2547,12 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
 }
 
 test "colour correction and limb darkening: continuity, flux conservation, thin limit" {
-    // Done et al. 2012: f = 1 below 3e4 K and continuous at 1e5 K (the 0.83 exponent joins the
-    // Compton branch to 0.3%).
+    // Done et al. 2012: f = 1 below 3e4 K; their published branches meet to 1.6% at 1e5 K
+    // (the 0.82 exponent of their eq. 2 against the (72 keV/kT)^(1/9) Compton branch).
     const done = "Done, Davis, Jin, Blaes & Ward 2012 colour correction";
     try claim("opus_quasar.fcol.cold", "No colour correction below 3e4 K", done, "T = 2.9e4 K", "f_col", colourFactor(2.9e4), 1.0, 1.0);
-    try claim("opus_quasar.fcol.continuous", "Colour correction is continuous at 1e5 K", done, "T = 1e5 K +- 0.01%", "f(0.9999e5) / f(1.0001e5) - 1", colourFactor(0.9999e5) / colourFactor(1.0001e5) - 1.0, -5e-3, 5e-3);
-    try claim("opus_quasar.fcol.mid", "Colour correction on the (T/3e4)^0.83 branch", done, "T = 3.7e4 K", "f_col", colourFactor(3.7e4), 1.15, 1.2);
+    try claim("opus_quasar.fcol.continuous", "Colour-correction branches meet within 2% at 1e5 K (published fits: 1.6%)", done, "T = 1e5 K +- 0.01%", "f(0.9999e5) / f(1.0001e5) - 1", colourFactor(0.9999e5) / colourFactor(1.0001e5) - 1.0, -2e-2, 2e-2);
+    try claim("opus_quasar.fcol.mid", "Colour correction on the (T/3e4)^0.82 branch", done, "T = 3.7e4 K", "f_col", colourFactor(3.7e4), 1.15, 1.2);
     // Limb darkening on a thick atmosphere conserves the flux of an isotropic emitter:
     // 2 int_0^1 I(mu) mu dmu = 1; and it switches off where the gas is thin.
     var flux: f64 = 0.0;

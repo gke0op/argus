@@ -756,7 +756,7 @@ pub fn redshift(a: f64, r: f64, L: f64) f64 {
 
 pub const BB_N: usize = 1024;
 pub const BB_TMIN: f64 = 300.0;
-pub const BB_TMAX: f64 = 80_000.0;
+pub const BB_TMAX: f64 = 200_000.0; // above the hottest observed colour temperature (~105 kK: g f T on the approaching inner disk)
 
 fn lobe(l: f64, mu: f64, s1: f64, s2: f64) f64 {
     const t = (l - mu) / (if (l < mu) s1 else s2);
