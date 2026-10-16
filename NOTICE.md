@@ -24,15 +24,15 @@ The git history records who did what; this is the summary.
 
 ### Themes
 
-- `themes/Majestic_Glutton.zig`: the owner's artwork, modelled on H1821+643; written by
-  Claude Opus. `themes/Cygnus_A.zig`,
-  `themes/J0834.zig` and `themes/PG1426.zig` are generated from it by
-  `tools/gen_quasars.py`; `themes/Gargantua.zig` is the same engine with a
-  disk chosen for the look. The physics was reviewed by Argon (Google Gemini),
-  GPT (OpenAI), two Claude Opus audits that wrote their own code, and an
-  overnight panel of models including DeepSeek, Muse, Nemotron, Claude Sonnet and
-  Claude Haiku; Claude Sonnet checked the literature parameters of H1821+643.
-  See `docs/majestic-glutton.md`.
+- `tools/quasar_template.zig` (the quasar engine): written by Claude Opus.
+  `themes/Cygnus_A.zig`, `themes/J0834.zig` and `themes/PG1426.zig` are
+  generated from it by `tools/gen_quasars.py`; `themes/Gargantua.zig` is the same
+  engine with a disk chosen for the look. The physics was reviewed by Argon
+  (Google Gemini), GPT (OpenAI), two Claude Opus audits that wrote their own code,
+  and an overnight panel of models including DeepSeek, Muse, Nemotron, Claude
+  Sonnet and Claude Haiku, on a reference build with H1821+643's parameters;
+  Claude Sonnet checked those literature parameters.
+  See `docs/QUASAR_MODEL.md`.
 - `themes/Gemini_Wormhole.zig`: written by Google Gemini. Claude Opus fixed the
   accretion disk's spiral winding, which tightened into moiré rings over time.
 - `themes/Gemini_Aquarium.zig`: Claude Opus's rework of Google Gemini's

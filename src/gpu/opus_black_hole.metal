@@ -1,7 +1,7 @@
 // ============================================================================
 // ARGUS GPU // src/gpu/opus_black_hole.metal
 //
-// themes/Majestic_Glutton.zig on the GPU, at the window's native resolution:
+// The Kerr-disk themes (tools/quasar_template.zig) on the GPU, at the window's native resolution:
 //
 //   bh_meter      once  exposure: inner-disk luminance on a 192-wide grid
 //   bh_trace      once  Kerr null geodesics, 2x2 samples per pixel, in row tiles:
