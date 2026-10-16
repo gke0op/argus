@@ -83,6 +83,10 @@ release: app
 	tar -c $$(git ls-files themes) | tar -x -C $(STAGE)
 	cp LICENSE NOTICE.md $(STAGE)/
 	cp docs/INSTALL.md $(STAGE)/INSTALL.md
+	@# The theme-authoring skills: .claude/skills/ so Claude Code finds them in the unzipped folder,
+	@# plus a visible WRITING_THEMES.md that points people and other agents to them.
+	mkdir -p $(STAGE)/.claude && tar -c $$(git ls-files .claude/skills) | tar -x -C $(STAGE)
+	cp docs/WRITING_THEMES.md $(STAGE)/WRITING_THEMES.md
 	for t in $$(git ls-files 'themes/*.zig'); do \
 		[ "$$(basename $$t)" = argus_theme_sdk.zig ] && continue; \
 		./argus-desktop --precompile $(STAGE)/$$t $(STAGE)/Argus.app/Contents/Resources/prebuilt || exit 1; \
