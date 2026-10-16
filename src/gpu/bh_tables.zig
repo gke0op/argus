@@ -85,7 +85,8 @@ pub const TraceParams = extern struct {
     row0: u32, // first row of this tile
     grid_w: u32, // exposure meter grid
     grid_h: u32,
-    _pad: [2]u32 = .{ 0, 0 }, // Metal rounds the struct to 16 bytes (float4 members)
+    spot_rmax: f32, // hot spots orbit inside this radius: gas there is never baked static
+    _pad: u32 = 0, // Metal rounds the struct to 16 bytes (float4 members)
 };
 
 /// Per-frame view state the presenter adds to the theme's Frame (mirrors `struct View`).
@@ -172,6 +173,7 @@ pub fn fillTrace(st: anytype, w: u32, h: u32, out: *TraceParams) void {
         .row0 = 0,
         .grid_w = METER_W,
         .grid_h = @max(1, METER_W * h / @max(w, 1)),
+        .spot_rmax = @floatCast(st.spot_rmax),
     };
     comptime std.debug.assert(@sizeOf(TraceParams) == 112);
 }

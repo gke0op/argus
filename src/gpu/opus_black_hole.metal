@@ -51,7 +51,6 @@ constant uint MAX_STEPS = 40000;
 constant float TAU_BEHIND = 40.0f;
 constant float TAU_MIN = 0.01f;
 constant float EMIT_FLOOR = 3e-4f;
-constant float SPOT_RMAX = 12.0f;
 constant float EXPO_R = 24.0f;
 constant float STAR_GAIN = 0.8f;
 constant float STAR_CELL = 8.0e-3f;
@@ -128,7 +127,9 @@ struct TraceParams {
     float4 gal_n;
     float4 gal_c;
     float a, sin_i, cos_i, incl, rh, r_in, r_out, lnr_in, lnr_span, lnt_span, mpp, pix_ang, exposure;
-    uint width, height, row0, grid_w, grid_h, pad0, pad1;
+    uint width, height, row0, grid_w, grid_h;
+    float spot_rmax; // hot spots orbit inside this: gas there is never baked static (the theme's)
+    uint pad1;
 };
 
 // Mirrors bh_tables.View.
@@ -573,7 +574,7 @@ static void addSample(thread Px& px, constant TraceParams& P, constant Static& s
         const float lmu = lnInvMu(P, alpha, h0);
         const float tau = tauExt(P, ttab, h0.r) * exp(lmu);
         const Sample smp = shadeDisk(P, st, ttab, alpha, h0.r, h0.ph, h0.t);
-        if (h0.r > SPOT_RMAX) {
+        if (h0.r > P.spot_rmax) {
             // Visible brightening by turbulence at +2.6 sigma (large on the Wien side of cool gas).
             const float y0 = luma(smp.rgb);
             const float peak_t = exp(2.6f * st.turb_sigma / 4.0f); // T at +2.6 sigma of the dissipation
