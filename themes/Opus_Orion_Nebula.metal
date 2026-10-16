@@ -137,6 +137,8 @@ constant float FLOW_CDF[64] = {   // share of a flow line's emission below h = 3
     0.000000f, 0.249360f, 0.405022f, 0.516257f, 0.599780f, 0.664430f, 0.715574f, 0.756722f, 0.790287f, 0.817987f, 0.841075f, 0.860489f, 0.876940f, 0.890979f, 0.903035f, 0.913449f, 0.922491f, 0.930381f, 0.937296f, 0.943383f, 0.948762f, 0.953533f, 0.957778f, 0.961569f, 0.964964f, 0.968013f, 0.970759f, 0.973238f, 0.975482f, 0.977519f, 0.979370f, 0.981057f, 0.982598f, 0.984007f, 0.985299f, 0.986485f, 0.987575f, 0.988580f, 0.989508f, 0.990364f, 0.991157f, 0.991892f, 0.992574f, 0.993208f, 0.993797f, 0.994346f, 0.994859f, 0.995337f, 0.995784f, 0.996202f, 0.996594f, 0.996961f, 0.997305f, 0.997629f, 0.997934f, 0.998220f, 0.998490f, 0.998744f, 0.998984f, 0.999211f, 0.999425f, 0.999627f, 0.999819f, 1.000000f};
 constant float FLOW_PDF[64] = {   // d CDF / d(h/R0)
     8.265542f, 3.943970f, 2.721009f, 2.005095f, 1.532569f, 1.201009f, 0.959061f, 0.777476f, 0.638207f, 0.529513f, 0.443434f, 0.374411f, 0.318460f, 0.272671f, 0.234874f, 0.203435f, 0.177098f, 0.154895f, 0.136066f, 0.120010f, 0.106250f, 0.094402f, 0.084155f, 0.075256f, 0.067498f, 0.060709f, 0.054748f, 0.049497f, 0.044857f, 0.040744f, 0.037089f, 0.033832f, 0.030922f, 0.028316f, 0.025976f, 0.023872f, 0.021974f, 0.020260f, 0.018709f, 0.017301f, 0.016023f, 0.014859f, 0.013798f, 0.012830f, 0.011944f, 0.011132f, 0.010388f, 0.009704f, 0.009075f, 0.008496f, 0.007962f, 0.007468f, 0.007012f, 0.006590f, 0.006199f, 0.005836f, 0.005499f, 0.005186f, 0.004895f, 0.004623f, 0.004370f, 0.004134f, 0.003913f, 0.003707f};
+constant float FLOW_TAIL[64] = {  // E[h/R0 | above h/R0 = 3 i / 63]
+    0.262468f, 0.342582f, 0.413907f, 0.481987f, 0.548015f, 0.612496f, 0.675698f, 0.737774f, 0.798821f, 0.858903f, 0.918064f, 0.976332f, 1.033732f, 1.090277f, 1.145982f, 1.200854f, 1.254904f, 1.308137f, 1.360559f, 1.412177f, 1.462996f, 1.513022f, 1.562260f, 1.610717f, 1.658398f, 1.705309f, 1.751458f, 1.796851f, 1.841495f, 1.885398f, 1.928567f, 1.971010f, 2.012736f, 2.053752f, 2.094068f, 2.133691f, 2.172632f, 2.210898f, 2.248500f, 2.285446f, 2.321745f, 2.357408f, 2.392443f, 2.426861f, 2.460670f, 2.493880f, 2.526502f, 2.558543f, 2.590015f, 2.620926f, 2.651286f, 2.681104f, 2.710390f, 2.739154f, 2.767403f, 2.795147f, 2.822396f, 2.849158f, 2.875443f, 2.901258f, 2.926613f, 2.951516f, 2.975976f, 3.000000f};
 struct Line { float3 xyz; float ratio; float k; };  // CIE XYZ per unit energy, ratio to the mapped line, A/A_Hb
 constant Line L_BALMER[4] = {
     {float3(0.20082f, 0.07973f, 0.00000f), 1.00000f, 0.7800f},   // 656.282 nm
@@ -662,7 +664,7 @@ kernel void argus_init(constant ArgusFrame& f [[buffer(0)]],
     if (gid.x >= f.state_width || gid.y >= f.state_height) return;
     const uint blk = gid.y / DATA_H, jn = gid.y - blk * DATA_H;   // jn: 0 = north
     if (blk == 3u && jn == 0u) {   // the flow profile row, sampled with hardware interpolation
-        state.write(gid.x < 64u ? float4(FLOW_CDF[gid.x], FLOW_PDF[gid.x], 0.0f, 0.0f) : float4(0.0f), gid);
+        state.write(gid.x < 64u ? float4(FLOW_CDF[gid.x], FLOW_PDF[gid.x], FLOW_TAIL[gid.x], 0.0f) : float4(0.0f), gid);
         return;
     }
     if (blk > 2u || gid.x >= DATA_W) { state.write(float4(0.0f), gid); return; }
@@ -713,11 +715,12 @@ static float2 st_uv(float2 xy, uint blk) {
     return float2((col + 0.5f) / float(DATA_W), (jn + 0.5f + float(blk * DATA_H)) / float(3u * DATA_H + 1u));
 }
 
-// The flow's emission profile, u = h / R0 over 0..3: CDF in .x, PDF in .y (state's last row).
-static float2 flow_prof(texture2d<float> st, sampler smp, float u) {
+// The flow's emission profile, u = h / R0 over 0..3 (state's last row): CDF in .x, PDF in .y,
+// and in .z the mean height of the emission above u.
+static float3 flow_prof(texture2d<float> st, sampler smp, float u) {
     const float x = (clamp(u, 0.0f, 3.0f) * (63.0f / 3.0f) + 0.5f) / float(DATA_W);
-    const float2 p = st.sample(smp, float2(x, (float(3u * DATA_H) + 0.5f) / float(3u * DATA_H + 1u))).xy;
-    return float2(p.x, u > 3.0f ? 0.0f : p.y);
+    const float3 p = st.sample(smp, float2(x, (float(3u * DATA_H) + 0.5f) / float(3u * DATA_H + 1u))).xyz;
+    return float3(p.x, u > 3.0f ? 0.0f : p.y, p.z);
 }
 
 // Colour of one mapped line group after the Veil and the ISM: sum over its lines of
@@ -795,7 +798,7 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
         if (s.z < zf) continue;
         const float3 xyz = STAR_XYZ[i].xyz;
         const float peak = xyz.y / px_sr;              // radiance if all its light fell in one pixel
-        const float rad = clamp(1.5f + 2.0f * log2(max(peak * EXPOSURE / STRETCH, 1.0f)), 2.0f, 40.0f);
+        const float rad = clamp(1.5f + 2.0f * log2(max(peak * EXPOSURE / STRETCH, 1.0f)), 2.0f, 56.0f);
         if (pp.x + rad < tlo.x || pp.x - rad > thi.x || pp.y + rad < tlo.y || pp.y - rad > thi.y) continue;
         const uint slot = atomic_fetch_add_explicit(&nS, 1u, memory_order_relaxed);
         if (slot >= SCAP) continue;
@@ -843,8 +846,9 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
 
     // 2) the flow, from the front back toward the camera: steps grow geometrically away from
     //    the front; each segment is integrated exactly for its own front height (CDF). What
-    //    lies beyond the last step is added at the last step's brightness, so a ray from
-    //    Earth always gets exactly the measured line brightness.
+    //    lies beyond the last step is added once, sampled where that remainder's light comes
+    //    from on average (its mean height), so a ray from Earth still gets exactly the
+    //    measured line brightness and a slanted ray sees the high gas where it is.
     float I_ha = 0.0f, I_o3 = 0.0f;
     {
         float t0 = t_hit;
@@ -859,7 +863,7 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
             const float v1 = max((o.z + t1 * dz - s1.z) / max(s1.w, 1e-4f), 0.0f);
             const float dl = abs(t0 - t1);
             const float dv = v1 - v0;
-            const float2 p1 = flow_prof(st, smp, v1);
+            const float3 p1 = flow_prof(st, smp, v1);
             const float avg = abs(dv) > 1e-3f ? (p1.x - P0) / dv : flow_prof(st, smp, 0.5f * (v0 + v1)).y;
             const float w = avg * dl / Rv;
             I_ha += w * 0.5f * (s0.x + s1.x);
@@ -868,8 +872,11 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
             if (v1 >= 3.0f) break;
         }
         const float tail = 1.0f - P0;
-        I_ha += tail * s0.x;
-        I_o3 += tail * s0.y;
+        const float v_tail = flow_prof(st, smp, v0).z;
+        const float t_tail = t0 - (v_tail - v0) * max(s0.w, 1e-4f) / max(-dz, 0.3f);
+        const float4 st_tail = st.sample(smp, st_uv(o.xy + t_tail * d.xy, 0u));
+        I_ha += tail * st_tail.x;
+        I_o3 += tail * st_tail.y;
     }
 
     // 3) the front sheet ([N II], [S II], [O I]) seen at its angle

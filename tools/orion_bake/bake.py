@@ -628,6 +628,11 @@ def main():
     W("    " + ", ".join(f"{v:.6f}f" for v in np.interp(uu, u, cdf)) + "};")
     W(f"constant float FLOW_PDF[{NT}] = {{   // d CDF / d(h/R0)")
     W("    " + ", ".join(f"{v:.6f}f" for v in np.interp(uu, u, pdf)) + "};")
+    # mean height of the emission above each height (where a ray's remaining "tail" comes from)
+    upm = np.concatenate([[0], np.cumsum(0.5 * (u[1:] * pdf[1:] + u[:-1] * pdf[:-1]) * np.diff(u))])   # int_0^u u' p du'
+    tail_mean = np.where(1 - cdf > 1e-6, (upm[-1] - upm) / np.maximum(1 - cdf, 1e-12), u)
+    W(f"constant float FLOW_TAIL[{NT}] = {{  // E[h/R0 | above h/R0 = 3 i / {NT - 1}]")
+    W("    " + ", ".join(f"{v:.6f}f" for v in np.interp(uu, u, np.minimum(tail_mean, 3.0))) + "};")
     W("struct Line { float3 xyz; float ratio; float k; };  // CIE XYZ per unit energy, ratio to the mapped line, A/A_Hb")
     for gname, ls in grp_xyz.items():
         W(f"constant Line L_{gname.upper()}[{len(ls)}] = {{")
