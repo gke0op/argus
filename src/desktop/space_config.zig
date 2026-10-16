@@ -165,7 +165,7 @@ pub var gpu_ports = true;
 
 /// Set by the app: compiles a `.metal` theme source and reports whether it is loadable, so a
 /// broken edit never replaces a working theme. Null (tests, harness) accepts any source.
-pub var metal_validate: ?*const fn (src: []const u8, label: []const u8) bool = null;
+pub var metal_validate: ?*const fn (src: []const u8, path: []const u8) bool = null;
 // Themes built on the Kerr-disk engine (src/gpu/bh_*), drawn by its GPU path.
 const GPU_PORT_THEMES = [_][]const u8{ "Opus_Quasar.zig", "Opus_Gargantua.zig" };
 
@@ -282,7 +282,7 @@ pub const SpaceConfig = struct {
         const src = std.Io.Dir.cwd().readFile(g_io, path, &buf) catch return false;
         if (std.mem.indexOf(u8, src, "argus_draw") == null) return false;
         if (metal_validate) |validate| {
-            if (!validate(src, std.Io.Dir.path.basename(path))) return false;
+            if (!validate(src, path)) return false;
         }
         if (std.Io.Dir.cwd().statFile(g_io, path, .{})) |st| {
             self.last_mtime = st.mtime.nanoseconds;

@@ -123,8 +123,13 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
     const label = std.Io.Dir.path.basename(path);
     const frames = @max(n_frames, 2);
     var err_buf: [4096]u8 = undefined;
+    const data = metal_theme.loadData(io, alloc, path, src) catch |e| {
+        std.debug.print("METAL DATA FILE FAILED: {s}: {s}\nVerdict           : FAIL\n", .{ path, @errorName(e) });
+        std.process.exit(1);
+    };
+    defer if (data) |d| alloc.free(d);
 
-    var theme = metal_theme.Theme.compile(src, label, @intCast(width), @intCast(height), 0x5EED, &err_buf) catch {
+    var theme = metal_theme.Theme.compile(src, label, data, @intCast(width), @intCast(height), 0x5EED, &err_buf) catch {
         std.debug.print("METAL COMPILE FAILED: {s}\n{s}\nVerdict           : FAIL\n", .{ path, std.mem.sliceTo(&err_buf, 0) });
         std.process.exit(1);
     };
@@ -132,7 +137,7 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
 
     // Watchdog: a small 320x200 instance must run too (no size assumptions in the kernels).
     var wd_ok = false;
-    if (metal_theme.Theme.compile(src, label, 320, 200, 1, &err_buf)) |wd_theme| {
+    if (metal_theme.Theme.compile(src, label, data, 320, 200, 1, &err_buf)) |wd_theme| {
         var wd = wd_theme;
         defer wd.deinit();
         const wd_out = mtl.newTexture(wd.dev, mtl.PIXEL_RGBA32F, 320, 200, mtl.STORAGE_SHARED);

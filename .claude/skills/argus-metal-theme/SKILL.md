@@ -82,6 +82,13 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
 - In `argus_draw`, sample the state with a linear sampler to upscale smoothly: `constexpr sampler s(filter::linear, address::repeat); state.sample(s, argus_uv01(gid, f.width, f.height))`.
 - Wrap-around grids (torus) avoid edge artefacts. Anything that varies with position must then be periodic too (use `sin/cos(2π·uv)`), or you get a seam.
 - A lower-resolution state (e.g. half the screen) is cheaper and usually looks better upscaled.
+- **Shipping data.** A theme can't read files, and its source is capped at 128 KB. For measured
+  data (maps, tables), put a raw texel file next to the theme and declare it:
+  `// @argus data Name.bin 512x512 rgba8` (or `rgba16f`): W x H texels, row-major, no header,
+  a plain file name in the theme's folder. `argus_init` then gets it as a third argument,
+  `texture2d<float, access::read> data [[texture(1)]]`, to decode or bake into the state; it is
+  not bound for step or draw. A missing or wrong-sized file fails the load (and the harness).
+  Example: `themes/Opus_Orion_Nebula.metal` (built by `tools/orion_bake/bake.py`).
 
 ## 4. Workflow
 

@@ -37,4 +37,31 @@ Themes added for this release:
   bioluminescent surf on a moonless night; the flash behaviour follows the
   published dinoflagellate research cited in its header.
 
-The repository contains no third-party source code or data.
+- `themes/Opus_Orion_Nebula.metal` and its data file `themes/Opus_Orion_Nebula.bin`:
+  written by Claude Opus. The baking tool is `tools/orion_bake/bake.py`; the theme's
+  header separates what is measured, fitted and assumed.
+
+## Third-party data
+
+The repository contains no third-party source code. `themes/Opus_Orion_Nebula.bin`
+and the baked constants in `themes/Opus_Orion_Nebula.metal` are derived from:
+
+- **VLT/MUSE maps of the Orion Nebula**: Weilbacher, P. M. et al. 2015, A&A 582, A114,
+  "A MUSE map of the central Orion Nebula (M 42)"; data published by the Leibniz-Institut
+  für Astrophysik Potsdam (AIP), doi:10.17876/data/2023_3, under Creative Commons CC0 1.0
+  ("Creative Commons CC0 for data"). Based on observations made with ESO telescopes at the
+  La Silla Paranal Observatory under programme ID 60.A-9100(A). We downsampled the
+  reddening-corrected line maps (Hβ → Hα, [O III], [N II], [S II], [O I]) and the extinction
+  map, masked bright stars, and encoded them as 8-bit logarithms. The density and velocity
+  maps were used for fitting only.
+- **3D dust map**: Edenhofer, G. et al. 2024, A&A 685, A82, "A parsec-scale Galactic 3D dust
+  map out to 1.25 kpc from the Sun", data doi:10.5281/zenodo.8187943, licensed under
+  CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Changes: we read the posterior
+  mean and standard deviation along the 64 HEALPix sightlines around M42 and kept only the
+  integrated extinction in front of the Orion complex (one number, `C_FG`), which is
+  subtracted from the MUSE extinction map before encoding.
+- **Star positions and magnitudes** of 12 bright stars: the SIMBAD database, operated at
+  CDS, Strasbourg, France (Wenger et al. 2000, A&AS 143, 9).
+
+Physical constants and published parameters (line ratios, recombination coefficients,
+extinction law, stellar temperatures, cluster structure) are cited where they are used.

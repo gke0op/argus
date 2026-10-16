@@ -659,8 +659,10 @@ const MacBridge = struct {
         if (self.mt[idx] == null) {
             var buf: [131072]u8 = undefined;
             const src = std.Io.Dir.cwd().readFile(g_io, sp.getPath(), &buf) catch return false;
+            const data = metal_theme.loadData(g_io, std.heap.page_allocator, sp.getPath(), src) catch return false;
+            defer if (data) |d| std.heap.page_allocator.free(d);
             const seed: u32 = @truncate(std.hash.Wyhash.hash(sp.space_id, sp.getPath()));
-            self.mt[idx] = gpu.ThemePresenter.create(src, sp.getLabel(), sp.dylib_gen, seed, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H) orelse return false;
+            self.mt[idx] = gpu.ThemePresenter.create(src, data, sp.getLabel(), sp.dylib_gen, seed, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H) orelse return false;
             self.mt_last_tick[idx] = self.frame_idx;
             self.snap_tick[idx] = 0;
         }
@@ -1739,9 +1741,15 @@ fn onPopoverMouseUp(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c)
 const NEIGHBOR_WARM_TICKS: usize = 3;
 
 /// Compiles a `.metal` theme to check it before it replaces a Space's current theme.
-fn validateMetalTheme(src: []const u8, label: []const u8) bool {
+fn validateMetalTheme(src: []const u8, path: []const u8) bool {
+    const label = std.Io.Dir.path.basename(path);
     var err_buf: [2048]u8 = undefined;
-    var t = metal_theme.Theme.compile(src, label, @intCast(NATIVE_W), @intCast(NATIVE_H), 0, &err_buf) catch {
+    const data = metal_theme.loadData(g_io, std.heap.page_allocator, path, src) catch |e| {
+        std.debug.print("argus: {s} not loaded: data file: {s}\n", .{ label, @errorName(e) });
+        return false;
+    };
+    defer if (data) |d| std.heap.page_allocator.free(d);
+    var t = metal_theme.Theme.compile(src, label, data, @intCast(NATIVE_W), @intCast(NATIVE_H), 0, &err_buf) catch {
         std.debug.print("argus: {s} not loaded: {s}\n", .{ label, std.mem.sliceTo(&err_buf, 0) });
         return false;
     };
@@ -2638,7 +2646,7 @@ test "Metal-only themes load into a Space and render on the GPU" {
         var buf: [131072]u8 = undefined;
         const src = try std.Io.Dir.cwd().readFile(g_io, path, &buf);
         var err_buf: [2048]u8 = undefined;
-        var t = metal_theme.Theme.compile(src, path, 64, 40, 1, &err_buf) catch |e| {
+        var t = metal_theme.Theme.compile(src, path, null, 64, 40, 1, &err_buf) catch |e| {
             std.debug.print("{s}: {s}\n", .{ path, std.mem.sliceTo(&err_buf, 0) });
             return e;
         };
