@@ -169,6 +169,9 @@ const MacBridge = struct {
     NSURL: ?*anyopaque,
     desktop_level: isize,
     normal_window: bool,
+    /// `--offscreen`: screen-sized windows far off-screen, no menu-bar item. For measuring the
+    /// engine (memory, GPU) next to a running Argus without touching the live wallpaper.
+    offscreen: bool = false,
     native_data_providers: [MAX_SPACES]?*anyopaque = @splat(null),
     popover_win: ?*anyopaque,
     popover_layer: ?*anyopaque,
@@ -222,6 +225,8 @@ const MacBridge = struct {
     mt_last_tick: [MAX_SPACES]usize = @splat(0),
     // GPU Spaces have no CPU frame; they publish a snapshot as sp.cg_image for the menu previews.
     snap_tick: [MAX_SPACES]usize = @splat(0), // frame_idx + 1 of the last snapshot, 0 = none yet
+    // frame_idx of each GPU Space's last frame; hidden ones are parked after GPU_PARK_TICKS.
+    gpu_drawn_tick: [MAX_SPACES]usize = @splat(0),
     perf_renders: [MAX_SPACES]u16 = @splat(0),
     perf_visible: u16 = 0,
     screen_rect: CGRect,
@@ -251,11 +256,13 @@ const MacBridge = struct {
     pub fn ensureSpaceWindow(self: *MacBridge, idx: usize) void {
         var sp = &self.obs.spaces[idx];
         if (sp.desktop_win == null) {
-            const win_rect = if (self.normal_window)
+            const win_rect = if (self.offscreen)
+                CGRect{ .origin = .{ .x = -30000.0, .y = -30000.0 }, .size = self.screen_rect.size }
+            else if (self.normal_window)
                 CGRect{ .origin = .{ .x = 120.0, .y = 120.0 }, .size = .{ .width = 960.0, .height = 600.0 } }
             else
                 self.screen_rect;
-            const style_mask: usize = if (self.normal_window) (1 | 2 | 4 | 8) else 0;
+            const style_mask: usize = if (self.normal_window and !self.offscreen) (1 | 2 | 4 | 8) else 0;
             const win = self.msgInitWin(
                 self.msg0(self.NSWindow, self.sel_registerName("alloc")),
                 self.sel_registerName("initWithContentRect:styleMask:backing:defer:"),
@@ -581,13 +588,15 @@ const MacBridge = struct {
             }
         }
 
-        if (sp.mode != .custom_shader or !sp.metal_theme) self.dropMetalTheme(idx);
-        if (sp.mode != .custom_shader or sp.metal_theme) self.dropGpu(idx);
+        // GPU presenters hand the Space's layer to each other (see renderSpaceMetal/Gpu); it is
+        // only retired when the Space stops being GPU-drawn.
         if (sp.mode == .custom_shader and sp.metal_theme) {
             _ = self.renderSpaceMetal(idx);
             return;
         }
         if (sp.mode == .custom_shader and self.gpu_enabled and self.renderSpaceGpu(idx)) return;
+        self.dropMetalTheme(idx);
+        self.dropGpu(idx);
 
         // A picture Space whose image failed to load shows the window's black background.
         if (sp.mode != .custom_shader) {
@@ -634,17 +643,65 @@ const MacBridge = struct {
         return last == 0 or (self.popover_visible and self.frame_idx + 1 >= last + 15);
     }
 
-    /// Wraps the snapshot now in the Space's own pixel buffer as its preview image.
+    /// A GPU Space's preview: full canvas size while Mission Control stills use it (they write
+    /// it to disk as the Space's picture), otherwise a small image just for the menu.
+    fn previewTarget(self: *MacBridge, idx: usize) struct { px: []u32, w: usize, h: usize } {
+        if (g_pictures.enabled) return .{ .px = &self.obs.space_native_pixels[idx], .w = NATIVE_W, .h = NATIVE_H };
+        return .{ .px = &self.obs.preview_pixels[idx], .w = obs_mod.PREVIEW_W, .h = obs_mod.PREVIEW_H };
+    }
+
+    /// Wraps the snapshot now in the Space's preview buffer as its preview image.
     fn publishSnapshot(self: *MacBridge, idx: usize) void {
         self.snap_tick[idx] = self.frame_idx + 1;
-        const img = self.CGImageCreate(NATIVE_W, NATIVE_H, 8, 32, NATIVE_W * 4, self.color_space, 5 | (4 << 12), self.native_data_providers[idx], null, false, 0) orelse return;
+        const t = self.previewTarget(idx);
+        const img = if (t.w == NATIVE_W)
+            self.CGImageCreate(NATIVE_W, NATIVE_H, 8, 32, NATIVE_W * 4, self.color_space, 5 | (4 << 12), self.native_data_providers[idx], null, false, 0)
+        else blk: {
+            const prov = self.CGDataProviderCreateWithData(null, @ptrCast(t.px.ptr), t.w * t.h * 4, null) orelse return;
+            defer self.CFRelease(prov);
+            break :blk self.CGImageCreate(t.w, t.h, 8, 32, t.w * 4, self.color_space, 5 | (4 << 12), prov, null, false, 0);
+        };
         const sp = &self.obs.spaces[idx];
         if (sp.cg_image) |old| self.CGImageRelease(old);
-        sp.cg_image = img;
+        sp.cg_image = img orelse return;
+    }
+
+    /// Once a tick: finished traces drop their temporary buffers, unused traced images are
+    /// freed after a while, and GPU Spaces that haven't drawn for GPU_PARK_TICKS give back
+    /// their spare drawables (the one on screen stays, so the window is unchanged).
+    fn tickGpu(self: *MacBridge) void {
+        gpu.pollEngines();
+        gpu.reapEngines(self.frame_idx, false);
+        gpu.reapLayers(self.frame_idx);
+        for (0..self.obs.n_spaces) |idx| {
+            if (self.frame_idx -| self.gpu_drawn_tick[idx] < GPU_PARK_TICKS) continue;
+            if (self.gpu[idx]) |*p| p.park();
+            if (self.mt[idx]) |*p| p.park();
+        }
+    }
+
+    /// Hands over the Space's hybrid layer when a Metal-only theme replaces it (or null).
+    fn takeGpuLayer(self: *MacBridge, idx: usize) ?*anyopaque {
+        if (self.gpu[idx]) |*p| {
+            const l = p.release(self.frame_idx);
+            self.gpu[idx] = null;
+            return l;
+        }
+        return null;
+    }
+
+    /// Hands over the Space's Metal-only layer when a hybrid theme replaces it (or null).
+    fn takeMetalLayer(self: *MacBridge, idx: usize) ?*anyopaque {
+        if (self.mt[idx]) |*p| {
+            const l = p.release();
+            self.mt[idx] = null;
+            return l;
+        }
+        return null;
     }
 
     fn dropMetalTheme(self: *MacBridge, idx: usize) void {
-        if (self.mt[idx]) |*p| p.destroy();
+        if (self.mt[idx]) |*p| p.destroy(self.frame_idx);
         self.mt[idx] = null;
     }
 
@@ -652,17 +709,24 @@ const MacBridge = struct {
     /// since the Space's last frame, so warm (10 FPS) neighbors animate at the right speed.
     fn renderSpaceMetal(self: *MacBridge, idx: usize) bool {
         const sp = &self.obs.spaces[idx];
+        // The Space's layer outlives theme changes: a new theme draws into the same layer.
+        var keep: ?*anyopaque = null;
         if (self.mt[idx]) |*p| {
-            const host = self.msg0(p.layer, self.sel_registerName("superlayer"));
-            if (p.gen != sp.dylib_gen or host != sp.desktop_layer) self.dropMetalTheme(idx);
+            if (p.gen != sp.dylib_gen) {
+                keep = p.release();
+                self.mt[idx] = null;
+            } else _ = p.rehost(sp.desktop_layer);
         }
+        if (keep == null) keep = self.takeGpuLayer(idx);
+        defer if (keep) |k| gpu.retire(k, self.frame_idx);
         if (self.mt[idx] == null) {
             var buf: [131072]u8 = undefined;
             const src = std.Io.Dir.cwd().readFile(g_io, sp.getPath(), &buf) catch return false;
             const data = metal_theme.loadData(g_io, std.heap.page_allocator, sp.getPath(), src) catch return false;
             defer if (data) |d| std.heap.page_allocator.free(d);
             const seed: u32 = @truncate(std.hash.Wyhash.hash(sp.space_id, sp.getPath()));
-            self.mt[idx] = gpu.ThemePresenter.create(src, data, sp.getLabel(), sp.dylib_gen, seed, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H) orelse return false;
+            self.mt[idx] = gpu.ThemePresenter.create(src, data, sp.getLabel(), sp.dylib_gen, seed, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H, keep) orelse return false;
+            keep = null;
             self.mt_last_tick[idx] = self.frame_idx;
             self.snap_tick[idx] = 0;
         }
@@ -671,12 +735,16 @@ const MacBridge = struct {
         const dt = std.math.clamp(@as(f32, @floatFromInt(ticks)) / 30.0, 1.0 / 30.0, 0.5) * @as(f32, @floatCast(self.obs.spin_mult));
         const p = &self.mt[idx].?;
         if (!p.render(dt)) return false;
-        if (self.snapshotDue(idx) and p.snapshot(&self.obs.space_native_pixels[idx])) self.publishSnapshot(idx);
+        self.gpu_drawn_tick[idx] = self.frame_idx;
+        if (self.snapshotDue(idx)) {
+            const t = self.previewTarget(idx);
+            if (p.snapshot(t.px, t.w, t.h)) self.publishSnapshot(idx);
+        }
         return true;
     }
 
     fn dropGpu(self: *MacBridge, idx: usize) void {
-        if (self.gpu[idx]) |*p| p.destroy();
+        if (self.gpu[idx]) |*p| p.destroy(self.frame_idx);
         self.gpu[idx] = null;
     }
 
@@ -684,20 +752,32 @@ const MacBridge = struct {
     /// False when the theme has no GPU port (the caller falls back to the CPU path).
     fn renderSpaceGpu(self: *MacBridge, idx: usize) bool {
         const sp = &self.obs.spaces[idx];
+        // The Space's layer outlives theme changes: a new theme draws into the same layer.
+        var keep: ?*anyopaque = null;
         if (self.gpu[idx]) |*p| {
-            const host = self.msg0(p.layer, self.sel_registerName("superlayer"));
-            if (p.handle != sp.dylib_handle or host != sp.desktop_layer) self.dropGpu(idx);
+            if (p.handle != sp.dylib_handle) {
+                keep = p.release(self.frame_idx);
+                self.gpu[idx] = null;
+            } else _ = p.rehost(sp.desktop_layer);
         }
+        if (keep == null and self.gpu[idx] == null) keep = self.takeMetalLayer(idx);
+        defer if (keep) |k| gpu.retire(k, self.frame_idx);
         if (self.gpu[idx] == null) {
             if (self.gpu_tried[idx] == sp.dylib_handle) return false; // not a GPU build: don't retry every frame
             self.gpu_tried[idx] = sp.dylib_handle;
-            self.gpu[idx] = gpu.Presenter.create(sp.dylib_handle, sp.theme_state, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H) orelse return false;
+            const key = sc.themeSourceHash(sp.getPath(), true);
+            self.gpu[idx] = gpu.Presenter.create(sp.dylib_handle, sp.theme_state, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H, key, self.frame_idx, keep) orelse return false;
+            keep = null;
             self.snap_tick[idx] = 0;
         }
         self.obs.stepSpace(idx);
         const p = &self.gpu[idx].?;
         if (!p.render()) return false;
-        if (self.snapshotDue(idx) and p.snapshot(&self.obs.space_native_pixels[idx])) self.publishSnapshot(idx);
+        self.gpu_drawn_tick[idx] = self.frame_idx;
+        if (self.snapshotDue(idx)) {
+            const t = self.previewTarget(idx);
+            if (p.snapshot(t.px, t.w, t.h)) self.publishSnapshot(idx);
+        }
         return true;
     }
 
@@ -1759,6 +1839,8 @@ fn onPopoverMouseUp(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c)
 
 /// Off-screen neighbors re-render every 3rd 30 Hz tick (~10 FPS).
 const NEIGHBOR_WARM_TICKS: usize = 3;
+/// A GPU Space not drawn for this long (2 s) parks its layer (frees its spare drawables).
+const GPU_PARK_TICKS: usize = 60;
 
 /// Compiles a `.metal` theme to check it before it replaces a Space's current theme.
 fn validateMetalTheme(src: []const u8, path: []const u8) bool {
@@ -1826,6 +1908,7 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     // at ~10 FPS so a swipe never reveals a stale frame, and jump to 30 FPS the moment their window
     // turns visible mid-swipe. Nothing renders while a fullscreen app's Space is active (it is not one
     // of ours, so active_space_id no longer matches the active slot), or while the screen is locked.
+    b.tickGpu();
     const active_idx = b.obs.active_space_idx;
     const active_is_ours = active_idx < b.obs.n_spaces and
         b.obs.spaces[active_idx].space_id == b.obs.active_space_id;
@@ -1982,6 +2065,7 @@ pub fn main(init: std.process.Init) !void {
 
     var headless_test = false;
     var normal_window = false;
+    var offscreen = false;
     var max_frames: usize = 0;
     var perf_log = false;
     var snapshot_dir: ?[]const u8 = null;
@@ -2018,6 +2102,9 @@ pub fn main(init: std.process.Init) !void {
             gpu.hdr_enabled = false; // GPU themes stay in standard range even on HDR displays
         } else if (std.mem.eql(u8, a, "--window")) {
             normal_window = true;
+        } else if (std.mem.eql(u8, a, "--offscreen")) {
+            normal_window = true;
+            offscreen = true;
         } else if (std.mem.eql(u8, a, "--frames") and i + 1 < args.len) {
             i += 1;
             max_frames = try std.fmt.parseInt(usize, args[i], 10);
@@ -2209,7 +2296,7 @@ pub fn main(init: std.process.Init) !void {
     // 2. Initialize NSApplication as Menu-Bar Accessory
     const NSApplication = objc_getClass("NSApplication") orelse return error.NoNSApp;
     const ns_app = msg0(NSApplication, sel_registerName("sharedApplication"));
-    msgInt(ns_app, sel_registerName("setActivationPolicy:"), if (normal_window) 0 else 1);
+    msgInt(ns_app, sel_registerName("setActivationPolicy:"), if (offscreen) 2 else if (normal_window) 0 else 1);
     msgVoid(ns_app, sel_registerName("finishLaunching"));
 
     // 3. Display Geometry & Classes for Per-Space NSWindows
@@ -2278,6 +2365,7 @@ pub fn main(init: std.process.Init) !void {
     const NSStatusBar = objc_getClass("NSStatusBar") orelse return error.NoStatusBar;
     const sys_bar = msg0(NSStatusBar, sel_registerName("systemStatusBar"));
     const status_item = msgStatusItem(sys_bar, sel_registerName("statusItemWithLength:"), -1.0);
+    if (offscreen) msgBool(status_item, sel_registerName("setVisible:"), false);
     _ = msg0(status_item, sel_registerName("retain"));
     const status_button = msg0(status_item, sel_registerName("button"));
     // The glyph image is the whole status item: no title text.
@@ -2394,6 +2482,7 @@ pub fn main(init: std.process.Init) !void {
         .NSURL = NSURL,
         .desktop_level = desktop_level,
         .normal_window = normal_window,
+        .offscreen = offscreen,
         .native_data_providers = native_data_providers,
         .popover_win = popover_win,
         .popover_layer = popover_layer,
@@ -2411,6 +2500,7 @@ pub fn main(init: std.process.Init) !void {
         .sel_occlusion_state = sel_registerName("occlusionState"),
         .perf_log = perf_log,
         .gpu_enabled = sc.gpu_ports,
+
         .screen_rect = screen_rect,
         .pboard_filenames_type = pboard_filenames_type,
         .CATransaction = objc_getClass("CATransaction"),
@@ -2428,6 +2518,7 @@ pub fn main(init: std.process.Init) !void {
         .max_frames = max_frames,
     };
     g_bridge = &bridge;
+    gpu.log_events = perf_log;
     bridge.snapshot_dir = snapshot_dir;
     obs.paused = !settings.getBool("animate", true);
     obs.spin_mult = pl.SPEEDS[pl.speedIndex(settings.getFloat("speed", 1.0, 0.25, 2.0))];
