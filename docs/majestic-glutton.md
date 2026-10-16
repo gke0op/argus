@@ -21,10 +21,10 @@ black hole fed by a thin, hot accretion disk.
 | Parameter | Value used | Literature | Source | Status |
 |---|---|---|---|---|
 | Spin a* | 0.62 | 0.62 (+0.22 / −0.37, 90%) | Sisk-Reynés, Reynolds, Matthews & Smith 2022, MNRAS 514, 2568 (Chandra X-ray reflection) | measured |
-| Mass | 4e9 Msun | ~3–6e9 (Hβ virial, UV disk fit, X-ray); outliers 1e9 and 3e10; 2026 reverberation lag in tension | Reynolds 2014 (arXiv 1408.4803); Fukuchi, Ichikawa et al. 2022 (arXiv 2209.09255) | centre of consistent estimates |
+| Mass | 4e9 Msun | ~3–6e9 (Hβ virial, UV disk fit, X-ray); outliers 1e9 and 3e10. A 2026 Hβ reverberation lag of 83 d is 5.6× short of the R–L relation but driven by the line's tail; the line core gives 267 d, close to R–L | Reynolds 2014 (arXiv 1408.4803); Fukuchi, Ichikawa et al. 2022 (arXiv 2209.09255); Li et al. 2026 (arXiv 2601.18269) | centre of consistent estimates |
 | Luminosity | 0.20 L_Edd (computed, see §4) | λ_Edd = 0.18 (full SED fit), 0.59 (X-ray bolometric) | Fukuchi, Ichikawa et al. 2022 | matches |
 | Inner-disk inclination from Earth | (camera at 88°, a choice) | 44.6 ± 3.3° (90%); older fit ~57° | Sisk-Reynés 2022; Reynolds 2014 | our camera is not on Earth's line of sight |
-| Radio | no jet drawn | radio-quiet by luminosity; weak FR I-type jet, lobes ~280 kpc | Blundell & Rawlings 2001 (astro-ph/0110157) | invisible in optical; outside the view |
+| Radio | no jet drawn | radio-quiet by luminosity; a weak ~300 kpc-scale FR I radio structure | Blundell & Rawlings 2001 (astro-ph/0110157) | invisible in optical; outside the view |
 | Recoil | not modelled | broad lines offset ~1000–2100 km/s; nucleus offset from host centre: candidate recoiling black hole | Robinson et al. 2010; Jadhav et al. 2021, MNRAS 507, 484 | unsettled; would look the same up close |
 
 ## 2. Camera
@@ -40,8 +40,11 @@ black hole fed by a thin, hot accretion disk.
 ## 3. Light paths
 
 - **Geodesics:** exact Kerr null geodesics in Boyer–Lindquist coordinates, Hamiltonian form,
-  integrated with RK4. p_r is re-solved from the null condition at every step; rays are traced
-  backward from the camera.
+  integrated with RK4. p_r is re-solved from the null condition at every step, except near its
+  turning points (where the integrated value is kept); rays are traced backward from the camera.
+- **Camera model:** screen coordinates (α, β) are the photons' asymptotic impact parameters; the
+  camera distance (1000 M) sets where rays start. A true static pinhole at 1000 M would differ in
+  image scale by ~0.1%.
 - **Shadow test (full contour):** the traced shadow edge is compared with Bardeen's analytic
   critical curve at 766 points, at the theme's spin (0.62), inclination (88°) and camera
   distance (1000 M).
@@ -112,11 +115,13 @@ The disk is **computed**, not shaped by hand:
    - Boundary: zero stress at the ISCO.
    - Numerics: backward Euler with a Thomas solve.
 2. **Initial ring and snapshot:** a ring of gas at 4 r_isco (width 0.8 r_isco), evolved until the
-   radius where the mass flux reverses reaches 5 r_isco. The recipe (initial ring and snapshot
+   radius where the mass flux reverses reaches 5 r_isco. The source temperature is capped at
+   70,000 K (T_MAX_SOURCE; reached only by the sub-pixel, zero-stress sliver at the ISCO edge). The recipe (initial ring and snapshot
    criterion) scales with the ISCO, so it applies unchanged at any spin. The solution does not:
    the equation's Kerr coefficients depend on spin, so it is recomputed for each spin.
 3. **Flux:** F = −(U⁰)² ζ Ω′ / (2r).
-   - Near the ISCO it is steady inflow: F/F_Page-Thorne = 0.99 at 1.5 r_isco.
+   - Near the ISCO it is steady inflow: F/F_Page-Thorne = 0.99 at 1.5 r_isco (the test bounds
+     the spread inside 1.25 r_isco).
    - It falls below Page-Thorne outward: 0.89 at 9 M, 0.55 at 19 M, 0.28 at 28 M.
    - Mass budget closes to 0.998.
 4. **Physical scaling:** the ISCO inflow is set to 0.36 Ṁ_Edd for 4e9 Msun, α = 0.1.
@@ -165,8 +170,11 @@ The disk ends at R_out = 48 r_isco = 180 M, where τ ≈ 1e-4, so the gas fades 
     functions.
   - Beaming is on.
 - **Colour correction** (Done, Davis, Jin, Blaes & Ward 2012): f_col⁻⁴ B(f_col T).
-  - f = 1 below 3e4 K, (T/3e4 K)^0.83 up to 1e5 K, and (72 keV/kT)^{1/9} above that.
-  - The branches are continuous to 0.3%; f ≈ 1.5 at the 50,000 K peak.
+  - f = 1 below 3e4 K, (T/3e4 K)^0.82 up to 1e5 K (their eq. 2), and (72 keV/kT)^{1/9} above.
+  - The published branches meet to 1.6% at 1e5 K, a temperature this disk never reaches;
+    f ≈ 1.5 at the 50,000 K peak.
+  - The table of observed colours reaches 200 kK, above the hottest observed colour
+    temperature (g f T_s ≈ 105 kK on the approaching inner disk).
 - **Limb darkening:** I(μ) ∝ 1 + 2.06 μ (Chandrasekhar H-function, linear fit as in Laor 1991),
   normalised to an isotropic emitter's flux (tested to 1e-6).
   - μ is measured in the gas frame: μ = g |p_θ| / r.
@@ -221,9 +229,10 @@ The camera sits inside the core of the cluster's giant central galaxy.
 - **Why it is black:**
   - The Sun's surface brightness is −26.74 mag spread over π (959.6″)² = 2.89e6 arcsec²:
     −26.74 + 2.5 log₁₀(2.89e6) = −10.6 mag arcsec⁻².
-  - At 550 nm a 50,000 K blackbody is ~133× brighter per area than the Sun's 5,772 K
-    (−2.5 log₁₀ 133 = −5.3 mag), so the disk is ≈ −15.9 mag arcsec⁻².
-  - Against the host's +14.5 to +16, the disk is ~30–32 magnitudes (~10¹²) brighter. At any
+  - At 550 nm a 50,000 K blackbody is ~133× brighter per area than the Sun's 5,772 K; with the
+    colour correction the render uses, f⁻⁴ B(f T) at f ≈ 1.5, it is ~41× (−2.5 log₁₀ 41 =
+    −4.0 mag), so the disk is ≈ −14.6 mag arcsec⁻².
+  - Against the host's +14.5 to +16, the disk is ~29–31 magnitudes (~10¹²) brighter. At any
     exposure that shows the disk, the sky is black.
 - Renders that show a sky expose it separately; this one does not.
 

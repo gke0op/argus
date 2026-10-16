@@ -8,11 +8,12 @@
 // microlensing); this is what that physics predicts. The Event Horizon Telescope's images
 // (M87*, Sgr A*) are a different, starving kind of black hole: hot, faint, see-through flows.
 // Modelled on H1821+643, the quasar at the centre of the galaxy cluster CL1821+643 (radio-quiet
-// by luminosity, though it drives a weak FR I-type jet with 280 kpc lobes, Blundell & Rawlings
+// by luminosity, though it drives a weak ~300 kpc-scale FR I radio structure, Blundell & Rawlings
 // 2001: invisible in optical light and far outside this view). Its measured spin, a* = 0.62
 // (+0.22 / -0.37, 90%; Sisk-Reynes, Reynolds, Matthews & Smith 2022, MNRAS 514, 2568, Chandra
 // X-ray reflection); its mass, 4e9 Msun (the centre of the consistent estimates, ~3-6e9; the
-// 2026 reverberation lag is in tension, unresolved); its luminosity, ~0.2 of Eddington's
+// 2026 H-beta reverberation lag, 83 d, is 5.6x short of R-L but tail-driven, the line core gives
+// 267 d: Li et al., arXiv:2601.18269); its luminosity, ~0.2 of Eddington's
 // (Fukuchi, Ichikawa et al. 2022: lambda = 0.18 from the full SED, 0.59 from X-rays): a
 // radiatively efficient thin disk. From Earth we see its inner disk at 44.6 +- 3.3 deg (90%);
 // this camera sits elsewhere around it, at 88 deg (a choice). It may also be a recoiling black
@@ -38,8 +39,8 @@
 //    in steady inflow and has the Page-Thorne flux shape (within 1% at 1.5 ISCO radii; mass
 //    budget closes to 0.3%); further out the inflow falls to zero at the radius where its mass
 //    flux reverses (5 ISCO radii, 19 M), so the flux drops below Page-Thorne (0.89 at 9 M, 0.55
-//    at 19 M). Its radii scale with the ISCO (3.75 M at this spin), so it is the same solution
-//    at any spin. Beyond
+//    at 19 M). Its recipe (ring and snapshot) scales with the ISCO (3.75 M at this spin); the
+//    solution itself is recomputed per spin (the Kerr coefficients depend on it). Beyond
 //    it the disk spreads outward, and its dissipation, temperature and opacity fall off
 //    together, so it thins out with no edge. The stress follows the closure, not the local
 //    pressure: W = 1.5 alpha (P/rho) r holds only at the flux peak, where it is set (further
@@ -137,7 +138,7 @@ pub const INCL: f64 = 88.0 * math.pi / 180.0;
 /// Checked by `make claims` through probeEquatorialRay (equatorial light paths).
 pub const claims = sdk.Claims{ .metric = .kerr, .spin = SPIN, .inclination_deg = 88.0 };
 pub const R_OUT: f64 = 48.0 * R_ISCO; // geometry only: the computed disk has faded to nothing here
-/// The disk solution's radii scale with the ISCO, so it is the same solution at any spin.
+/// The disk recipe's radii scale with the ISCO (the solution is recomputed per spin).
 pub const R_ISCO: f64 = isco(SPIN);
 // Gas denser than this (line of sight) is drawn opaque: e^-40 of what lies behind leaks, under
 // 1e-3 of display white even behind the brightest disk (light is composited before tone mapping).
@@ -2539,7 +2540,7 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
     const cond = "a = 0.62, 4e9 Msun, alpha = 0.1, ISCO inflow 0.36 Mdot_Edd, ring at 4 r_isco evolved to flux reversal at 5 r_isco";
     const mb = "Mummery & Balbus 2019 GR thin-disk equation";
     try claim("opus_quasar.disk.mass_budget", "The evolved disk conserves mass (accreted + remaining = initial)", mb, cond, "mass budget", d.mass_budget, 0.99, 1.01);
-    try claim("opus_quasar.disk.page_thorne_inner", "Near the ISCO the snapshot is steady inflow (Page-Thorne)", "Page & Thorne 1974, at the snapshot's ISCO inflow", cond, "F/F_PT spread inside 1.5 r_isco", d.pt_ratio_spread, null, 1.15);
+    try claim("opus_quasar.disk.page_thorne_inner", "Near the ISCO the snapshot is steady inflow (Page-Thorne)", "Page & Thorne 1974, at the snapshot's ISCO inflow", cond, "F/F_PT spread inside 1.25 r_isco (SNAP_RREV / 4)", d.pt_ratio_spread, null, 1.15);
     try claim("opus_quasar.disk.t_peak", "Peak disk temperature is quasar-like", "H1821+643: L ~ 0.2 L_Edd at 4e9 Msun (Fukuchi, Ichikawa et al. 2022)", cond, "T_peak (K)", d.t_peak, 40_000.0, 60_000.0);
     try claim("opus_quasar.disk.eddington", "The snapshot shines at H1821+643's measured Eddington ratio", "lambda_Edd = 0.18 (full SED; Fukuchi, Ichikawa et al. 2022)", cond, "L / L_Edd", EDD_RATIO * d.lum_ratio, 0.17, 0.23);
     try claim("opus_quasar.disk.opaque_10", "The disk is opaque at 10 ISCO radii", "electron scattering + Kramers opacity", cond, "tau_ext at 10 r_isco", at(&d, r_in, dl, 10.0 * R_ISCO)[1], 10.0, null);
