@@ -5,7 +5,7 @@ app asks for macOS 13 or later.
 
 ## Download a release (nothing else to install)
 
-1. Download `Argus-v<version>-macos-arm64.zip` (currently `Argus-v0.1.2-macos-arm64.zip`)
+1. Download `Argus-v<version>-macos-arm64.zip` (currently `Argus-v0.1.3-macos-arm64.zip`)
    from the project's GitHub Releases page. To check it, download the `.sha256` file next to
    it and run `shasum -a 256 -c Argus-v<version>-macos-arm64.zip.sha256` in the same folder.
 2. Double-click the zip. You get a folder `Argus-v<version>-macos-arm64` that holds `Argus.app`
@@ -20,7 +20,7 @@ app asks for macOS 13 or later.
    mark from the folder, so macOS opens it like an app you built yourself:
 
    ```bash
-   V=0.1.2   # the version you downloaded
+   V=0.1.3   # the version you downloaded
    xattr -dr com.apple.quarantine ~/Downloads/Argus-v$V-macos-arm64
    open ~/Downloads/Argus-v$V-macos-arm64/Argus.app
    ```

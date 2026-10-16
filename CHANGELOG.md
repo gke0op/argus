@@ -4,6 +4,23 @@ All notable changes to Argus are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-10-16
+
+### Fixed
+
+- At 60 and 120 fps, themes that count frames ran their frame-based logic early or skipped
+  steps; Lizard Island's reef never finished building. `ArgusFrame.frame` is now the 30 Hz
+  simulation tick at every frame rate, so every theme behaves exactly as at 30 fps.
+- Cygnus A's outer disk could shimmer with moiré fringes at 120 fps: sheared turbulence is now
+  filtered across each pixel's footprint. Mean brightness is unchanged.
+
+### Changed
+
+- The popover stays open while you drag a theme in from Finder after its themes button opens
+  Finder ("drop mode"); it still closes on Esc, the eye, or a click elsewhere.
+- Security reports go through GitHub's private vulnerability reporting; acknowledgement within
+  7 days.
+
 ## [0.1.2] - 2026-10-16
 
 ### Added
