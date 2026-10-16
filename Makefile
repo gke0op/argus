@@ -5,7 +5,7 @@ THEME ?= themes/Echo.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: all app desktop kronos harness claims ledger test run stop clean gpu-bench gpu-probes metalfx-demo gpu-arch
+.PHONY: quasars all app desktop kronos harness claims ledger test run stop clean gpu-bench gpu-probes metalfx-demo gpu-arch
 
 all: app kronos
 
@@ -33,7 +33,12 @@ LEDGER_OUT ?= docs/opus_quasar_ledger.json
 ledger:
 	ZIG=$(ZIG) tools/ledger.sh $(LEDGER_THEME) $(LEDGER_OUT)
 
+# The quasar family: generated from themes/Opus_Quasar.zig (tools/gen_quasars.py).
+quasars:
+	python3 -I tools/gen_quasars.py
+
 test:
+	python3 -I tools/gen_quasars.py --check
 	$(ZIG) test $(ZFLAGS) src/desktop_wallpaper.zig
 	$(ZIG) test $(ZFLAGS) src/kronos_tui.zig
 
