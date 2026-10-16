@@ -7,7 +7,7 @@ right there on the desktop. Argus fixes that: ignite a relativistic quasar behin
 for a few milliseconds of GPU a frame, or really anything you can write a pixel for.
 
 <p align="center">
-  <img src="docs/media/hero.gif" alt="Cygnus_A: a Kerr black hole with a thin accretion disk, seen nearly edge-on, then Night_Tide: bioluminescent surf on a moonless beach" width="100%">
+  <img src="docs/media/hero.gif" alt="Cygnus_A: a Kerr black hole with a thin accretion disk; the camera tilts from 72 to 88 degrees, nearly edge-on, and back" width="100%">
 </p>
 <p align="center"><a href="docs/media/hero.mp4">Watch in full quality (MP4)</a></p>
 
@@ -94,6 +94,13 @@ drop a theme (or a picture) on any of them. Pause with ⏸ (the eye closes while
 gear opens Settings: step a Space's theme (or go back to the macOS default), speed, smooth
 swipes, live reload and open at login. Settings live in `.argus_settings.conf` next to
 Argus.app, one `key=value` per line.
+
+<p align="center">
+  <img src="docs/media/popover.png" alt="The Argus menu-bar popover: a strip of seven Space thumbnails, each running its own theme, with Space V (Cygnus A) selected, plus pause and settings buttons" width="680">
+</p>
+<p align="center">
+  <img src="docs/media/settings.png" alt="The Argus Settings view: Space V's preview and theme stepper set to Cygnus A, a speed slider at 1x, and switches for smooth swipes, live reload and open at login" width="680">
+</p>
 
 ## Write your own theme
 
