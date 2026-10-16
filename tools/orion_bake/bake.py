@@ -467,6 +467,25 @@ def main():
       f"{np.median((ncl / ne)[sel]):.2f} (16-84% {np.percentile((ncl / ne)[sel], 16):.2f}-{np.percentile((ncl / ne)[sel], 84):.2f}), i.e. phi = {phi_cl:.3f}. "
       f"The two independent estimates of the layer thickness differ by {phi_cl / phi:.2f}x: R0 is known to within that factor.")
 
+    # --- Check: the Bright Bar is a nearly edge-on piece of front, so across it the ions are laid
+    #     out on the sky by height. Full-resolution maps, rotated so the [S II] ridge is level.
+    best = None
+    for ang in np.arange(-36.0, -20.0, 0.5):
+        prof = nd.rotate(np.log(c["sii"]), -ang, reshape=False, order=1, mode="nearest")[:, 500:1300].mean(1)
+        sharp = nd.gaussian_filter1d(prof, 2).max() - np.median(prof)
+        if best is None or sharp > best[0]: best = (sharp, ang)
+    ang = best[1]
+    rot = {k: nd.rotate(c[k], -ang, reshape=False, order=1, mode="nearest")[:, 400:1200].mean(1) for k in ("hb", "oiii", "nii", "sii", "oi")}
+    y0 = int(np.argmax(nd.gaussian_filter1d(rot["sii"], 3)[200:1300]) + 200)
+    mpc = SPAXEL_AS * DIST_PC * math.pi / 180 / 3600 * 1000
+    offs = {k: (int(np.argmax(nd.gaussian_filter1d(v[y0 - 120:y0 + 121], 2))) - 120) * mpc for k, v in rot.items()}
+    R("\nCheck, the Bright Bar seen edge-on (PA of the ridge in the pixel frame {:.1f} deg; + = toward the Trapezium): peaks of "
+      .format(ang) + ", ".join(f"{k} {v:+.0f}" for k, v in sorted(offs.items(), key=lambda t: t[1])) + " mpc. "
+      f"The ions are layered as the model has them (O0 -> S+/N+ -> H+/O++), across {max(offs.values()) - min(offs.values()):.0f} mpc. "
+      f"The model draws the low ions as a sheet at the base of the flow; at the orbit's widest yaw (4.3 deg) that "
+      f"misplaces them by at most {(max(offs.values()) - min(offs.values())) * math.tan(math.radians(4.3)):.0f} mpc "
+      f"({(max(offs.values()) - min(offs.values())) * math.tan(math.radians(4.3)) / (sp * 1000):.1f} texels).")
+
     # --- [S II] doublet from density (Sanders+2016 eq. 6, 10^4 K) -------------------------------
     r_sii = 0.4315 * (2107 + ne) / (627.1 + ne)
 

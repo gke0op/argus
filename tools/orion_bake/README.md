@@ -91,6 +91,12 @@ in numpy from the shipped data and compares the two.
   - [S II] is a further +1.1 km/s toward the cloud's velocity. It shines partly inside the
     accelerating front, below the sonic point. The model draws it on the front sheet; it
     has no layer of its own.
+- **Bright Bar test (geometry).** The Bar is a nearly edge-on stretch of front, so across it
+  the ions spread out on the sky by height. The emission peaks fall in order going toward
+  the Trapezium: [O I] −26 mpc, [N II] −9, [S II] 0, Hβ +28, [O III] +29. That is the
+  model's layering. The whole span is 55 mpc; drawing the low ions as one sheet misplaces
+  them by at most 4 mpc (3.6 texels) at the widest yaw. Toward the star, Hα doesn't drop to
+  half within 46 mpc of its peak, so R0 ≳ 0.13 pc, consistent with the fit (0.29–1.5 pc).
 - **Dust.** Edenhofer's map toward θ¹ Ori C puts almost nothing in front of 360 pc
   (A_V ≈ 0.08 mag, uniform over all 64 sightlines). So 93% of the median measured
   reddening is the Veil.
