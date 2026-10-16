@@ -88,7 +88,8 @@
 
 constant int   PALETTE   = 0;        // 0 = true colour, 1 = Hubble SHO false colour (labelled)
 constant float D_VEIL    = 1.0f;     // pc in front of theta1 Ori C (O'Dell et al. 2009)
-constant float VIEW_W_PC = 0.60f;    // field of view across the screen's long side
+constant float VIEW_W_PC = 0.60f;    // field of view across the screen's width...
+constant float VIEW_H_PC = 0.50f;    // ...or its height, whichever is tighter (the data are 0.68 x 0.57 pc)
 constant float2 VIEW_C   = float2(-0.035f, -0.045f);   // view centre, pc from theta1 Ori C (west, north)
 constant float ORBIT_YAW = 0.075f;   // radians (4.3 deg)
 constant float ORBIT_PITCH = 0.045f; // radians (2.6 deg)
@@ -536,7 +537,7 @@ static View make_view(constant ArgusFrame& f) {
     View v;
     v.R = Ry * Rx;
     v.d = -v.R[2];
-    v.scale = VIEW_W_PC / float(max(f.width, f.height));   // pc per pixel
+    v.scale = min(VIEW_W_PC / float(f.width), VIEW_H_PC / float(f.height));   // pc per pixel: any screen shape stays inside the data
     v.half_px = 0.5f * float2(f.width, f.height);
     return v;
 }

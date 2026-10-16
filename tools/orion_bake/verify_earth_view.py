@@ -61,7 +61,7 @@ lin = xyz @ M.T * EXPO          # per texel, before display; sampled bilinearly 
 
 ref_img = np.array(Image.open(sys.argv[1]).convert("RGB")).astype(np.float64) / 255.0
 h, w = ref_img.shape[:2]
-scale = VIEW_W / max(w, h)
+scale = min(VIEW_W / w, num("VIEW_H_PC") / h)
 gx, gy = np.meshgrid(np.arange(w) + 0.5 - w / 2, -(np.arange(h) + 0.5 - h / 2))
 col = cx + (VX + gx * scale) / TEXEL; row = cy + (VY + gy * scale) / TEXEL
 
