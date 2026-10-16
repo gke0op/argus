@@ -44,7 +44,7 @@ constant float OBS_R = 1000.0f;
 constant float T_REF = 1012.4292161968444f; // OBS_R + 2 ln(OBS_R / 2)
 constant float K_NEAR = 0.08f;
 constant uint MAX_STEPS = 40000;
-constant float AXIS_FOLD_COS = 0.99995f; // cos(0.01)
+constant float AXIS_FOLD_COS = 0.99500417f; // cos(0.1): a ray that turns at sin(theta) ~ 0.01 (a = 0.99, L ~ 0.05) must fold too
 // Gas denser than this is drawn opaque. The theme uses TAU_THICK * e^TAU_NOISE = 16.6, which
 // hides a leak of e^-5 behind stirred gas: fine against the sky, but here light is composited
 // before tone mapping and the inner disk behind can be ~50x display white, so a leak that size
