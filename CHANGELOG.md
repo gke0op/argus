@@ -4,6 +4,14 @@ All notable changes to Argus are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-10-16
+
+### Added
+
+- `Lizard_Island` (Metal) returns to the lineup: a diver's drift over the Lizard Island lagoon,
+  Great Barrier Reef, at real scale, with seagrass and animals from field sources. Seven
+  themes now ship.
+
 ## [0.1.1] - 2026-10-16
 
 ### Added
@@ -18,8 +26,7 @@ All notable changes to Argus are recorded here. The format follows
 ### Changed
 
 - The lineup is six themes: `Cygnus_A`, `Night_Tide`, `Orion_Nebula`, `Ebru_Studio`,
-  `Tutorial_Tides` and `Tutorial_Reef`. `tools/gen_quasars.py` generates Cygnus A only; other
-  quasars can be generated from local configurations in `tools/local/`.
+  `Tutorial_Tides` and `Tutorial_Reef`. Cygnus A is the only quasar.
 - Less GPU memory for black-hole Spaces: Spaces showing the same theme at the same size share
   one traced image, kept 30 s after its last use so a reload doesn't retrace; GPU Spaces not
   drawn for 2 s release their spare drawables while the last frame stays on screen; menu

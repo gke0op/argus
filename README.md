@@ -61,7 +61,9 @@ Want your own? Cygnus A is generated from a template (`make quasars`); give it a
 spin and a feeding rate and grow your own plump one.
 
 Beyond the black hole: [`Night_Tide`](themes/Night_Tide.metal), a beautiful night on the
-coast where the flashes in the surf follow published dinoflagellate research. And more in
+coast where the flashes in the surf follow published dinoflagellate research, and
+[`Lizard_Island`](themes/Lizard_Island.metal), a diver's drift over a real Great Barrier Reef
+lagoon at metre scale, built from field sources. And more in
 [`themes/`](themes/): drag any of them onto a Space.
 
 ## Install
