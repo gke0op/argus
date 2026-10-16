@@ -167,7 +167,7 @@ pub var gpu_ports = true;
 /// broken edit never replaces a working theme. Null (tests, harness) accepts any source.
 pub var metal_validate: ?*const fn (src: []const u8, path: []const u8) bool = null;
 // Themes built on the Kerr-disk engine (src/gpu/bh_*), drawn by its GPU path.
-const GPU_PORT_THEMES = [_][]const u8{ "Opus_Quasar.zig", "Opus_Gargantua.zig" };
+const GPU_PORT_THEMES = [_][]const u8{ "Opus_Quasar.zig", "Opus_Gargantua.zig", "Opus_Cygnus_A.zig", "Opus_J0834.zig", "Opus_PG1426.zig" };
 
 fn isGpuPortTheme(path: []const u8) bool {
     const base = std.Io.Dir.path.basename(path);
