@@ -110,7 +110,8 @@ in numpy from the shipped data and compares the two.
 - **Layer thickness (R0).** This is the least certain fitted quantity. The front's curvature
   gives R0 ≈ 0.9 pc; the [Cl III] density gives 1.6 times that. Older 2e17 cm estimates of
   the layer point the other way, to about half. So R0 is known to within roughly a factor
-  of 2. It changes only the off-Earth views: from Earth the
+  of 2. What that changes on screen: at the orbit's widest yaw, 0.6× or 1.7× R0 moves the
+  median pixel by 3/255 and the 99th percentile by 11–12/255. From Earth it changes nothing. It changes only the off-Earth views: from Earth the
   image is the data either way.
 - **Absolute depth.** The depth scales as √Q (Q itself is ±10%) and with the assumed
   distance. The dust absorbing ionising photons inside the gas (Henney et al. 2005:
