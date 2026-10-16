@@ -911,6 +911,7 @@ pub const State = struct {
     cell_r0: f32, // octave-0 cell size: radial bins
     cell_p0: f32, // octave-0 cell size: azimuth, Q16
     turb_sigma: f32, // TURB_SIGMA, for the GPU path
+    spot_rmax: f64, // SPOT_RMAX, for the GPU path
     rho_row: [N_OCT]f32, // measured neighbour correlation of each noise plane: rows, phase cells
     rho_ph: [N_OCT]f32,
     foot_cr: [N_OCT]f32, // GPU footprint filter: cell constants of the box-averaged rendered field
@@ -1059,6 +1060,7 @@ pub const State = struct {
         self.cell_r0 = @floatCast(2.0 * EDDY_MIN_H * H_OVER_R / (self.lnr_span / @as(f64, @floatFromInt(R_BINS))));
         self.cell_p0 = @floatCast(2.0 * EDDY_MAJ_H * H_OVER_R / (2.0 * math.pi) * 65536.0);
         self.turb_sigma = TURB_SIGMA;
+        self.spot_rmax = SPOT_RMAX;
         for (0..N_OCT) |oct| {
             const sc = math.pow(f64, 2.0, @floatFromInt(oct));
             const gr: usize = @max(1, @as(usize, @intFromFloat(@round(@as(f64, NR) / (cell_rows / sc)))));
