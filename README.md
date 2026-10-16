@@ -35,7 +35,7 @@ full-screen app, the lock screen or a sleeping display covers them.
 
 One quasar ships with the app, and it is real:
 
-> **Cygnus A**
+> **Cygnus A**  
 > Quasar: spinning (Kerr) black hole with its accretion disk, both computed.
 
 Kerr is what the black hole *is*: the exact solution for a
