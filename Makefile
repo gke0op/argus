@@ -5,7 +5,7 @@ THEME ?= themes/Echo.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: all app desktop kronos harness claims test run stop clean gpu-bench gpu-probes metalfx-demo gpu-arch
+.PHONY: all app desktop kronos harness claims ledger test run stop clean gpu-bench gpu-probes metalfx-demo gpu-arch
 
 all: app kronos
 
@@ -26,6 +26,12 @@ harness:
 
 claims:
 	$(ZIG) run -lc -O ReleaseFast --dep theme -Mroot=src/claim_check.zig -O ReleaseFast -Mtheme=$(THEME)
+
+# Test ledger: one JSON record per checked physics claim, from the theme's tests, claims and gpu-bench.
+LEDGER_THEME ?= themes/Opus_Quasar.zig
+LEDGER_OUT ?= docs/opus_quasar_ledger.json
+ledger:
+	ZIG=$(ZIG) tools/ledger.sh $(LEDGER_THEME) $(LEDGER_OUT)
 
 test:
 	$(ZIG) test $(ZFLAGS) src/desktop_wallpaper.zig

@@ -285,3 +285,42 @@ pub const RayProbe = struct {
     /// Total deflection angle in radians (escaping rays only; inf if unresolved).
     deflection: f64,
 };
+
+// ---- ARGUS-BENCH test ledger ----
+// One machine-readable record per checked physics claim. Theme tests call `ledger`, which
+// prints the record as a `LEDGER {json}` line on stderr and returns the verdict the test
+// asserts, so the ledger's tolerance is the test's by construction. `make claims` and
+// `make gpu-bench` print the same schema (src/ledger.zig); `make ledger` collects them all.
+pub const LedgerRecord = struct {
+    id: []const u8,
+    claim: []const u8,
+    /// Reference quantity and its source (paper, closed form, independent code).
+    reference: []const u8,
+    conditions: []const u8,
+    /// What `measured` is, with units.
+    quantity: []const u8,
+    measured: f64,
+    /// Pass iff lo <= measured <= hi; no bounds = reported, not asserted.
+    lo: ?f64 = null,
+    hi: ?f64 = null,
+    source: []const u8,
+};
+
+pub fn ledger(r: LedgerRecord) bool {
+    const asserted = r.lo != null or r.hi != null;
+    const pass = !std.math.isNan(r.measured) and
+        (r.lo == null or r.measured >= r.lo.?) and (r.hi == null or r.measured <= r.hi.?);
+    std.debug.print("\nLEDGER {f}\n", .{std.json.fmt(.{
+        .id = r.id,
+        .claim = r.claim,
+        .reference = r.reference,
+        .conditions = r.conditions,
+        .quantity = r.quantity,
+        .measured = if (std.math.isFinite(r.measured)) @as(?f64, r.measured) else null,
+        .lo = r.lo,
+        .hi = r.hi,
+        .pass = if (asserted) @as(?bool, pass) else null,
+        .source = r.source,
+    }, .{})});
+    return pass or !asserted;
+}

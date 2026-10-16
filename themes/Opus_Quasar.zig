@@ -134,6 +134,8 @@ const sdk = @import("argus_theme_sdk.zig");
 
 pub const SPIN: f64 = 0.62; // H1821+643's measured spin (Sisk-Reynes et al. 2022; see header)
 pub const INCL: f64 = 88.0 * math.pi / 180.0;
+/// Checked by `make claims` through probeEquatorialRay (equatorial light paths).
+pub const claims = sdk.Claims{ .metric = .kerr, .spin = SPIN, .inclination_deg = 88.0 };
 pub const R_OUT: f64 = 48.0 * R_ISCO; // geometry only: the computed disk has faded to nothing here
 /// The disk solution's radii scale with the ISCO, so it is the same solution at any spin.
 pub const R_ISCO: f64 = isco(SPIN);
@@ -1967,6 +1969,23 @@ pub const State = struct {
         return !math.isFinite(self.t_m) or !math.isFinite(self.exposure);
     }
 
+    /// ARGUS-BENCH claim probe: equatorial photon with signed impact parameter b (M, b > 0
+    /// prograde), traced by traceRay, the geodesic code draw()'s tables come from, from a
+    /// camera on the equator at OBS_R. Deflection is the angle between the ray's start and
+    /// escape directions: exact below pi, which covers the checker's b >= 1.3 b_c.
+    pub fn probeEquatorialRay(self: *const State, b: f64) sdk.RayProbe {
+        _ = self;
+        const g = Geo.init(SPIN, 0.5 * math.pi, R_OUT);
+        const h = traceRay(&g, -b, 0.0, false); // L = -alpha sin(i) = b
+        if (h.kind != .sky) return .{ .captured = true, .deflection = 0.0 };
+        const st = initialState(&g, -b, 0.0);
+        const d = rhs(g.a, st.L, st.y);
+        var v0 = [3]f64{ d[0], OBS_R * d[2], -OBS_R * d[1] }; // as traceNext's escape direction, at theta = pi/2, phi = 0
+        const n0 = @sqrt(dot3(v0, v0));
+        for (&v0) |*x| x.* /= n0;
+        return .{ .captured = false, .deflection = math.acos(math.clamp(dot3(v0, h.dir), -1.0, 1.0)) };
+    }
+
     /// The CPU turbulence grid at a pixel: variance-preserving interpolation between nodes
     /// (separable, weights from tables).
     inline fn turbGrid(self: *const State, phi: u16, rbf: f32) f32 {
@@ -2209,22 +2228,33 @@ comptime {
 }
 
 // ============================================================================ physics tests
+// Every assertion goes through `claim`, which prints a ledger record (sdk.ledger) with the
+// same tolerance it asserts; `make ledger` collects them.
 
 const testing = std.testing;
 
+const LEDGER_SRC = "zig test themes/Opus_Quasar.zig";
+
+fn claim(id: []const u8, text: []const u8, reference: []const u8, conditions: []const u8, quantity: []const u8, measured: f64, lo: ?f64, hi: ?f64) !void {
+    try testing.expect(sdk.ledger(.{ .id = id, .claim = text, .reference = reference, .conditions = conditions, .quantity = quantity, .measured = measured, .lo = lo, .hi = hi, .source = LEDGER_SRC }));
+}
+
 test "ISCO: 6M without spin, -> 1M at extreme spin, and energy is minimal there" {
-    try testing.expectApproxEqAbs(6.0, isco(0.0), 1e-12);
-    try testing.expect(isco(0.999999) < 1.05);
+    const ref = "Bardeen, Press & Teukolsky 1972 closed form";
+    try claim("opus_quasar.isco.schwarzschild", "ISCO is 6 M without spin", ref, "a = 0", "r_isco (M)", isco(0.0), 6.0 - 1e-12, 6.0 + 1e-12);
+    try claim("opus_quasar.isco.extreme", "ISCO approaches 1 M at extreme prograde spin", ref, "a = 0.999999", "r_isco (M)", isco(0.999999), null, 1.05);
     const a = SPIN;
     const r = isco(a);
     const e = 1e-5;
     const dE = (orbit(a, r * (1 + e)).E - orbit(a, r * (1 - e)).E) / (2 * r * e);
-    try testing.expect(@abs(dE) < 1e-6);
-    try testing.expect(orbit(a, r * 1.01).E > orbit(a, r).E);
+    try claim("opus_quasar.isco.energy_min", "Circular-orbit energy is stationary at the ISCO", "dE/dr = 0 at the marginally stable orbit", "a = 0.62, central difference dr = 1e-5 r", "|dE/dr| at r_isco", @abs(dE), null, 1e-6);
+    try claim("opus_quasar.isco.energy_rises", "Energy rises outside the ISCO", "dE/dr > 0 outside the marginally stable orbit", "a = 0.62, r = 1.01 r_isco", "E(1.01 r_isco) - E(r_isco)", orbit(a, r * 1.01).E - orbit(a, r).E, 0.0, null);
+    _ = sdk.ledger(.{ .id = "opus_quasar.isco.value", .claim = "ISCO radius and efficiency used by the disk (reported)", .reference = "Bardeen, Press & Teukolsky 1972", .conditions = "a = 0.62", .quantity = "r_isco (M)", .measured = r, .source = LEDGER_SRC });
+    _ = sdk.ledger(.{ .id = "opus_quasar.isco.efficiency", .claim = "Radiative efficiency 1 - E_isco (reported)", .reference = "Bardeen, Press & Teukolsky 1972", .conditions = "a = 0.62", .quantity = "eta = 1 - E_isco", .measured = 1.0 - orbit(a, r).E, .source = LEDGER_SRC });
 }
 
 test "photon orbits and Schwarzschild shadow radius sqrt(27)" {
-    try testing.expectApproxEqAbs(3.0, photonOrbit(0.0, true), 1e-12);
+    try claim("opus_quasar.photon_orbit.schwarzschild", "Photon orbit is 3 M without spin", "Bardeen 1973 closed form", "a = 0", "r_ph (M)", photonOrbit(0.0, true), 3.0 - 1e-12, 3.0 + 1e-12);
     const g = Geo.init(0.0, INCL, R_OUT);
     var lo: f64 = 4.0;
     var hi: f64 = 7.0;
@@ -2232,43 +2262,172 @@ test "photon orbits and Schwarzschild shadow radius sqrt(27)" {
         const mid = 0.5 * (lo + hi);
         if (traceRay(&g, 0.0, mid, false).kind == .hole) lo = mid else hi = mid;
     }
-    try testing.expectApproxEqAbs(@sqrt(27.0), 0.5 * (lo + hi), 2e-3);
+    try claim("opus_quasar.shadow.schwarzschild_radius", "Traced Schwarzschild shadow radius is sqrt(27) M", "sqrt(27) M (Synge 1966; Luminet 1979)", "a = 0, i = 88 deg, r_obs = 1000 M, CPU f64, 40 bisections along alpha = 0", "|b_traced - sqrt(27)| (M)", @abs(0.5 * (lo + hi) - @sqrt(27.0)), null, 2e-3);
 }
 
-/// Bardeen (1973) critical curve: the exact edge of the Kerr shadow.
-fn bardeen(a: f64, incl: f64, r: f64) ?[2]f64 {
+/// Bardeen (1973) critical curve: screen point (alpha, beta^2) of the photon orbit at radius r.
+/// beta^2 < 0 off the visible arc.
+fn bardeenB2(a: f64, incl: f64, r: f64) [2]f64 {
     const lam = -(r * r * (r - 3.0) + a * a * (r + 1.0)) / (a * (r - 1.0));
     const eta = r * r * r * (4.0 * a * a - r * (r - 3.0) * (r - 3.0)) / (a * a * (r - 1.0) * (r - 1.0));
     const ci = @cos(incl);
     const si = @sin(incl);
-    const b2 = eta + a * a * ci * ci - lam * lam * ci * ci / (si * si);
-    if (b2 < 0) return null;
-    return .{ -lam / si, @sqrt(b2) };
+    return .{ -lam / si, eta + a * a * ci * ci - lam * lam * ci * ci / (si * si) };
 }
 
-test "Kerr shadow edge matches Bardeen's analytic critical curve" {
-    const g = Geo.init(SPIN, INCL, R_OUT);
-    const r1 = photonOrbit(SPIN, true);
-    const r2 = photonOrbit(SPIN, false);
-    var worst: f64 = 0.0;
-    var checked: usize = 0;
-    for (1..12) |k| {
-        const r = r1 + (r2 - r1) * @as(f64, @floatFromInt(k)) / 12.0;
-        const ab = bardeen(SPIN, INCL, r) orelse continue;
-        if (ab[1] < 0.3) continue; // too close to the equator line to bisect cleanly
-        var lo: f64 = 0.0;
-        var hi: f64 = ab[1] + 3.0;
-        if (traceRay(&g, ab[0], lo, false).kind != .hole) continue;
-        for (0..40) |_| {
+/// Bardeen (1973) critical curve: the exact edge of the Kerr shadow (upper half).
+fn bardeen(a: f64, incl: f64, r: f64) ?[2]f64 {
+    const ab = bardeenB2(a, incl, r);
+    if (ab[1] < 0) return null;
+    return .{ ab[0], @sqrt(ab[1]) };
+}
+
+// Full-contour shadow sweep. Points per half of the curve (upper and lower), spaced in
+// photon-orbit radius as (1 - cos(pi u)) / 2: dense toward both ends of the visible arc, where
+// the curve meets the equator and turns fastest in r (beta ~ sqrt(r - r_end)), so the spacing
+// there is ~uniform in arc length. Each point's edge is bisected along the ray from the shadow's
+// centre (the shadow is convex), so the equatorial ends bisect as cleanly as the top.
+// Rays at alpha ~ 0 have angular momentum L ~ 0 and pass over a pole of the Boyer-Lindquist
+// coordinates, where the integrator is least accurate; a sparse sweep can step over that
+// band, so it gets its own dense samples.
+pub const CONTOUR_N: usize = 256;
+pub const POLAR_N: usize = 128; // per half, uniform in alpha over the polar band (spacing 3e-5 M)
+pub const POLAR_BAND: f64 = 0.004; // M: |alpha| below this counts as the polar band (1/10 pixel)
+pub const CONTOUR_ITERS: usize = 32; // bracket 0.2 d ~ 1 M -> 2e-10 M
+pub const CONTOUR_PTS: usize = 2 * CONTOUR_N - 2 + 2 * POLAR_N;
+
+/// Fills `out` (CONTOUR_PTS points: the curve's upper half, its lower half without the two
+/// equator points, then the polar band, upper and lower) and returns the bisection centre.
+/// The first 2 CONTOUR_N - 2 points are the even sweep that RMS is taken over.
+pub fn shadowContour(a: f64, incl: f64, out: *[CONTOUR_PTS][2]f64) [2]f64 {
+    const n = CONTOUR_N;
+    const r1 = photonOrbit(a, true);
+    const r2 = photonOrbit(a, false);
+    const rm = 0.5 * (r1 + r2);
+    var ends: [2]f64 = undefined;
+    for ([_]f64{ r1, r2 }, &ends) |r_side, *e| { // beta^2 = 0 between the orbit radius and rm
+        var lo = r_side;
+        var hi = rm;
+        for (0..200) |_| {
             const mid = 0.5 * (lo + hi);
-            if (traceRay(&g, ab[0], mid, false).kind == .hole) lo = mid else hi = mid;
+            if (bardeenB2(a, incl, mid)[1] < 0) lo = mid else hi = mid;
         }
-        worst = @max(worst, @abs(0.5 * (lo + hi) - ab[1]));
-        checked += 1;
+        e.* = hi;
     }
-    std.debug.print("\n  Bardeen check: {d} points, worst |beta_traced - beta_exact| = {e:.2} M\n", .{ checked, worst });
-    try testing.expect(checked >= 6);
-    try testing.expect(worst < 0.01);
+    for (0..n) |k| {
+        const u = @as(f64, @floatFromInt(k)) / @as(f64, @floatFromInt(n - 1));
+        const ab = bardeenB2(a, incl, ends[0] + (ends[1] - ends[0]) * 0.5 * (1.0 - @cos(math.pi * u)));
+        const beta = @sqrt(@max(ab[1], 0.0));
+        out[k] = .{ ab[0], beta };
+        if (k > 0 and k < n - 1) out[n + k - 1] = .{ ab[0], -beta };
+    }
+    for (0..POLAR_N) |k| { // alpha(r) rises monotonically through 0 here: invert by bisection
+        const target = POLAR_BAND * (2.0 * @as(f64, @floatFromInt(k)) / @as(f64, @floatFromInt(POLAR_N - 1)) - 1.0);
+        var lo = ends[0];
+        var hi = ends[1];
+        for (0..200) |_| {
+            const mid = 0.5 * (lo + hi);
+            if (bardeenB2(a, incl, mid)[0] < target) lo = mid else hi = mid;
+        }
+        const ab = bardeen(a, incl, 0.5 * (lo + hi)).?;
+        out[2 * n - 2 + k] = ab;
+        out[2 * n - 2 + POLAR_N + k] = .{ ab[0], -ab[1] };
+    }
+    return .{ 0.5 * (out[0][0] + out[n - 1][0]), 0.0 };
+}
+
+pub const ContourStats = struct {
+    max: f64 = 0, // all points
+    max_at: [2]f64 = .{ 0, 0 },
+    rms: f64 = 0, // the even sweep
+    rms_off_axis: f64 = 0, // the even sweep outside the polar band
+    max_off_axis: f64 = 0, // |alpha| >= POLAR_BAND
+    max_polar: f64 = 0, // |alpha| < POLAR_BAND
+    bad: usize = 0, // bracket failures (NaN offsets)
+};
+
+/// Max and RMS of signed edge offsets `off` at points `pts` from shadowContour.
+pub fn contourStats(pts: *const [CONTOUR_PTS][2]f64, off: *const [CONTOUR_PTS]f64) ContourStats {
+    var s: ContourStats = .{};
+    var sum2: f64 = 0.0;
+    var n2: usize = 0;
+    var sum2_off: f64 = 0.0;
+    var n2_off: usize = 0;
+    for (pts, off, 0..) |p, o, i| {
+        if (math.isNan(o)) {
+            s.bad += 1;
+            continue;
+        }
+        if (i < 2 * CONTOUR_N - 2) {
+            sum2 += o * o;
+            n2 += 1;
+            if (@abs(p[0]) >= POLAR_BAND) {
+                sum2_off += o * o;
+                n2_off += 1;
+            }
+        }
+        if (@abs(o) > s.max) {
+            s.max = @abs(o);
+            s.max_at = p;
+        }
+        if (@abs(p[0]) < POLAR_BAND) s.max_polar = @max(s.max_polar, @abs(o)) else s.max_off_axis = @max(s.max_off_axis, @abs(o));
+    }
+    s.rms = @sqrt(sum2 / @as(f64, @floatFromInt(@max(n2, 1))));
+    s.rms_off_axis = @sqrt(sum2_off / @as(f64, @floatFromInt(@max(n2_off, 1))));
+    return s;
+}
+
+/// Signed radial offset (M) of the traced shadow edge from Bardeen point p along the ray from
+/// centre c: > 0 when the traced shadow is larger. NaN if the bracket 0.9-1.1 d fails.
+fn edgeOffset(g: *const Geo, c: [2]f64, p: [2]f64) f64 {
+    const dx = p[0] - c[0];
+    const dy = p[1] - c[1];
+    const d = @sqrt(dx * dx + dy * dy);
+    const ux = dx / d;
+    const uy = dy / d;
+    var lo = 0.9 * d;
+    var hi = 1.1 * d;
+    if (traceRay(g, c[0] + ux * lo, c[1] + uy * lo, false).kind != .hole) return math.nan(f64);
+    if (traceRay(g, c[0] + ux * hi, c[1] + uy * hi, false).kind == .hole) return math.nan(f64);
+    for (0..CONTOUR_ITERS) |_| {
+        const mid = 0.5 * (lo + hi);
+        if (traceRay(g, c[0] + ux * mid, c[1] + uy * mid, false).kind == .hole) lo = mid else hi = mid;
+    }
+    return 0.5 * (lo + hi) - d;
+}
+
+fn contourWorker(g: *const Geo, c: [2]f64, pts: []const [2]f64, off: []f64, first: usize, stride: usize) void {
+    var i = first;
+    while (i < pts.len) : (i += stride) off[i] = edgeOffset(g, c, pts[i]);
+}
+
+/// CPU (f64) edge offsets for every shadowContour point, on all cores.
+pub fn traceContour(c: [2]f64, pts: *const [CONTOUR_PTS][2]f64, off: *[CONTOUR_PTS]f64) !void {
+    const g = Geo.init(SPIN, INCL, R_OUT);
+    var threads: [16]std.Thread = undefined;
+    const nt = @min(threads.len, std.Thread.getCpuCount() catch 4);
+    for (threads[0..nt], 0..) |*t, k| t.* = try std.Thread.spawn(.{}, contourWorker, .{ &g, c, pts, off, k, nt });
+    for (threads[0..nt]) |t| t.join();
+}
+
+test "Kerr shadow edge matches Bardeen's analytic critical curve over the whole contour" {
+    var pts: [CONTOUR_PTS][2]f64 = undefined;
+    const c = shadowContour(SPIN, INCL, &pts);
+    var off: [CONTOUR_PTS]f64 = undefined;
+    try traceContour(c, &pts, &off);
+    const s = contourStats(&pts, &off);
+    std.debug.print("\n  Bardeen contour (CPU f64): {d} points, max |offset| {e:.2} M at (alpha {d:.4}, beta {d:.3}); off-axis max {e:.2} M, polar-band max {e:.2} M; rms {e:.2} M ({e:.2} M off-axis); {d} bracket failures\n", .{ pts.len, s.max, s.max_at[0], s.max_at[1], s.max_off_axis, s.max_polar, s.rms, s.rms_off_axis, s.bad });
+
+    var cond_buf: [512]u8 = undefined;
+    const cond = try std.fmt.bufPrint(&cond_buf, "a = 0.62, i = 88 deg, r_obs = 1000 M; {d} points on the full critical curve (both halves, clustered toward the equatorial ends) + {d} in the polar band |alpha| < {d} M; CPU f64; {d} bisections along rays from the shadow centre", .{ 2 * CONTOUR_N - 2, 2 * POLAR_N, POLAR_BAND, CONTOUR_ITERS });
+    const text = "Traced shadow edge lies on the Kerr critical curve over the whole contour";
+    const ref = "Bardeen 1973 analytic critical curve";
+    try claim("opus_quasar.shadow.contour.cpu.max", text, ref, cond, "max |radial offset| over all points (M); tolerance 1/4 pixel", s.max, null, 1e-2);
+    try claim("opus_quasar.shadow.contour.cpu.rms", text, ref, cond, "rms radial offset over the curve sweep (M)", s.rms, null, 1e-3);
+    try claim("opus_quasar.shadow.contour.cpu.max_off_axis", text, ref, cond, "max |radial offset| outside the polar band (M)", s.max_off_axis, null, 1e-4);
+    try claim("opus_quasar.shadow.contour.cpu.rms_off_axis", text, ref, cond, "rms radial offset over the curve sweep outside the polar band (M)", s.rms_off_axis, null, 1e-4);
+    _ = sdk.ledger(.{ .id = "opus_quasar.shadow.contour.cpu.max_polar", .claim = "Shadow-edge error of rays passing over the spin axis (L ~ 0; reported)", .reference = ref, .conditions = cond, .quantity = "max |radial offset| in the polar band (M)", .measured = s.max_polar, .source = LEDGER_SRC });
+    try claim("opus_quasar.shadow.contour.cpu.brackets", "Every contour sample brackets the edge (inside at 0.9 d, outside at 1.1 d)", ref, cond, "bracket failures (count)", @floatFromInt(s.bad), null, 0.0);
 }
 
 test "geodesic invariants: null condition and Carter constant are conserved" {
@@ -2289,8 +2448,9 @@ test "geodesic invariants: null condition and Carter constant are conserved" {
         worst_q = @max(worst_q, @abs(carter(a, L, y) - q0) / q0);
     }
     std.debug.print("\n  invariants: max |H|/r^2 = {e:.2}, max |dQ/Q| = {e:.2}\n", .{ worst_h, worst_q });
-    try testing.expect(worst_h < 1e-4);
-    try testing.expect(worst_q < 1e-4);
+    const cond = "a = 0.62, i = 88 deg, ray (alpha, beta) = (-2.4, 3.9) M, production stepper (RK4 + p_r projection), up to 4000 steps";
+    try claim("opus_quasar.geodesic.null", "Rays stay null along the integration", "Kerr Hamiltonian H = 0 (Carter 1968)", cond, "max |H| / r^2", worst_h, null, 1e-4);
+    try claim("opus_quasar.geodesic.carter", "Carter constant is conserved along the integration", "Carter 1968 constant Q", cond, "max |dQ / Q|", worst_q, null, 1e-4);
 }
 
 fn nullB(a: f64, L: f64, y: V6) f64 {
@@ -2312,8 +2472,10 @@ test "Page-Thorne flux: zero at the ISCO, positive outside, Newtonian at large r
     var f: [PT_N]f64 = undefined;
     const r_in = isco(0.3);
     pageThorne(0.3, r_in, 1.0e5, &f);
-    try testing.expectEqual(@as(f64, 0.0), f[0]);
-    for (f[1..]) |v| try testing.expect(v > 0.0);
+    const ref = "Page & Thorne 1974";
+    const cond = "a = 0.3, r from r_isco to 1e5 M, 4096 log-spaced nodes";
+    try claim("opus_quasar.page_thorne.isco_zero", "Page-Thorne flux vanishes at the ISCO (zero-torque edge)", ref, cond, "F(r_isco)", f[0], 0.0, 0.0);
+    try claim("opus_quasar.page_thorne.positive", "Page-Thorne flux is positive outside the ISCO", ref, cond, "min F(r > r_isco)", std.mem.min(f64, f[1..]), math.floatMin(f64), null);
     // far out F -> C (1 - sqrt(r_*/r)) / r^3 ; F r^3 must flatten to a constant
     const dl = @log(1.0e5 / r_in) / @as(f64, PT_N - 1);
     const k1: usize = @intFromFloat(@log(2.0e4 / r_in) / dl);
@@ -2321,19 +2483,19 @@ test "Page-Thorne flux: zero at the ISCO, positive outside, Newtonian at large r
     const ra = r_in * @exp(dl * @as(f64, @floatFromInt(k1)));
     const rb = r_in * @exp(dl * @as(f64, @floatFromInt(k2)));
     const ratio = (f[k1] * ra * ra * ra) / (f[k2] * rb * rb * rb);
-    try testing.expectApproxEqAbs(1.0, ratio, 0.02);
+    try claim("opus_quasar.page_thorne.newtonian", "Page-Thorne flux becomes Newtonian (F r^3 -> const) far out", "Shakura & Sunyaev 1973 F ~ r^-3", cond, "(F r^3)(2e4 M) / (F r^3)(1e5 M)", ratio, 0.98, 1.02);
 }
 
-
 test "blackbody colours: 6500 K is near white, 3000 K is warm, 20000 K is blue" {
+    const ref = "Planck spectrum x CIE 1931 colour-matching functions";
     const w = blackbodyRGB(6500.0);
     const mx = @max(w[0], @max(w[1], w[2]));
     const mn = @min(w[0], @min(w[1], w[2]));
-    try testing.expect(mx / mn < 1.15);
+    try claim("opus_quasar.blackbody.white", "A 6500 K blackbody is near white", ref, "T = 6500 K, linear sRGB", "max / min channel", mx / mn, null, 1.15);
     const c = blackbodyRGB(3000.0);
-    try testing.expect(c[0] > c[1] and c[1] > c[2]);
+    try claim("opus_quasar.blackbody.warm", "A 3000 K blackbody is warm (R > G > B)", ref, "T = 3000 K, linear sRGB", "min(R - G, G - B)", @min(c[0] - c[1], c[1] - c[2]), math.floatMin(f64), null);
     const hot = blackbodyRGB(20000.0);
-    try testing.expect(hot[2] > hot[0]);
+    try claim("opus_quasar.blackbody.blue", "A 20000 K blackbody is blue (B > R)", ref, "T = 20000 K, linear sRGB", "B / R", hot[2] / hot[0], 1.0, null);
 }
 
 test "redshift: approaching side is the prograde-photon side, and the shadow is flattened there" {
@@ -2341,9 +2503,11 @@ test "redshift: approaching side is the prograde-photon side, and the shadow is 
     const r = 6.0;
     const g_left = redshift(a, r, 6.0 * @sin(INCL)); // alpha = -6
     const g_right = redshift(a, r, -6.0 * @sin(INCL)); // alpha = +6
-    try testing.expect(g_left > 1.0 and g_right < 1.0);
-    const flat = bardeen(a, INCL, photonOrbit(a, true) + 0.05);
-    if (flat) |ab| try testing.expect(ab[0] < 0.0);
+    const ref = "g = 1 / (u^t (1 - Omega L)), prograde circular Kerr orbit";
+    try claim("opus_quasar.redshift.approaching", "Gas on the prograde-photon side (alpha < 0) approaches: blueshift", ref, "a = 0.62, i = 88 deg, r = 6 M, alpha = -6 M", "g", g_left, 1.0, null);
+    try claim("opus_quasar.redshift.receding", "Gas on the other side recedes: redshift", ref, "a = 0.62, i = 88 deg, r = 6 M, alpha = +6 M", "g", g_right, null, 1.0);
+    const flat = bardeen(a, INCL, photonOrbit(a, true) + 0.05) orelse return error.TestUnexpectedResult;
+    try claim("opus_quasar.redshift.flat_side", "The shadow's flattened (prograde) side is the approaching side", "Bardeen 1973 critical curve", "a = 0.62, i = 88 deg, r_ph(prograde) + 0.05 M", "alpha (M)", flat[0], null, 0.0);
 }
 
 test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, translucent tail" {
@@ -2366,20 +2530,23 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
         const v = at(&d, r_in, dl, rr);
         std.debug.print("  r {d:>4}: T_s {d:>7.0} K  tau_ext {e:.3}  tau_* {e:.3}\n", .{ rr, v[0], v[1], v[2] });
     }
-    try testing.expectApproxEqAbs(1.0, d.mass_budget, 0.01);
-    try testing.expect(d.pt_ratio_spread < 1.15);
-    try testing.expect(d.t_peak > 40_000.0 and d.t_peak < 60_000.0); // H1821+643's L ~ 0.2 L_Edd at 4e9 Msun
-    try testing.expectApproxEqAbs(0.2, EDD_RATIO * d.lum_ratio, 0.03); // the snapshot shines at its measured rate
-    try testing.expect(at(&d, r_in, dl, 10.0 * R_ISCO)[1] > 10.0); // opaque at 10 ISCO radii
-    try testing.expect(at(&d, r_in, dl, 45.0 * R_ISCO)[1] < 1e-2); // gone by 45
+    const cond = "a = 0.62, 4e9 Msun, alpha = 0.1, ISCO inflow 0.36 Mdot_Edd, ring at 4 r_isco evolved to flux reversal at 5 r_isco";
+    const mb = "Mummery & Balbus 2019 GR thin-disk equation";
+    try claim("opus_quasar.disk.mass_budget", "The evolved disk conserves mass (accreted + remaining = initial)", mb, cond, "mass budget", d.mass_budget, 0.99, 1.01);
+    try claim("opus_quasar.disk.page_thorne_inner", "Near the ISCO the snapshot is steady inflow (Page-Thorne)", "Page & Thorne 1974, at the snapshot's ISCO inflow", cond, "F/F_PT spread inside 1.5 r_isco", d.pt_ratio_spread, null, 1.15);
+    try claim("opus_quasar.disk.t_peak", "Peak disk temperature is quasar-like", "H1821+643: L ~ 0.2 L_Edd at 4e9 Msun (Fukuchi, Ichikawa et al. 2022)", cond, "T_peak (K)", d.t_peak, 40_000.0, 60_000.0);
+    try claim("opus_quasar.disk.eddington", "The snapshot shines at H1821+643's measured Eddington ratio", "lambda_Edd = 0.18 (full SED; Fukuchi, Ichikawa et al. 2022)", cond, "L / L_Edd", EDD_RATIO * d.lum_ratio, 0.17, 0.23);
+    try claim("opus_quasar.disk.opaque_10", "The disk is opaque at 10 ISCO radii", "electron scattering + Kramers opacity", cond, "tau_ext at 10 r_isco", at(&d, r_in, dl, 10.0 * R_ISCO)[1], 10.0, null);
+    try claim("opus_quasar.disk.thin_45", "The disk has faded to nothing by 45 ISCO radii (no edge)", "electron scattering + Kramers opacity", cond, "tau_ext at 45 r_isco", at(&d, r_in, dl, 45.0 * R_ISCO)[1], null, 1e-2);
 }
 
 test "colour correction and limb darkening: continuity, flux conservation, thin limit" {
     // Done et al. 2012: f = 1 below 3e4 K and continuous at 1e5 K (the 0.83 exponent joins the
     // Compton branch to 0.3%).
-    try testing.expectEqual(@as(f64, 1.0), colourFactor(2.9e4));
-    try testing.expectApproxEqRel(colourFactor(0.9999e5), colourFactor(1.0001e5), 5e-3);
-    try testing.expect(colourFactor(3.7e4) > 1.15 and colourFactor(3.7e4) < 1.2);
+    const done = "Done, Davis, Jin, Blaes & Ward 2012 colour correction";
+    try claim("opus_quasar.fcol.cold", "No colour correction below 3e4 K", done, "T = 2.9e4 K", "f_col", colourFactor(2.9e4), 1.0, 1.0);
+    try claim("opus_quasar.fcol.continuous", "Colour correction is continuous at 1e5 K", done, "T = 1e5 K +- 0.01%", "f(0.9999e5) / f(1.0001e5) - 1", colourFactor(0.9999e5) / colourFactor(1.0001e5) - 1.0, -5e-3, 5e-3);
+    try claim("opus_quasar.fcol.mid", "Colour correction on the (T/3e4)^0.83 branch", done, "T = 3.7e4 K", "f_col", colourFactor(3.7e4), 1.15, 1.2);
     // Limb darkening on a thick atmosphere conserves the flux of an isotropic emitter:
     // 2 int_0^1 I(mu) mu dmu = 1; and it switches off where the gas is thin.
     var flux: f64 = 0.0;
@@ -2388,7 +2555,9 @@ test "colour correction and limb darkening: continuity, flux conservation, thin 
         const mu = (@as(f64, @floatFromInt(i)) + 0.5) / n;
         flux += 2.0 * limbFactor(-@log(mu), 1e6) * mu / n;
     }
-    try testing.expectApproxEqAbs(1.0, flux, 1e-6);
-    try testing.expectApproxEqAbs(1.0, limbFactor(-@log(0.1), 1e-6), 1e-5);
-    try testing.expect(limbFactor(-@log(0.2), 1e6) < 0.6); // grazing view of the thick disk: dimmer
+    const limb = "Chandrasekhar H-function, linear fit 1 + 2.06 mu (Laor 1991)";
+    try claim("opus_quasar.limb.flux", "Limb darkening conserves an isotropic emitter's flux", limb, "tau_ext = 1e6, midpoint rule over 20000 mu", "2 int I(mu) mu dmu", flux, 1.0 - 1e-6, 1.0 + 1e-6);
+    try claim("opus_quasar.limb.thin", "Limb darkening switches off where the gas is thin", limb, "tau_ext = 1e-6, mu = 0.1", "I(mu) / I_iso", limbFactor(-@log(0.1), 1e-6), 1.0 - 1e-5, 1.0 + 1e-5);
+    try claim("opus_quasar.limb.grazing", "A grazing view of the thick disk is dimmer", limb, "tau_ext = 1e6, mu = 0.2", "I(mu) / I_iso", limbFactor(-@log(0.2), 1e6), null, 0.6);
 }
+
