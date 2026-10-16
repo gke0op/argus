@@ -6,10 +6,9 @@ Our programs live in terminals and editors. We rarely get to see them run in the
 right there on the desktop. Argus fixes that: ignite a relativistic quasar behind your windows
 for a few milliseconds of GPU a frame, or really anything you can write a pixel for.
 
-<p align="center">
-  <img src="docs/media/hero.gif" alt="The seven Argus themes in turn: Cygnus A, a quasar (spinning Kerr black hole with its accretion disk) as the camera tilts to nearly edge-on, then Night Tide, Lizard Island, Orion Nebula, Ebru Studio, Tutorial Reef and Tutorial Tides" width="100%">
-</p>
-<p align="center"><a href="docs/media/hero.mp4">Watch in full quality (MP4)</a></p>
+https://github.com/user-attachments/assets/214949f1-89ae-4a92-bc46-31b52c7ffadf
+
+<p align="center"><sub>Cygnus A as the camera tilts to nearly edge-on. 120 FPS, rendered by the theme's own code. The other six are <a href="#the-themes">below</a>.</sub></p>
 
 ## What it is
 
@@ -30,6 +29,38 @@ a pixel grid, a clock and a frame budget.
 The engine itself is Zig 0.17.0 talking straight to the macOS frameworks, with no AppKit wrapper.
 It runs at 30 FPS, draws only the Spaces you can see, and does nothing at all while a
 full-screen app, the lock screen or a sleeping display covers them.
+
+## The themes
+
+Seven themes ship with the app. Each clip is 9 s at 120 FPS, drawn offline by the theme's own
+code on the app's GPU path, paced the way the app paces it. None of it is a screen recording.
+
+**Night Tide**: a night on the coast; the flashes in the surf follow published dinoflagellate
+research.
+
+https://github.com/user-attachments/assets/1e33cce0-f90f-45ff-ba3c-19aafc9aea05
+
+**Lizard Island**: a diver's drift over a real Great Barrier Reef lagoon at metre scale.
+
+https://github.com/user-attachments/assets/b68f698b-2cd2-4960-853f-f5835d6e11c7
+
+**Orion Nebula**: the heart of M42, built from what telescopes measured of it; as the view
+swings round, the 3D shape behind the image appears.
+
+https://github.com/user-attachments/assets/fb49a17f-1f52-4e93-844d-7c3b3b9ba214
+
+**Ebru Studio**: a Turkish marbling bath worked by a restless random hand, under a glass
+ceiling of studio lights.
+
+https://github.com/user-attachments/assets/b802e6f5-b52d-45f7-ad17-f4f8cc562b2d
+
+**Tutorial Reef**: the second tutorial, a reaction-diffusion reef that remembers between frames.
+
+https://github.com/user-attachments/assets/b4b1fafb-fe49-4463-95c6-0ada4525fc08
+
+**Tutorial Tides**: the first tutorial, an aurora over a night sea in five small steps.
+
+https://github.com/user-attachments/assets/a8786324-56d5-4646-a5a9-ad097ef7265e
 
 ## The quasar
 
@@ -64,11 +95,7 @@ physicists: [docs/QUASAR_MODEL.md](docs/QUASAR_MODEL.md).
 Want your own? Cygnus A is generated from a template (`make quasars`); give it a mass, a
 spin and a feeding rate and grow your own plump one.
 
-Beyond the black hole: [`Night_Tide`](themes/Night_Tide.metal), a beautiful night on the
-coast where the flashes in the surf follow published dinoflagellate research, and
-[`Lizard_Island`](themes/Lizard_Island.metal), a diver's drift over a real Great Barrier Reef
-lagoon at metre scale, built from field sources. And more in
-[`themes/`](themes/): drag any of them onto a Space.
+Every shipped theme is in [`themes/`](themes/): drag any of them onto a Space.
 
 ## Install
 

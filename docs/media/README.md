@@ -4,8 +4,8 @@ Every theme frame is rendered offline by the themes' own code on the GPU path th
 
 | File | Size | What it is |
 |---|---|---|
-| `hero.mp4` | 9.7 MB | 1920×1080, **120 FPS**, 21.5 s, H.264 High (two-pass, 3.5 Mbit/s). All seven shipped themes in turn, 0.5 s crossfades: Cygnus_A (6.5 s, the camera tilting 72° → 88°), then Night_Tide, Lizard_Island, Orion_Nebula, Ebru_Studio, Tutorial_Reef and Tutorial_Tides (3 s each) |
-| `hero.gif` | 4.5 MB | 400×226, 25 FPS, 8.6 s loop. The same seven, shorter: Cygnus A at 2× speed, the others 1.2 s each, cut from the same 120 FPS masters |
+| The seven theme clips | 6.2–9.1 MB each | 1920×1080, **120 FPS**, 9 s each, H.264 High in a QuickTime `.mov` flagged `com.apple.quicktime.full-frame-rate-playback-intent=1` (without it, QuickTime plays 120 FPS clips as slow motion). One per shipped theme: Cygnus_A (the camera tilting 72° → 88°), Night_Tide, Lizard_Island, Orion_Nebula, Ebru_Studio, Tutorial_Reef, Tutorial_Tides. Not in git: GitHub plays video only from user attachments (10 MB each at most), so the README links those |
+| `hero.gif` | 4.5 MB | 400×226, 25 FPS, 8.6 s loop, for posts and anywhere video does not play. The seven themes in turn: Cygnus A at 2× speed, the others 1.2 s each, cut from the same 120 FPS masters |
 | `cygnus-a.png` | 0.5 MB | Cygnus_A at its live camera (88°), 1920×1080 |
 | `night-tide.png` | 1.0 MB | Night_Tide, 1920×1080, 12.8 s into the simulation |
 | `spaces.png` | 0.5 MB | The seven shipped themes, one per Space, and an eighth Space left on macOS Default. Each tile is a 1920×1080 offline frame |
@@ -14,11 +14,11 @@ Every theme frame is rendered offline by the themes' own code on the GPU path th
 | `popover.png` | 0.16 MB | The menu-bar popover (Spaces strip) with the seven shipped themes, 1360×196 (2×) |
 | `settings.png` | 0.04 MB | The popover's Settings view, 1360×196 (2×) |
 
-## Cygnus_A (video, GIF, stills, card)
+## Cygnus_A (clip, GIF, stills, card)
 
 A small driver (`src/launch_render_bh.zig`, not committed) does what `make gpu-bench` does. It takes the theme's tables and `step()` state from `src/gpu/bh_tables.zig` and runs the app's engine `src/gpu/bh_gpu.zig` (meter → trace → footprint → shade, the kernels in `opus_black_hole.metal`) with sRGB 8-bit output. The theme's `init()` skips its CPU trace, as it does in the app. Time advances as the app's frame pacer (`src/desktop/frame_rate.zig`) advances it: `step(0.008)` per 30 Hz logic tick, spread over the frames, so `step(0.002)` per frame at 120 FPS. A held inclination is traced once and shaded every frame, as in the app. **The earlier hero (30 FPS, October 16) ran Cygnus A's turbulence too fast:** its driver stepped the theme 1/30 s per frame instead of 0.008 per tick, about 4.2× the wallpaper's speed. This render steps it exactly as the app does. It also includes the shear-aware turbulence filter that keeps the disk from shimmering at 120 FPS.
 
-The only departure from the live wallpaper is the camera move. The GPU trace takes the inclination as a runtime parameter (`TraceParams.incl/sin_i/cos_i`). The video holds 72° for 0.25 s, eases (smoothstep) to 88° over 4.5 s, then holds 88°. 88° is the theme's own `INCL`: the last 3 s are exactly what the wallpaper shows. Every frame is a fresh full geodesic trace at its inclination, with no interpolation between frames. Exposure is the engine's own meter at each frame's inclination, smoothed over time (Gaussian, σ = 32 frames at 120 FPS, in log space) so its 1/8-stop histogram bins don't flicker. On the held 88° frames it equals the live meter.
+The only departure from the live wallpaper is the camera move. The GPU trace takes the inclination as a runtime parameter (`TraceParams.incl/sin_i/cos_i`). The clip holds 72° for 0.25 s, eases (smoothstep) to 88° over 4.5 s, then holds 88°. 88° is the theme's own `INCL`: the last 3 s are exactly what the wallpaper shows. Every frame is a fresh full geodesic trace at its inclination, with no interpolation between frames. Exposure is the engine's own meter at each frame's inclination, smoothed over time (Gaussian, σ = 32 frames at 120 FPS, in log space) so its 1/8-stop histogram bins don't flicker. On the held 88° frames it equals the live meter.
 
 ## Night_Tide and the other Metal themes
 
@@ -32,4 +32,4 @@ These are the app's own drawing of the popover, not a screen capture. The `--sna
 
 ## Encoding
 
-Frames were piped as raw RGBA into FFV1 lossless masters (kept out of git). They were converted to YUV with the BT.709 matrix (the earlier encodes used ffmpeg's default BT.601 matrix under a BT.709 tag, a slight colour shift) and encoded with two-pass `libx264 -preset slow -profile:v high` to fit under GitHub's 10 MB inline-video limit, tagged BT.709, with `+faststart`. The GIF uses a 192-colour palette (`palettegen`/`paletteuse`, sierra2_4a dither). The PNGs are truecolor at zlib level 9.
+Frames were piped as raw RGBA into FFV1 lossless masters (kept out of git). They were converted to YUV with the BT.709 matrix (the earlier encodes used ffmpeg's default BT.601 matrix under a BT.709 tag, a slight colour shift) and encoded with two-pass `libx264 -preset slow -profile:v high` to fit under GitHub's 10 MB inline-video limit, and remuxed into `.mov` with the playback-intent flag, tagged BT.709, with `+faststart`. The GIF uses a 192-colour palette (`palettegen`/`paletteuse`, sierra2_4a dither). The PNGs are truecolor at zlib level 9.
