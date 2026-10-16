@@ -1,10 +1,10 @@
 # Launch media: how it was made
 
-Every frame of the black hole and the beach is rendered offline by the themes' own code on the GPU path the app uses. None of it is a screen recording, an upscale or a reconstruction. Text, labels and layout were added afterwards in HTML and rendered with headless Chrome.
+Every frame of the quasar and the beach is rendered offline by the themes' own code on the GPU path the app uses. None of it is a screen recording, an upscale or a reconstruction. Text, labels and layout were added afterwards in HTML and rendered with headless Chrome.
 
 | File | Size | What it is |
 |---|---|---|
-| `hero.mp4` | 3.9 MB | 1920×1080, 30 FPS, 15.5 s, H.264 High (CRF 21). Cygnus_A for 11.5 s, a 1 s crossfade, then Night_Tide for 5 s |
+| `hero.mp4` | 3.9 MB | 1920×1080, 30 FPS, 15.5 s, H.264 High (CRF 21). Cygnus_A (a quasar: a spinning Kerr black hole with its accretion disk) for 11.5 s, a 1 s crossfade, then Night_Tide for 5 s |
 | `hero.gif` | 3.6 MB | 640×300, 15 FPS, 4.9 s loop. The Cygnus A camera sweep played forward, then backward |
 | `cygnus-a.png` | 0.5 MB | Cygnus_A at its live camera (88°), 1920×1080 |
 | `night-tide.png` | 1.0 MB | Night_Tide, 1920×1080, 12.8 s into the simulation |
