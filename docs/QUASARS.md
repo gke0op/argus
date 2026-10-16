@@ -1,6 +1,7 @@
 # The Quasars
 
-*A quasar on your desktop: Cygnus A, a spinning (Kerr) black hole with its accretion disk, both computed.*
+**Cygnus A**  
+*Quasar: spinning (Kerr) black hole with its accretion disk, both computed.*
 
 A quasar is a supermassive black hole caught in the middle of a meal. Gas spirals in, rubs
 against itself, heats past 30,000 degrees and outshines its whole galaxy. No telescope can

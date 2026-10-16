@@ -7,7 +7,7 @@ right there on the desktop. Argus fixes that: ignite a relativistic quasar behin
 for a few milliseconds of GPU a frame, or really anything you can write a pixel for.
 
 <p align="center">
-  <img src="docs/media/hero.gif" alt="Cygnus A: a quasar, a spinning (Kerr) black hole with its accretion disk; the camera tilts from 72 to 88 degrees, nearly edge-on, and back" width="100%">
+  <img src="docs/media/hero.gif" alt="Cygnus A. Quasar: spinning (Kerr) black hole with its accretion disk; the camera tilts from 72 to 88 degrees, nearly edge-on, and back" width="100%">
 </p>
 <p align="center"><a href="docs/media/hero.mp4">Watch in full quality (MP4)</a></p>
 
@@ -33,8 +33,12 @@ full-screen app, the lock screen or a sleeping display covers them.
 
 ## The quasar
 
-One quasar ships with the app, and it is real: **Cygnus A, a spinning (Kerr) black hole with its
-accretion disk, both computed.** Kerr is what the black hole *is*: the exact solution for a
+One quasar ships with the app, and it is real:
+
+> **Cygnus A**
+> Quasar: spinning (Kerr) black hole with its accretion disk, both computed.
+
+Kerr is what the black hole *is*: the exact solution for a
 spinning black hole, which every real one should be. The quasar is what it is *doing*: feeding
 through a luminous disk. Every pixel's light is traced along exact Kerr light paths, the disk's
 glow comes from a physical model of a feeding quasar, and the approximations and artistic
