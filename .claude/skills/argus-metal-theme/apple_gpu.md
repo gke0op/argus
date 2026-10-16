@@ -4,8 +4,7 @@ How Apple-silicon GPUs work and what that means for Argus's engine: measured on 
 (`make gpu-arch`, the harness, `make gpu-probes`) and checked against Apple's own material.
 Tags: **[measured]** here, **[Apple]** stated by Apple, **[RE]** reverse-engineered by
 others. Numbers are for an M3 at 1920x1200 unless noted; ratios travel better than
-absolutes. Some measurements name themes that are no longer in `themes/` (Coral Reef,
-Gemini Aquarium, Lizard Island); they are in the history: `git show f566e3a:themes/<name>`.
+absolutes.
 
 ## 1. The machine
 
@@ -26,7 +25,7 @@ Gemini Aquarium, Lizard Island); they are in the history: `git show f566e3a:them
 - **M3 Dynamic Caching** [Apple, WWDC23 "Explore GPU advancements in M3 and A17 Pro"]:
   registers, threadgroup memory and tile memory come from one on-chip pool allocated at
   run time, by what the code actually uses. So on an M3:
-  - code that doesn't run doesn't cost (an unused coral path in Coral Reef: 0.02 ms)
+  - code that doesn't run doesn't cost (an unused coral path in a reef theme: 0.02 ms)
     [measured];
   - reserving threadgroup memory (up to 28 KB) had no occupancy effect [measured];
   - threadgroup shape made no difference once the GPU was warm [measured].
@@ -50,8 +49,8 @@ frame takes ~1.9x longer than back-to-back** [measured, `make gpu-arch ARCH=cloc
 | paced at 10 FPS (a warm neighbour) | 1.28 ms |
 
 The harness reports both (`Profile (BGRA8)` and `Paced 30 FPS`). Live costs of the
-Metal themes are 1.4–2.3x their back-to-back numbers: Lizard Island 2.6 → 5.6 ms, Coral
-Reef 3.3 → 5.9 ms, Aquarium 1.7 → 3.5 ms, Tides 0.6 → 1.5 ms. That is efficient (a low
+Metal themes are 1.4–2.3x their back-to-back numbers: a lagoon theme 2.6 → 5.6 ms, a reef
+theme 3.3 → 5.9 ms, an aquarium theme 1.7 → 3.5 ms, Tutorial_Tides 0.6 → 1.5 ms. That is efficient (a low
 clock is low power), but **budgets must be judged on the paced number**, and A/B tests
 must warm the GPU first: two of the "wins" this study first found (compute 2x slower than
 fragment, 32x32 groups 2.5x slower) were the GPU clock ramping up during the first
