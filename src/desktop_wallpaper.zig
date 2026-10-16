@@ -10,6 +10,7 @@ const settings = @import("desktop/settings.zig");
 const login_item = @import("desktop/login_item.zig");
 const pl = @import("desktop/popover_layout.zig");
 const frame_rate = @import("desktop/frame_rate.zig");
+const popover_dismiss = @import("desktop/popover_dismiss.zig");
 
 pub const NATIVE_W = sc.NATIVE_W;
 pub const NATIVE_H = sc.NATIVE_H;
@@ -1784,6 +1785,7 @@ fn onPrepareForDragOperation(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) cal
 
 fn onDraggingEntered(_: ?*anyopaque, _: ?*anyopaque, sender: ?*anyopaque) callconv(.c) usize {
     const b = g_bridge orelse return 0;
+    g_dismiss.dragOver(nowSeconds());
     const loc = b.msgRetPoint(sender, b.sel_registerName("draggingLocation"));
     const top_y = (pl.SPACES_H - 1.0) - loc.y;
     // Holding a dragged file near either end of the strip scrolls it to the hidden Spaces.
@@ -1858,6 +1860,10 @@ fn onPerformDragOperation(_: ?*anyopaque, _: ?*anyopaque, sender: ?*anyopaque) c
         }
     }
 
+    if (ok) {
+        g_dismiss.dropped();
+        clearDropHint(b);
+    }
     b.renderActiveDesktopSpace();
     b.flushPopoverLayer();
     return ok;
@@ -1896,6 +1902,8 @@ fn onStatusItemClick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c
 }
 
 fn closePopover(b: *MacBridge) void {
+    g_dismiss.closed();
+    clearDropHint(b);
     b.popover_visible = false;
     b.pending_thumb = null;
     b.slider_drag = false;
@@ -1933,10 +1941,71 @@ const EV_LEFT_DRAGGED: usize = 6;
 const EV_KEY_DOWN: usize = 10;
 const KEY_ESCAPE: usize = 53;
 
-/// A press outside the popover closes it on release, unless the press became a drag: dragging a
-/// theme out of Finder onto the strip starts with a click outside and must keep it open.
-var g_outside_press = false;
-var g_outside_dragged = false;
+/// When an outside click closes the popover, including drop mode (desktop/popover_dismiss.zig).
+var g_dismiss: popover_dismiss.Dismiss = .{};
+const DROP_HINT = "Drag a theme onto a Space";
+
+fn nowSeconds() f64 {
+    return @as(f64, @floatFromInt(std.Io.Clock.awake.now(g_io).nanoseconds)) / 1e9;
+}
+
+/// The themes button opened Finder: Finder clicks keep the popover open for a while.
+fn enterDropMode(b: *MacBridge) void {
+    g_dismiss.enterDropMode(nowSeconds());
+    b.setNote(false, DROP_HINT, .{});
+    b.flushPopoverLayer();
+}
+
+fn clearDropHint(b: *MacBridge) void {
+    if (b.note_len > 0 and std.mem.eql(u8, b.note_buf[0..b.note_len], DROP_HINT)) b.note_len = 0;
+}
+
+/// Finder's process id, for telling which app a click went to.
+fn finderPid(b: *MacBridge) i32 {
+    const NSRunningApplication = b.objc_getClass("NSRunningApplication") orelse return -1;
+    const id = b.msgUTF8(b.NSString, b.sel_str_utf8, "com.apple.finder");
+    const apps = b.msgIdRetId(NSRunningApplication, b.sel_registerName("runningApplicationsWithBundleIdentifier:"), id) orelse return -1;
+    const app = b.msg0(apps, b.sel_registerName("firstObject")) orelse return -1;
+    return @truncate(b.msgRetInt(app, b.sel_registerName("processIdentifier")));
+}
+
+var g_cg_window_info: ?*const fn (u32, u32) callconv(.c) ?*anyopaque = null;
+var g_key_owner_pid: ?*anyopaque = null;
+
+/// True when a global mouse event went to Finder: Finder is frontmost, or the event's window
+/// (CGWindowList) belongs to Finder. The desktop is Finder's too, and its icons can be dragged.
+fn clickInFinder(b: *MacBridge, event: ?*anyopaque) bool {
+    if (b.objc_getClass("NSWorkspace")) |NSWorkspace| {
+        if (b.msg0(b.msg0(NSWorkspace, b.sel_registerName("sharedWorkspace")), b.sel_registerName("frontmostApplication"))) |front| {
+            if (b.msg0(front, b.sel_registerName("bundleIdentifier"))) |bid| {
+                if (b.msgRetCStr(bid, b.sel_registerName("UTF8String"))) |c| {
+                    if (std.mem.eql(u8, std.mem.span(c), "com.apple.finder")) return true;
+                }
+            }
+        }
+    }
+    if (g_cg_window_info == null) {
+        const cg = std.c.dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", .{ .LAZY = true }) orelse return false;
+        g_cg_window_info = @ptrCast(@alignCast(std.c.dlsym(cg, "CGWindowListCopyWindowInfo") orelse return false));
+        const key: *const ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(cg, "kCGWindowOwnerPID") orelse return false));
+        g_key_owner_pid = key.*;
+    }
+    const wid: u32 = @truncate(@as(usize, @bitCast(b.msgRetInt(event, b.sel_registerName("windowNumber")))));
+    if (wid == 0) return false;
+    const info = g_cg_window_info.?(1 << 3, wid) orelse return false; // kCGWindowListOptionIncludingWindow
+    defer b.CFRelease(info);
+    if (b.CFArrayGetCount(info) < 1) return false;
+    const dict = b.CFArrayGetValueAtIndex(info, 0) orelse return false;
+    const num = b.CFDictionaryGetValue(dict, g_key_owner_pid) orelse return false;
+    var pid: i32 = 0;
+    if (!b.CFNumberGetValue(num, 3, &pid)) return false; // kCFNumberSInt32Type
+    return pid == finderPid(b);
+}
+
+fn clickWhere(b: *MacBridge, event: ?*anyopaque) popover_dismiss.Where {
+    if (mouseInsidePopover(b)) return .popover;
+    return if (clickInFinder(b, event)) .finder else .elsewhere;
+}
 
 fn mouseInsidePopover(b: *MacBridge) bool {
     const m = b.msgRetPoint(b.NSEvent, b.sel_registerName("mouseLocation"));
@@ -1950,16 +2019,10 @@ fn onOutsideEvent(_: ?*anyopaque, event: ?*anyopaque) callconv(.c) void {
     if (!b.popover_visible) return;
     const t: usize = @bitCast(b.msgRetInt(event, b.sel_registerName("type")));
     switch (t) {
-        EV_LEFT_DOWN => {
-            g_outside_press = !mouseInsidePopover(b);
-            g_outside_dragged = false;
-        },
-        EV_LEFT_DRAGGED => g_outside_dragged = true,
-        EV_LEFT_UP => {
-            if (g_outside_press and !g_outside_dragged and !mouseInsidePopover(b)) closePopover(b);
-            g_outside_press = false;
-        },
-        EV_RIGHT_DOWN => if (!mouseInsidePopover(b)) closePopover(b),
+        EV_LEFT_DOWN => g_dismiss.leftDown(clickWhere(b, event), nowSeconds()),
+        EV_LEFT_DRAGGED => g_dismiss.leftDragged(nowSeconds()),
+        EV_LEFT_UP => if (g_dismiss.leftUp(mouseInsidePopover(b))) closePopover(b),
+        EV_RIGHT_DOWN => if (g_dismiss.rightDown(clickWhere(b, event), nowSeconds())) closePopover(b),
         else => {},
     }
 }
@@ -1981,7 +2044,7 @@ fn onAppResignActive(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c
     const b = g_bridge orelse return;
     if (!b.popover_visible) return;
     const buttons: usize = @bitCast(b.msgRetInt(b.NSEvent, b.sel_registerName("pressedMouseButtons")));
-    if (buttons & 1 == 0 and !mouseInsidePopover(b)) closePopover(b);
+    if (g_dismiss.resignActive(buttons & 1 != 0, mouseInsidePopover(b))) closePopover(b);
 }
 
 fn installPopoverDismissal(b: *MacBridge, msg_send: *align(4) const anyopaque, ctrl: ?*anyopaque) void {
@@ -2060,7 +2123,10 @@ fn onPopoverMouseDown(_: ?*anyopaque, _: ?*anyopaque, event: ?*anyopaque) callco
 fn handlePopoverHit(b: *MacBridge, hit: pl.Hit) void {
     const sel = @min(b.sel_space, b.obs.n_spaces -| 1);
     switch (hit) {
-        .open_themes => b.openThemesFolder(),
+        .open_themes => {
+            b.openThemesFolder();
+            enterDropMode(b);
+        },
         .toggle_pause => b.setPaused(!b.obs.paused),
         .open_settings => {
             b.sel_space = b.obs.active_space_idx;
@@ -2338,6 +2404,11 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
         b.writePopoverPng(.settings, dir, "popover_settings_paused.png");
         std.process.exit(0);
     };
+
+    if (g_dismiss.tick(nowSeconds())) {
+        clearDropHint(b);
+        if (b.popover_visible) b.flushPopoverLayer();
+    }
 
     if (b.note_until != 0 and b.frame_idx >= b.note_until) {
         b.note_len = 0;
@@ -3196,6 +3267,7 @@ test {
     _ = @import("desktop/login_item.zig");
     _ = @import("desktop/popover_layout.zig");
     _ = @import("desktop/frame_rate.zig");
+    _ = @import("desktop/popover_dismiss.zig");
 }
 
 test "Metal-only themes load into a Space and render on the GPU" {
