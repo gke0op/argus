@@ -183,6 +183,14 @@ const MacBridge = struct {
     browse_idx: ?usize = null, // stepper position, kept even when that theme failed to load
     slider_drag: bool = false,
     strip_scroll: f64 = 0.0, // points the Spaces strip is scrolled right (more than 7 Spaces)
+    // A single click on a thumbnail opens Settings once the double-click window has passed; a
+    // second click inside it ejects that Space instead.
+    pending_thumb: ?usize = null,
+    pending_until: usize = 0,
+    last_thumb: ?usize = null,
+    last_thumb_frame: usize = 0,
+    eject_flash_idx: ?usize = null,
+    eject_flash_frame: usize = 0,
     msgRetF64: MsgSendRetF64,
     // One-line note under the selected Space ("Loading Echo…", "Couldn't load …").
     note_buf: [96]u8 = undefined,
@@ -959,8 +967,8 @@ const MacBridge = struct {
 
         // Header: themes folder (left), "Argus" (centre), pause/play and Settings (right).
         self.themesIcon(ctx, H, 20.0, 11.0);
-        if (self.note_len > 0 and self.note_error) {
-            self.drawLabel(ctx, H, W * 0.5, 12.0, self.note_buf[0..self.note_len], self.dict_small, C_ERROR, .center);
+        if (self.note_len > 0) {
+            self.drawLabel(ctx, H, W * 0.5, 12.0, self.note_buf[0..self.note_len], self.dict_small, if (self.note_error) C_ERROR else C_BODY, .center);
         } else {
             self.drawLabel(ctx, H, W * 0.5, 10.5, "Argus", self.dict_title, C_TITLE, .center);
         }
@@ -988,6 +996,12 @@ const MacBridge = struct {
             if (r.x + r.w < clip.x or r.x > clip.x + clip.w) continue; // scrolled out of view
             const is_drag_hover = (self.obs.drag_hover_idx != null and self.obs.drag_hover_idx.? == idx);
             self.drawStripThumb(ctx, H, r, sp, idx == self.obs.active_space_idx, is_drag_hover);
+            if (self.ejectFlashing() and self.eject_flash_idx.? == idx) {
+                // Ejected: a white flash over the now-empty tile that fades out.
+                const age: f64 = @floatFromInt(self.frame_idx -% self.eject_flash_frame);
+                const a = 0.6 * (1.0 - age / @as(f64, @floatFromInt(EJECT_FLASH_TICKS)));
+                self.fillR(ctx, H, r, 4.5, .{ 1.0, 1.0, 1.0, a });
+            }
         }
     }
 
@@ -1256,11 +1270,33 @@ const MacBridge = struct {
         self.dropMetalTheme(idx);
         self.dropGpu(idx);
         self.gpu_tried[idx] = null;
-        const sp = &self.obs.spaces[idx];
-        sp.unloadShader();
-        sp.setPath("");
+        self.obs.spaces[idx].resetToDefault();
         self.applyThemeModeToSpace(idx, .passthrough);
         self.note_len = 0;
+    }
+
+    /// Double-click or two-finger tap on a strip thumbnail: eject the Space's theme (or picture)
+    /// back to macOS Default, with a brief flash on the thumbnail and a toast in the header.
+    /// A Space already at the default is left alone.
+    pub fn ejectSpace(self: *MacBridge, idx: usize) void {
+        if (idx >= self.obs.n_spaces or self.obs.spaces[idx].mode == .passthrough) return;
+        self.resetSpaceToDefault(idx);
+        if (self.sel_space == idx) self.browse_idx = null;
+        self.eject_flash_idx = idx;
+        self.eject_flash_frame = self.frame_idx;
+        self.setNote(false, "Space {s} back to macOS default", .{romanNumeral(self.obs.spaces[idx].index_1based)});
+        self.note_until = self.frame_idx + 75; // a toast: 2.5 s
+    }
+
+    fn ejectFlashing(self: *const MacBridge) bool {
+        return self.eject_flash_idx != null and self.frame_idx -% self.eject_flash_frame < EJECT_FLASH_TICKS;
+    }
+
+    /// Clicks within this many ticks count as one double-click (the system interval, capped so a
+    /// single click on a thumbnail still opens Settings promptly).
+    fn doubleClickTicks(self: *MacBridge) usize {
+        const secs = self.msgRetF64(self.NSEvent, self.sel_registerName("doubleClickInterval"));
+        return @intFromFloat(@ceil(std.math.clamp(secs, 0.15, 0.3) * 30.0));
     }
 
     pub fn setWarmNeighbors(self: *MacBridge, on: bool) void {
@@ -1734,6 +1770,8 @@ fn onStatusItemClick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c
         b.pop_face = .spaces;
         b.slider_drag = false;
         b.note_len = 0;
+        b.pending_thumb = null;
+        b.last_thumb = null;
         b.syncSpacesFromSkyLight(false);
         b.strip_scroll = pl.scrollToShow(b.obs.active_space_idx, b.strip_scroll, b.obs.n_spaces);
         b.renderAllSpaces();
@@ -1765,11 +1803,37 @@ fn popoverPoint(b: *MacBridge, event: ?*anyopaque) CGPoint {
 fn onPopoverMouseDown(_: ?*anyopaque, _: ?*anyopaque, event: ?*anyopaque) callconv(.c) void {
     const b = g_bridge orelse return;
     const p = popoverPoint(b, event);
+    const clicks = b.msgRetInt(event, b.sel_registerName("clickCount"));
+    const window = b.doubleClickTicks();
+    // The second click of a slow double-click can land after Settings opened: still an eject.
+    if (b.pop_face == .settings and clicks >= 2 and b.last_thumb != null and b.frame_idx -% b.last_thumb_frame <= window + 6) {
+        const idx = b.last_thumb.?;
+        b.last_thumb = null;
+        b.setPopFace(.spaces);
+        b.ejectSpace(idx);
+        b.flushPopoverLayer();
+        return;
+    }
     const hit = if (b.pop_face == .settings)
         pl.hitSettings(p.x, p.y)
     else
         pl.hitSpaces(p.x, p.y, b.obs.n_spaces, b.obs.paused, b.strip_scroll);
-    if (hit) |h| handlePopoverHit(b, h);
+    if (hit) |h| switch (h) {
+        .space_thumb => |i| {
+            if (clicks >= 2 and b.last_thumb == i) {
+                b.pending_thumb = null;
+                b.last_thumb = null;
+                b.ejectSpace(i);
+            } else {
+                // Settings opens from onTick once a second click can no longer come.
+                b.pending_thumb = i;
+                b.pending_until = b.frame_idx + window;
+                b.last_thumb = i;
+                b.last_thumb_frame = b.frame_idx;
+            }
+        },
+        else => handlePopoverHit(b, h),
+    };
     b.renderActiveDesktopSpace();
     b.flushPopoverLayer();
 }
@@ -1830,12 +1894,31 @@ fn onPopoverMouseDragged(_: ?*anyopaque, _: ?*anyopaque, event: ?*anyopaque) cal
     b.flushPopoverLayer();
 }
 
+/// Two-finger tap (secondary click) on a strip thumbnail ejects that Space's theme.
+fn onPopoverRightMouseDown(_: ?*anyopaque, _: ?*anyopaque, event: ?*anyopaque) callconv(.c) void {
+    const b = g_bridge orelse return;
+    if (b.pop_face != .spaces) return;
+    const p = popoverPoint(b, event);
+    const hit = pl.hitSpaces(p.x, p.y, b.obs.n_spaces, b.obs.paused, b.strip_scroll) orelse return;
+    switch (hit) {
+        .space_thumb => |i| {
+            b.pending_thumb = null;
+            b.ejectSpace(i);
+            b.flushPopoverLayer();
+        },
+        else => {},
+    }
+}
+
 fn onPopoverMouseUp(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     const b = g_bridge orelse return;
     if (!b.slider_drag) return;
     b.slider_drag = false;
     settings.setFloat("speed", b.obs.spin_mult);
 }
+
+/// Length of the eject flash on a thumbnail (0.4 s at 30 Hz).
+const EJECT_FLASH_TICKS: usize = 12;
 
 /// Off-screen neighbors re-render every 3rd 30 Hz tick (~10 FPS).
 const NEIGHBOR_WARM_TICKS: usize = 3;
@@ -1977,7 +2060,15 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
         b.note_until = 0;
     }
 
-    if (b.popover_visible and (b.frame_idx % 3) == 0) {
+    if (b.pending_thumb) |i| if (b.frame_idx >= b.pending_until) {
+        b.pending_thumb = null;
+        if (b.popover_visible and b.pop_face == .spaces and i < b.obs.n_spaces) {
+            b.sel_space = i;
+            b.setPopFace(.settings);
+        }
+    };
+
+    if (b.popover_visible and ((b.frame_idx % 3) == 0 or b.ejectFlashing())) {
         b.flushPopoverLayer();
     } else if (rendered_any) {
         // Single batched CATransaction flush per tick so off-screen/incoming Space windows update live mid-swipe
@@ -2285,6 +2376,7 @@ pub fn main(init: std.process.Init) !void {
     _ = class_addMethod(pop_view_cls, sel_registerName("mouseDragged:"), @ptrCast(&onPopoverMouseDragged), "v@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("mouseUp:"), @ptrCast(&onPopoverMouseUp), "v@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("scrollWheel:"), @ptrCast(&onPopoverScrollWheel), "v@:@");
+    _ = class_addMethod(pop_view_cls, sel_registerName("rightMouseDown:"), @ptrCast(&onPopoverRightMouseDown), "v@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("acceptsFirstMouse:"), @ptrCast(&onAcceptsFirstMouse), "B@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("draggingEntered:"), @ptrCast(&onDraggingEntered), "Q@:@");
     _ = class_addMethod(pop_view_cls, sel_registerName("draggingUpdated:"), @ptrCast(&onDraggingUpdated), "Q@:@");
@@ -2579,6 +2671,31 @@ pub fn main(init: std.process.Init) !void {
 
     onTick(null, null, null);
     msgVoid(ns_app, sel_registerName("run"));
+}
+
+test "eject: a theme Space goes back to macOS Default and saves as passthrough" {
+    g_io = std.testing.io;
+    sc.g_io = std.testing.io;
+    const alloc = std.testing.allocator;
+    const obs = try Observatory.init(alloc);
+    defer obs.deinit(alloc);
+    obs.n_spaces = 3;
+    obs.spaces[1].space_id = 42;
+    try std.testing.expect(obs.spaces[1].compileAndLoadShader(1, "themes/Gemini_Wormhole.zig"));
+    try std.testing.expectEqual(SpaceMode.custom_shader, obs.spaces[1].mode);
+
+    obs.spaces[1].resetToDefault();
+    const sp = &obs.spaces[1];
+    try std.testing.expectEqual(SpaceMode.passthrough, sp.mode);
+    try std.testing.expect(sp.dylib_handle == null and sp.custom_render_fn == null and sp.theme_state == null);
+    try std.testing.expectEqual(@as(usize, 0), sp.getPath().len);
+    try std.testing.expectEqualStrings("macOS Default", sp.getLabel());
+
+    var buf: [1024]u8 = undefined;
+    const conf = obs.serializeStateConfig(&buf);
+    try std.testing.expect(std.mem.indexOf(u8, conf, "1\tpassthrough\tmacOS Default\t\t42\n") != null);
+    // Hot reload never brings it back: a passthrough Space has no path to watch.
+    try std.testing.expect(std.mem.indexOf(u8, conf, "Gemini_Wormhole") == null);
 }
 
 test "Observatory multi-Space engine: default Spaces, shader hot-compilation and config parsing" {
