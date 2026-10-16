@@ -172,6 +172,9 @@ const MacBridge = struct {
     /// `--offscreen`: screen-sized windows far off-screen, no menu-bar item. For measuring the
     /// engine (memory, GPU) next to a running Argus without touching the live wallpaper.
     offscreen: bool = false,
+    /// `--bench-space N` (with --offscreen): Space N counts as the visible, active Space and
+    /// draws at 30 FPS whatever Space the user is on; no warm neighbours. For per-theme numbers.
+    bench_space: ?usize = null,
     native_data_providers: [MAX_SPACES]?*anyopaque = @splat(null),
     popover_win: ?*anyopaque,
     popover_layer: ?*anyopaque,
@@ -808,7 +811,7 @@ const MacBridge = struct {
     /// Renders a Space if it is on screen, or if it is a warm neighbor whose last frame is
     /// `warm_ticks` old. Returns true when it rendered.
     fn renderIfDue(self: *MacBridge, idx: usize, warm_ticks: usize) bool {
-        const visible = self.spaceWindowVisible(idx);
+        const visible = if (self.bench_space) |n| n == idx else self.spaceWindowVisible(idx);
         if (visible) self.perf_visible |= @as(u16, 1) << @intCast(idx);
         const last = self.last_render_tick[idx];
         const due = visible or (warm_ticks != 0 and (last == 0 or self.frame_idx + 1 >= last + warm_ticks));
@@ -1233,7 +1236,7 @@ const MacBridge = struct {
     /// "Smooth Space swipes" is on, so a swipe never reveals a stale frame; off, they wait until
     /// their window turns visible.
     fn neighborWarmTicks(self: *const MacBridge) usize {
-        return if (self.warm_neighbors) NEIGHBOR_WARM_TICKS else 0;
+        return if (self.warm_neighbors and self.bench_space == null) NEIGHBOR_WARM_TICKS else 0;
     }
 
     /// Loads the theme `delta` steps away in themes/ into the selected Space.
@@ -2110,9 +2113,9 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     // turns visible mid-swipe. Nothing renders while a fullscreen app's Space is active (it is not one
     // of ours, so active_space_id no longer matches the active slot), or while the screen is locked.
     b.tickGpu();
-    const active_idx = b.obs.active_space_idx;
+    const active_idx = b.bench_space orelse b.obs.active_space_idx;
     const active_is_ours = active_idx < b.obs.n_spaces and
-        b.obs.spaces[active_idx].space_id == b.obs.active_space_id;
+        (b.bench_space != null or b.obs.spaces[active_idx].space_id == b.obs.active_space_id);
     var rendered_any = false;
     if (!b.obs.paused and active_is_ours and !b.screen_locked) {
         b.obs.phase_accum += (1.0 / 150.0) * b.obs.spin_mult;
@@ -2275,6 +2278,7 @@ pub fn main(init: std.process.Init) !void {
     var headless_test = false;
     var normal_window = false;
     var offscreen = false;
+    var bench_space: ?usize = null;
     var max_frames: usize = 0;
     var perf_log = false;
     var snapshot_dir: ?[]const u8 = null;
@@ -2314,6 +2318,9 @@ pub fn main(init: std.process.Init) !void {
         } else if (std.mem.eql(u8, a, "--offscreen")) {
             normal_window = true;
             offscreen = true;
+        } else if (std.mem.eql(u8, a, "--bench-space") and i + 1 < args.len) {
+            i += 1;
+            bench_space = try std.fmt.parseInt(usize, args[i], 10);
         } else if (std.mem.eql(u8, a, "--frames") and i + 1 < args.len) {
             i += 1;
             max_frames = try std.fmt.parseInt(usize, args[i], 10);
@@ -2703,6 +2710,7 @@ pub fn main(init: std.process.Init) !void {
         .desktop_level = desktop_level,
         .normal_window = normal_window,
         .offscreen = offscreen,
+        .bench_space = if (offscreen) bench_space else null,
         .native_data_providers = native_data_providers,
         .popover_win = popover_win,
         .popover_layer = popover_layer,
