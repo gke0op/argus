@@ -19,7 +19,10 @@ M = 4e9 Msun: 1 M of length = 5.91e12 m (39.5 AU), 1 M of time = 19,700 s.
 
 ## 0. The flagship: Cygnus A
 
-The hidden quasar in the radio galaxy Cygnus A, generated from the same engine. Its own numbers,
+The hidden quasar in the radio galaxy Cygnus A: a spinning (Kerr) black hole with its accretion
+disk, both computed. The light paths are exact Kerr geodesics; the disk is the computed GR viscous
+model below. The disk rides on pure Kerr spacetime, so its own gravity is neglected, which is safe
+because its mass is a tiny fraction of the hole's. Generated from the same engine. Its own numbers,
 computed by its disk solution and recorded in [`docs/cygnus_a_ledger.json`](cygnus_a_ledger.json)
 (56 records: 49 asserted, all pass):
 
