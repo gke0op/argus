@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-tools/orion_bake/verify_earth_view.py -- checks that Opus_Orion_Nebula, seen from Earth (the
+tools/orion_bake/verify_earth_view.py -- checks that Orion_Nebula, seen from Earth (the
 orbit frozen at zero), shows exactly the measured line maps it ships.
 
     python3 -I tools/orion_bake/verify_earth_view.py <render.png> [--diff out.png]
 
 <render.png> is a harness frame of a copy of the theme with ORBIT_YAW and ORBIT_PITCH set to 0.
-This script rebuilds the same image independently from themes/Opus_Orion_Nebula.bin and the
+This script rebuilds the same image independently from themes/Orion_Nebula.bin and the
 baked constants (numpy, bilinear sampling, the same colour pipeline) and compares the two away
 from stars. Needs numpy and Pillow.
 """
@@ -15,7 +15,7 @@ import numpy as np
 from PIL import Image
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
-SRC = open(os.path.join(ROOT, "themes", "Opus_Orion_Nebula.metal")).read()
+SRC = open(os.path.join(ROOT, "themes", "Orion_Nebula.metal")).read()
 
 def const(name):
     m = re.search(rf"constant\s+\w+\s+{name}\s*=\s*([^;]+);", SRC)
@@ -39,7 +39,7 @@ TEXEL = num("TEXEL_PC"); EXPO = num("EXPOSURE"); STRETCH = num("STRETCH"); C_FG 
 cx, cy = (float(v) for v in re.findall(r"[-0-9.]+(?=f)", const("STAR_C_TEX"))[-2:])
 VIEW_W = num("VIEW_W_PC"); VX, VY = (float(v) for v in re.findall(r"[-0-9.]+(?=f)", const("VIEW_C"))[-2:])
 
-raw = np.fromfile(os.path.join(ROOT, "themes", "Opus_Orion_Nebula.bin"), np.uint8).reshape(2 * H, W, 4) / 255.0
+raw = np.fromfile(os.path.join(ROOT, "themes", "Orion_Nebula.bin"), np.uint8).reshape(2 * H, W, 4) / 255.0
 A, B = raw[:H][::-1], raw[H:][::-1]          # row 0 = south from here on
 dec = lambda e, k: 10 ** (LR[k][0] + e * (LR[k][1] - LR[k][0]))
 ha, o3, n2, s2 = dec(A[..., 0], 0), dec(A[..., 1], 1), dec(A[..., 2], 2), dec(A[..., 3], 3)

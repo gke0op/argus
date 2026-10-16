@@ -18,7 +18,7 @@ body:
     attributes:
       label: Theme
       description: Which theme (file name), if the bug is in a theme.
-      placeholder: themes/Opus_Night_Tide.metal
+      placeholder: themes/Night_Tide.metal
   - type: input
     id: mac
     attributes:

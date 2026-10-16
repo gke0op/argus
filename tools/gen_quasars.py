@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Generate the quasar family from themes/Opus_Quasar.zig.
+"""Generate the quasar family from themes/H1821.zig.
 
-Opus_Quasar.zig (H1821+643) is the one source of the engine. Each other quasar is the same
+H1821.zig (H1821+643) is the one source of the engine. Each other quasar is the same
 file with its own object paragraph, spin, mass and Eddington ratio, test bounds and ledger ids.
 Edit the source, then run `make quasars`; `make test` runs `--check` and fails on a stale file.
 
@@ -13,7 +13,11 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "themes", "Opus_Quasar.zig")
+# The source theme's name (file stem). Renaming it (e.g. to "Quasar") also needs a `git mv` of the
+# file and the same rename inside it: its header title, LEDGER_PREFIX and claim ids (lower case).
+SOURCE_NAME = "H1821"
+SRC = os.path.join(ROOT, "themes", SOURCE_NAME + ".zig")
+SOURCE_ID = SOURCE_NAME.lower() + "."  # its ledger id prefix
 
 # Each entry: the object's paragraph (replaces H1821+643's), the parameters, and the bounds of
 # its own disk claims. `edd` is the snapshot's ISCO inflow (Mdot_Edd units); the snapshot
@@ -21,8 +25,8 @@ SRC = os.path.join(ROOT, "themes", "Opus_Quasar.zig")
 # absolute L/L_Edd lands on lambda).
 QUASARS = [
     {
-        "file": "Opus_Cygnus_A.zig",
-        "title": "OPUS CYGNUS A",
+        "file": "Cygnus_A.zig",
+        "title": "CYGNUS A",
         "slug": "cygnus_a",
         # Computed by this theme's disk solution; its "computed disk" test checks them (HEADER).
         "computed": {"pt_25": 0.87, "pt_5": 0.51, "lum": 0.55, "l_edd": 0.0125, "t_peak": 37_700.0, "r_peak": 3.41, "h_over_r": 0.004},
@@ -47,8 +51,8 @@ QUASARS = [
 """,
     },
     {
-        "file": "Opus_J0834.zig",
-        "title": "OPUS J0834",
+        "file": "J0834.zig",
+        "title": "J0834",
         "slug": "j0834",
         # Computed by this theme's disk solution; its "computed disk" test checks them (HEADER).
         "computed": {"pt_25": 0.82, "pt_5": 0.47, "lum": 0.57, "l_edd": 0.040, "t_peak": 64_600.0, "r_peak": 1.96, "h_over_r": 0.021},
@@ -72,8 +76,8 @@ QUASARS = [
 """,
     },
     {
-        "file": "Opus_PG1426.zig",
-        "title": "OPUS PG 1426",
+        "file": "PG1426.zig",
+        "title": "PG 1426",
         "slug": "pg1426",
         # Computed by this theme's disk solution; its "computed disk" test checks them (HEADER).
         "computed": {"pt_25": 0.87, "pt_5": 0.51, "lum": 0.55, "l_edd": 0.0244, "t_peak": 56_000.0, "r_peak": 3.41, "h_over_r": 0.008},
@@ -104,7 +108,7 @@ PARA_END = "// Audited independently"
 def rep(s, a, b, count=1):
     n = s.count(a)
     if n != count:
-        raise SystemExit(f"gen_quasars: expected {count} of {a[:70]!r} in Opus_Quasar.zig, found {n}")
+        raise SystemExit(f"gen_quasars: expected {count} of {a[:70]!r} in {SOURCE_NAME}.zig, found {n}")
     return s.replace(a, b)
 
 
@@ -165,9 +169,9 @@ def generate(src, q):
     i = src.index(PARA_START)
     j = src.index(PARA_END)
     s = src[:i] + q["para"] + src[j:]
-    s = rep(s, "// OPUS QUASAR // themes/Opus_Quasar.zig",
+    s = rep(s, f"// {SOURCE_NAME.upper()} // themes/{SOURCE_NAME}.zig",
             f"// {q['title']} // themes/{q['file']}\n"
-            "// GENERATED from themes/Opus_Quasar.zig by tools/gen_quasars.py: edit the source, then\n"
+            f"// GENERATED from themes/{SOURCE_NAME}.zig by tools/gen_quasars.py: edit the source, then\n"
             "// `make quasars`. Same engine; this object's paragraph, spin, mass and Eddington ratio.")
     s = rep(s, "//  * Spin a = 0.62 M (H1821+643's measured value, above), inclination 88 deg (nearly edge-on).",
             f"//  * {q['spin_note']}")
@@ -186,8 +190,8 @@ def generate(src, q):
             f'"{q["lam_ref"]}", cond, "T_peak (K)", d.t_peak, {q["t_lo"]:.1f}, {q["t_hi"]:.1f});')
     s = rep(s, '"The snapshot shines at H1821+643\'s measured Eddington ratio", "lambda_Edd = 0.18 (full SED; Fukuchi, Ichikawa et al. 2022)", cond, "L / L_Edd: cgs flux integrated over both faces (flat area)", d.l_edd_abs, 0.17, 0.23);',
             f'"The snapshot shines at the object\'s Eddington ratio", "{q["lam_ref"]}", cond, "L / L_Edd: cgs flux integrated over both faces (flat area)", d.l_edd_abs, {q["lam"] * 0.85:.4f}, {q["lam"] * 1.15:.4f});')
-    s = s.replace('"zig test themes/Opus_Quasar.zig"', f'"zig test themes/{q["file"]}"')
-    s = s.replace('"opus_quasar.', f'"opus_{q["slug"]}.')
+    s = s.replace(f'"zig test themes/{SOURCE_NAME}.zig"', f'"zig test themes/{q["file"]}"')
+    s = s.replace('"' + SOURCE_ID, f'"{q["slug"]}.')
     s = s.replace("a = 0.62", f"a = {q['spin']}")
     return computed_text(s, q)
 

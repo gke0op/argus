@@ -1,26 +1,29 @@
 // @argus-theme: custom_shader
 // ============================================================================
-// OPUS GARGANTUA // themes/Opus_Gargantua.zig
+// H1821 // themes/H1821.zig
 //
-// Interstellar's mood on Opus_Quasar's engine. The gravity is all computed, exactly as there:
-// Kerr light paths (GPU-traced at native resolution, the same shadow-edge check), redshift and
-// beaming, light-travel delays, photon rings, shearing hot spots on Kerr orbits, limb
-// darkening, and the turbulence machinery. The disk itself is CHOSEN, for the look, and says so:
-//  * Temperature: a steady Page-Thorne disk, T ~ F^(1/4), scaled to a 6,500 K peak: the warm
-//    white-gold of the film's Gargantua. A real thin disk this cool around a 5e9 solar-mass
-//    hole is not self-consistent: at the ~1e-3 lower accretion rate it needs, the computed
-//    model's gas comes out opaque everywhere (cooler gas absorbs more), and real gas that
-//    starved would puff up into a hot, faint flow (what the Event Horizon Telescope images).
-//    Interstellar took the same licence, and turned beaming off; here beaming stays on.
-//  * Outer gas: a translucent column, tau = 220 (5 M / r) e^(-r / 5 M) (the gamma = 1
-//    Lynden-Bell & Pringle viscous-spreading shape), so the lensed underside of the disk glows
-//    through below the shadow. Grey: emission and extinction depth alike.
-//  * Turbulence: bolder than a thermal thin disk (sigma 0.4, not 0.2), eddies 6x the quasar's
-//    (H/r 0.06) living 2x the measured time, so the shear winds them into broad bands; the GPU
-//    footprint filter is narrowed to match so they never alias.
-// The notes below are Opus_Quasar's and describe the shared engine; where they quote the
-// quasar's disk (37,000 K, the computed profile, Eddington ratios) Gargantua's choices above
-// replace them. The computed quasar disk is still solved at init (its test runs here too).
+// A quasar: a spinning (Kerr) supermassive black hole feeding a luminous thin accretion
+// disk, seen up close, rendered from the physics rather than tuned by eye. No telescope can
+// resolve a real quasar disk (we know them from their light: spectra, variability,
+// microlensing); this is what that physics predicts. The Event Horizon Telescope's images
+// (M87*, Sgr A*) are a different, starving kind of black hole: hot, faint, see-through flows.
+// Modelled on H1821+643, the quasar at the centre of the galaxy cluster CL1821+643 (radio-quiet
+// by luminosity, though it drives a weak ~300 kpc-scale FR I radio structure, Blundell & Rawlings
+// 2001: invisible in optical light and far outside this view). Its measured spin, a* = 0.62
+// (+0.22 / -0.37, 90%; Sisk-Reynes, Reynolds, Matthews & Smith 2022, MNRAS 514, 2568, Chandra
+// X-ray reflection); its mass, 4e9 Msun (the centre of the consistent estimates, ~3-6e9; the
+// 2026 H-beta reverberation lag, 83 d, is 5.6x short of R-L but tail-driven, the line core gives
+// 267 d: Li et al., arXiv:2601.18269); its luminosity, ~0.2 of Eddington's
+// (Fukuchi, Ichikawa et al. 2022: lambda = 0.18 from the full SED, 0.59 from X-rays): a
+// radiatively efficient thin disk. From Earth we see its inner disk at 44.6 +- 3.3 deg (90%);
+// this camera sits elsewhere around it, at 88 deg (a choice). It may also be a recoiling black
+// hole: its broad lines move ~1000-2100 km/s against the host and the nucleus looks offset from
+// the host's centre (Robinson et al. 2010; Jadhav et al. 2021, MNRAS 507, 484), as a hole kicked
+// by asymmetric gravitational waves in a merger would be. Unsettled (a binary or a wind could
+// also explain it); up close it would look the same, since the disk moves with the hole.
+// Audited independently (Gemini 4 Argon; Claude Opus with its own code): every item under
+// "computed" was re-derived and checked. Gargantua.zig is the same engine at a chosen,
+// cooler temperature.
 //
 // What is computed, not chosen:
 //  * Light paths: exact Kerr null geodesics (Hamiltonian form, RK4, with p_r re-solved
@@ -33,16 +36,19 @@
 //    solution of the general-relativistic thin-disk evolution equation (Balbus 2017; Mummery &
 //    Balbus 2019, MNRAS 489, 132; see diskProfile): a ring of gas that has spread for a while,
 //    zero stress at the ISCO, a stress W ~ r^(1/2) independent of Sigma. Near the ISCO it is
-//    in steady inflow and has the Page-Thorne flux shape (within 2% inside 3 M; mass budget
-//    closes to 0.1%); further out the inflow falls to zero at the radius where its mass flux
-//    reverses (10 M), so the flux drops below Page-Thorne (0.86 at 5 M, 0.50 at 10 M). Beyond
+//    in steady inflow and has the Page-Thorne flux shape (within 1% at 1.5 ISCO radii; mass
+//    budget closes to 0.3%); further out the inflow falls to zero at the radius where its mass
+//    flux reverses (5 ISCO radii, 19 M), so the flux drops below Page-Thorne (0.89 at 9 M, 0.55
+//    at 19 M). Its recipe (ring and snapshot) scales with the ISCO (3.75 M at this spin); the
+//    solution itself is recomputed per spin (the Kerr coefficients depend on it). Beyond
 //    it the disk spreads outward, and its dissipation, temperature and opacity fall off
 //    together, so it thins out with no edge. The stress follows the closure, not the local
 //    pressure: W = 1.5 alpha (P/rho) r holds only at the flux peak, where it is set (further
-//    out the closure's stress implies alpha >> 1). Scaled to a 5e9 solar-mass hole whose
-//    ISCO accretion rate is 3% of Eddington's (alpha = 0.1); the snapshot shines at ~1.5% of
-//    L_Edd, because its inflow stops at 10 M. Peak 37,000 K, blue-white, as real thin disks
-//    around such holes are. Local structure: scale height from hydrostatic balance with gas +
+//    out the closure's stress implies alpha >> 1). Scaled to a 4e9 solar-mass hole whose
+//    ISCO accretion rate is 36% of Eddington's (alpha = 0.1); the snapshot shines at 0.54 of
+//    that (its inflow stops at 5 ISCO radii), i.e. ~0.2 L_Edd as measured. Peak ~50,000 K at
+//    5.7 M (radiation-pressure supported, H/r ~ 0.05 there), blue-white, as real
+//    thin disks around such holes are. Local structure: scale height from hydrostatic balance with gas +
 //    radiation pressure, midplane temperature from radiative diffusion, electron scattering +
 //    Kramers absorption at that temperature. Where the gas thins it emits as a grey isothermal
 //    slab (energy-conserving source temperature; emission depth sqrt(tau_a tau_ext) where
@@ -50,8 +56,10 @@
 //    extinction depth.
 //  * Color: each point radiates the spectrum of a disk atmosphere: a colour-corrected
 //    blackbody f^-4 B(f T_s), whose electron scattering hardens it to a bluer colour at the
-//    same flux (Done, Davis, Jin, Blaes & Ward 2012: f = 1 below 3e4 K, 1.19 at the 37,000 K
-//    peak). The observed spectrum is that at g f T_s, with g the full Kerr redshift
+//    same flux (Done, Davis, Jin, Blaes & Ward 2012: f = 1 below 3e4 K, where hydrogen
+//    absorption thermalises the light; ~1.5 at this disk's 50,000 K peak. Where the gas is thick
+//    to scattering its temperature is T_eff and f alone hardens it; the thin-slab boost of the
+//    source temperature applies only where the gas is thin overall, so it is not counted twice). The observed spectrum is that at g f T_s, with g the full Kerr redshift
 //    (gravitational + Doppler), so color AND brightness come from Planck's law integrated
 //    against CIE 1931 color matching functions. Beaming is not switched off: the approaching
 //    side is much brighter, as it would be.
@@ -63,26 +71,27 @@
 //    coordinate travel time, so lensed images lag the direct one.
 //  * Grazing light: where gas is translucent, light crosses tau / mu of it, with mu =
 //    g |p_theta| / r the cosine of its angle to the disk in the gas's own frame
-//    (at 80 deg the median mu is ~0.2), and I = B(1 - e^-tau/mu) + I_behind e^-tau/mu.
+//    (at this steep tilt most crossings graze the gas), and I = B(1 - e^-tau/mu) + I_behind e^-tau/mu.
 //
 // What is chosen (stated honestly):
-//  * Spin a = 0.94 M, inclination 80 deg (steeply tilted).
-//  * The disk's parameters: mass 5e9 Msun, ISCO accretion rate 3% of Eddington, alpha 0.1, the initial ring
-//    (8 M, width 1.6 M) and the snapshot (mass flux reversing at 10 M). The Sigma-independent
+//  * Spin a = 0.62 M (H1821+643's measured value, above), inclination 88 deg (nearly edge-on).
+//  * The disk's parameters: mass 4e9 Msun, ISCO accretion rate 36% of Eddington, alpha 0.1, the
+//    initial ring (4 ISCO radii, width 0.8) and the snapshot (mass flux reversing at 5 ISCO
+//    radii). The Sigma-independent
 //    stress is what gives the soft outer fade: a stress that grows with Sigma (a pure alpha
 //    closure) makes a sharp front instead (Mummery & Balbus 2019). Opacity: grey, and an
-//    extrapolation beyond ~35 M: there the gas is below ~5000 K and neutral, so electron
+//    extrapolation beyond ~70 M: there the gas is below ~5000 K and neutral, so electron
 //    scattering and Kramers (which need free electrons) do not apply, and the true opacity
-//    (H-, molecules, dust) is not modelled. Sigma falls an e-fold per ~5 M out there, so the
+//    (H-, molecules, dust) is not modelled. Sigma falls an e-fold per ~10 M out there, so the
 //    fade is robust but its exact radius and its colour are not computed physics. The colour
 //    correction and limb darkening are fits to disk-atmosphere models, not computed here.
-//  * Time-lapse: one ISCO orbit takes ~2.4 s on screen, one at r = 6 M ~10 s (in
-//    reality ~7 and ~28 days for this 5e9 solar-mass hole).
+//  * Time-lapse: one ISCO orbit takes ~5 s on screen, one at r = 6 M ~10 s (in reality ~11
+//    and ~22 days for this 4e9 solar-mass hole).
 //  * Turbulence: procedural noise carrying the measured statistics of magnetorotational
 //    turbulence, not simulated MHD (Guan et al. 2009; Beckwith, Armitage & Simon 2011;
 //    Hirose et al. 2009). As rendered (time-averaged 1/e correlation ellipse, measured on the
 //    tables): eddies ~1.8 H along the orbit by ~0.25 H radially (axis ratio ~7), trailing
-//    12-14 deg; H/r = 0.01 is our choice (this disk: 0.006-0.012 at the peak, by convention).
+//    12-14 deg; H/r = 0.01 is our choice (this disk: ~0.05 at the peak, radiation-supported).
 //    They get there physically: born leading ~31 deg, swung by the Kerr shear through radial
 //    to trailing (the birth shape is fitted to that outcome). Two octaves with amplitude
 //    2^(-5j/6), a k^(-11/3) per-mode spectrum; octave j lives P(r) 2^(-2j/3) (correlation
@@ -105,11 +114,13 @@
 //    are not drawn in higher-order rings or in images seen through translucent gas).
 //    They shear as they age: every radius of the clump keeps its own Omega(r), so after
 //    an age a the part at r has moved Omega(r) a and the clump draws out into an arc.
-//    Hotter gas: emissivity x (1 + boost), so T rises as (1 + boost)^(1/4). Their count,
+//    Hotter gas: emissivity x (1 + boost), so T rises as (1 + boost)^(1/4), and its colour
+//    correction follows (FCOL_FOLLOWS: above ~30 kK a spot hardens, bluer and dimmer). Their count,
 //    size and brightness are choices; their motion is not.
-//  * Sky: a procedural Milky Way (band, dust lanes, bulge) and stars placed
-//    behind the hole and seen through the geodesics, so it bends into arcs and
-//    an Einstein ring. Its brightness is a composite-exposure choice.
+//  * Sky: black, as it would be. From here, at the centre of the giant galaxy hosting
+//    H1821+643 inside its cluster, the sky holds the host's stars and the cluster's galaxies,
+//    but next to a 50,000 K disk they are ~1e12 times fainter, far below any exposure that
+//    shows the disk (or any HDR display's range). Renders that show a sky expose it separately.
 //  * Camera exposure + Reinhard tone mapping (HDR: to the display's EDR headroom).
 //    The CPU fallback composites translucent layers after tone mapping, in display
 //    values; the GPU composites radiances before it.
@@ -123,18 +134,23 @@ const std = @import("std");
 const math = std.math;
 const sdk = @import("argus_theme_sdk.zig");
 
-pub const SPIN: f64 = 0.94;
-pub const LEDGER_PREFIX = "opus_gargantua."; // gpu_bench record ids
-pub const INCL: f64 = 80.0 * math.pi / 180.0;
-pub const R_OUT: f64 = 48.0; // geometry only: Gargantua's chosen column is tau ~ 2e-3 here
-pub const GARG_RC: f64 = 5.0; // M: roll-off scale of Gargantua's chosen outer column
-pub const GARG_TAU0: f64 = 220.0; // tau = 1 near r = 20 M; opaque (tau > 15) inside ~10 M
+pub const SPIN: f64 = 0.62; // H1821+643's measured spin (Sisk-Reynes et al. 2022; see header)
+pub const INCL: f64 = 88.0 * math.pi / 180.0;
+/// Checked by `make claims` through probeEquatorialRay (equatorial light paths).
+pub const claims = sdk.Claims{ .metric = .kerr, .spin = SPIN, .inclination_deg = 88.0 };
+/// Colour correction under turbulence and hot spots: re-evaluated at the hotter gas's own
+/// temperature (Done et al. 2012's law applied locally), so above ~30 kK a hot patch hardens and
+/// reads bluer and a little dimmer in the visible; false holds the smooth disk's f_col.
+pub const FCOL_FOLLOWS: bool = true;
+pub const R_OUT: f64 = 48.0 * R_ISCO; // geometry only: the computed disk has faded to nothing here
+/// The disk recipe's radii scale with the ISCO (the solution is recomputed per spin).
+pub const R_ISCO: f64 = isco(SPIN);
 // Gas denser than this (line of sight) is drawn opaque: e^-40 of what lies behind leaks, under
 // 1e-3 of display white even behind the brightest disk (light is composited before tone mapping).
 const TAU_BEHIND: f64 = 40.0;
 const TAU_MIN: f64 = 0.01; // thinner than this (line of sight) the gas is left out: opacity < 1%
 const EMIT_FLOOR: f64 = 3e-4; // display-linear (~1/255): gas that can't reach this even stirred is baked
-const SPOT_RMAX: f64 = 12.0; // M: hot spots orbit inside this (r_in * 5.35 + width); never baked there
+const SPOT_RMAX: f64 = 5.35 * R_ISCO + 2.0; // M: hot spots orbit inside this (r_in * 5.35 + width); never baked there
 const EXPO_R: f64 = 24.0; // exposure is metered on the bright inner disk only
 const EMIT_N: usize = 1024; // 1 - exp(-e^x) table over x = ln(tau) in [EMIT_X0, EMIT_X1]
 const EMIT_X0: f32 = -7.0;
@@ -145,14 +161,13 @@ const OBS_R: f64 = 1000.0;
 // Omega(r) * 1000 M would wind the disk pattern ~0.5 rad per pixel radially and the
 // footprint filter would (rightly) erase all turbulence and hot spots.
 const T_REF: f64 = OBS_R + 2.0 * @log(OBS_R / 2.0);
-const HALF_H: f64 = 15.5; // half the screen height, in units of M
+const HALF_H: f64 = 24.0; // half the screen height, in units of M
 const TIME_LAPSE: f64 = 10.0; // M of coordinate time per unit of Argus dt
 // Turbulence: statistics of magnetorotational turbulence from shearing-box and global MHD
 // simulations (Guan et al. 2009, ApJ 694, 1010; Beckwith, Armitage & Simon 2011, MNRAS 416, 361).
-const TURB_SIGMA: f32 = 0.4; // Gargantua: bolder than a thermal thin disk's 0.2 (a choice)
-const GARG_LIFE: f64 = 2.0; // Gargantua: eddies live 2x the measured time, so shear winds them into long arcs (a choice)
+const TURB_SIGMA: f32 = 0.2; // rms of ln(dissipation) at the photosphere: thermal thin disk
 const NOISE_STD: f32 = 40.0; // noise table byte levels per standard deviation
-pub const H_OVER_R: f64 = 0.06; // Gargantua: eddies 6x the quasar's (a choice, for broad bands)
+pub const H_OVER_R: f64 = 0.01; // turbulence scale height, a choice (this disk: ~0.05 at the peak, radiation-supported)
 pub const NR: usize = 2048; // turbulence rows across the radial span (eddies are smaller than a radial bin)
 pub const N_OCT: usize = 2; // octaves, amplitude 2^(-5j/6): a k^(-11/3) per-mode spectrum (Beckwith 2011). A third
 // (0.03 H radially) would be finer than a table row, and than a Retina pixel's footprint on the disk.
@@ -174,7 +189,9 @@ const LIMB_B: f64 = 2.06; // electron-scattering limb darkening I(mu) ~ 1 + LIMB
 const EXP_N: usize = 1024; // exp table over [-4, 4] for the CPU draw
 const EXPO_TARGET: f64 = 7.0; // 99th-percentile disk luminance maps here before tone mapping
 const STAR_GAIN: f64 = 0.8;
-const SKY_VISIBLE: f64 = 1.0; // Gargantua keeps its (artistic) starfield
+// The sky is black: next to a 50,000 K disk everything else (the host galaxy's stars, the cluster's
+// galaxies) is ~1e12 times fainter, far below any exposure that shows the disk (see header).
+const SKY_VISIBLE: f64 = 0.0;
 const STAR_CELL: f64 = 8.0e-3; // star grid spacing on the sky, radians (resolution-independent)
 const STAR_FLUX: f64 = 60.0; // intrinsic star brightness; lensing then dims or brightens each one
 const SKY_GAIN: f64 = 0.010; // diffuse Milky Way surface brightness (linear, pre-encode)
@@ -258,13 +275,26 @@ pub fn pageThorne(a: f64, r_in: f64, r_max: f64, out: *[PT_N]f64) void {
 // Inside the mass-flux reversal radius it relaxes to the Page-Thorne flux; beyond it the disk is
 // spreading outward and its surface density, dissipation and opacity fall off together.
 
-pub const BH_MASS_SUN: f64 = 5.0e9; // a quasar-class supermassive hole
-pub const EDD_RATIO: f64 = 0.03; // ISCO accretion rate / (L_Edd / (eta c^2)): a thin disk (>~ 0.01)
+pub const BH_MASS_SUN: f64 = 4.0e9; // a quasar-class supermassive hole
+pub const EDD_RATIO: f64 = 0.36; // ISCO accretion rate / (L_Edd / (eta c^2)): a thin disk (>~ 0.01)
+/// The computed values the header quotes (rounded as quoted there); the "computed disk" test
+/// checks each against the solution, so the prose cannot drift from the physics.
+/// tools/gen_quasars.py writes this block (and the matching header text) for each generated theme.
+pub const HEADER = struct {
+    pub const r_isco: f64 = 3.75; // M
+    pub const pt_25: f64 = 0.89; // F / F_PT at 2.5 ISCO radii
+    pub const pt_5: f64 = 0.55; // F / F_PT at 5 ISCO radii
+    pub const lum: f64 = 0.54; // snapshot L / steady Page-Thorne L at the same inflow
+    pub const l_edd: f64 = 0.2; // L / L_Edd ("~")
+    pub const t_peak: f64 = 50_000.0; // K ("~")
+    pub const r_peak: f64 = 5.7; // M
+    pub const h_over_r: f64 = 0.05; // at the peak ("~")
+    pub const f_peak: f64 = 1.5; // colour correction at the peak ("~")
+};
 pub const ALPHA_VISC: f64 = 0.1; // Shakura-Sunyaev alpha
-pub const RING_R0: f64 = 8.0; // M: where the gas was deposited
-pub const T_DISPLAY_PEAK: f64 = 6_500.0; // K: the chosen peak (the computed disk's is ~37,000 K)
-const RING_D: f64 = 1.6; // M: initial ring width
-pub const SNAP_RREV: f64 = 10.0; // M: snapshot when the mass flux reverses here
+pub const RING_R0: f64 = 4.0 * R_ISCO; // where the gas was deposited
+const RING_D: f64 = 0.8 * R_ISCO; // initial ring width
+pub const SNAP_RREV: f64 = 5.0 * R_ISCO; // snapshot when the mass flux reverses here
 const DM_N: usize = 1200; // radial nodes of the evolution grid
 const DM_RMAX: f64 = 3000.0;
 // cgs
@@ -315,7 +345,7 @@ fn expE3(x: f64) f64 {
 /// The computed disk on the theme's log-r table grid r_k = r_in (r_tab/r_in)^(k/(PT_N-1)):
 /// source temperature, ln of the vertical extinction depth (electron scattering + Kramers) and
 /// ln of the thermalisation depth tau_* = sqrt(tau_a (tau_a + tau_es)).
-pub const PT_CHECK_R = [5]f64{ 3.0, 5.0, 8.0, 10.0, 15.0 };
+pub const PT_CHECK_R = [5]f64{ 1.5 * R_ISCO, 2.5 * R_ISCO, 4.0 * R_ISCO, 5.0 * R_ISCO, 7.5 * R_ISCO };
 
 pub const DiskProfile = struct {
     T: [PT_N]f32,
@@ -329,6 +359,8 @@ pub const DiskProfile = struct {
     mass_budget: f64, // mass lost / integrated ISCO inflow (1 = exact)
     pt_ratio_spread: f64, // max/min of F / F_PageThorne inside SNAP_RREV / 4
     pt_ratio_at: [5]f64, // F / F_PageThorne (normalised at the ISCO) at PT_CHECK_R
+    lum_ratio: f64, // snapshot luminosity / a steady Page-Thorne disk's at the same ISCO inflow
+    l_edd_abs: f64, // both faces' integral of the physical (cgs) flux, flat area weight, / L_Edd
 };
 
 /// Solves the disk. `pt` is the Page-Thorne flux on the same grid (shape only), used to set the
@@ -446,6 +478,17 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
     }
     const norm = ratio_sum / @max(ratio_n, 1.0);
     out.pt_ratio_spread = rmax / @max(rmin, 1e-300);
+    {
+        var l_snap: f64 = 0.0;
+        var l_pt: f64 = 0.0;
+        for (1..PT_N) |k| {
+            const rk = r_in * @exp(dl * @as(f64, @floatFromInt(k)));
+            const w = rk * rk * dl; // r dr in log steps (flat-space area weight)
+            l_snap += fgAt(&r, &fg, rk) / norm * w;
+            l_pt += @max(pt[k], 0.0) * w;
+        }
+        out.lum_ratio = l_snap / @max(l_pt, 1e-300);
+    }
     for (PT_CHECK_R, 0..) |rc, ci| {
         const k: usize = @intFromFloat(@round(@log(rc / r_in) / dl));
         out.pt_ratio_at[ci] = fgAt(&r, &fg, rc) / pt[k] / norm;
@@ -458,6 +501,15 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
     const eff = 1.0 - orbit(a, r_in).E;
     const mdot = EDD_RATIO * L_EDD_PER_MSUN * BH_MASS_SUN / (eff * C_CGS * C_CGS);
     const fscale = mdot * math.pow(f64, C_CGS, 6) / (G_CGS * G_CGS * m_g * m_g) / (4.0 * math.pi) / norm;
+    {
+        // Absolute check of fscale: the flux the renderer uses, integrated in cgs over both faces.
+        var l_abs: f64 = 0.0;
+        for (1..PT_N) |k| {
+            const rk = r_in * @exp(dl * @as(f64, @floatFromInt(k)));
+            l_abs += 2.0 * 2.0 * math.pi * fgAt(&r, &fg, rk) * fscale * rk * rk * dl * rg * rg;
+        }
+        out.l_edd_abs = l_abs / (L_EDD_PER_MSUN * BH_MASS_SUN);
+    }
     // Peak of the flux, then the stress there from the alpha closure (gas + radiation pressure).
     var ipk: usize = 1;
     for (1..N) |i| {
@@ -527,13 +579,25 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
         // temperature of the thin tail it runs away (free-free cooling falls as the gas heats),
         // the sign that neither Kramers nor electron scattering applies there (see header).
         const ta_f = 2.0 * lk.ta;
-        const tem = @min(ta_f * (1.0 + tes_f), @sqrt(ta_f * (ta_f + tes_f)));
-        const emiss = 1.0 - 2.0 * expE3(tem); // grey isothermal slab: flux out = sigma T_s^4 (1 - 2 E3)
-        const ts = @min(@sqrt(@sqrt(fphys / (SIGMA_SB * @max(emiss, 1e-300)))), T_MAX_SOURCE);
+        const tem_slab = @min(ta_f * (1.0 + tes_f), @sqrt(ta_f * (ta_f + tes_f)));
+        // Where the gas is thick to scattering (tau_ext >~ 10) it is a scattering atmosphere: its
+        // spectrum harder than T_eff is what the colour correction f (buildTables) describes, at
+        // T_eff and with full emission. The slab's own boost of T_s (energy through a thin
+        // thermalisation depth) would count that twice, so it applies only where the gas is
+        // thin overall; blended in log tau_ext between 1 and 10.
+        const tau_ext = tes_f + ta_f;
+        const w_atm = math.clamp(@log10(@max(tau_ext, 1e-30)), 0.0, 1.0);
+        // The emission depth is blended; the source temperature then follows from energy
+        // conservation with it (a grey isothermal slab: flux out = sigma T_s^4 (1 - 2 E3(tau_em)) = F), so the band neither over- nor
+        // under-emits (T_eff where thick, the slab's T_s where thin).
+        const tem = @exp((1.0 - w_atm) * @log(@max(tem_slab, 1e-30)) + w_atm * @log(@max(tem_slab, tau_ext)));
+        const ts = @min(@sqrt(@sqrt(fphys / (SIGMA_SB * @max(1.0 - 2.0 * expE3(tem), 1e-300)))), T_MAX_SOURCE);
         out.T[k] = @floatCast(ts);
-        out.lt_ext[k] = @floatCast(@max(@log(tes_f + ta_f), -60.0));
+        out.lt_ext[k] = @floatCast(@max(@log(tau_ext), -60.0));
         out.lt_em[k] = @floatCast(@max(@log(tem), -60.0));
-        if (rk < 30.0) out.t_peak = @max(out.t_peak, ts);
+        // Peak of the opaque disk (the zero-stress ISCO edge thins to a sub-pixel sliver whose thin-slab
+        // temperature is not the disk's).
+        if (rk < 8.0 * R_ISCO and tau_ext >= 1.0) out.t_peak = @max(out.t_peak, ts);
     }
 }
 
@@ -857,7 +921,7 @@ const Rec = extern struct {
     phi: u16, // emission azimuth + Omega * travel time, Q16 of 2 pi
     cov: u8, // disk coverage 0..255
     fr: u8 = 0, // pixel footprint on the disk: radial extent in quarter r-bins (saturating)
-    tobs: f16 = 0, // observed blackbody temperature g*T, for re-coloring hotter gas
+    tobs: f16 = 0, // observed colour temperature g*f*T in kK, for re-coloring hotter gas
     fp: u8 = 0, // pixel footprint: azimuthal extent in units of 64/65536 turn (saturating)
     bf: u8 = 0, // share of bg (luminance, /255) that lies behind this pixel's translucent gas
     resp: u8 = 0, // CPU turbulence: d ln(luminance) / d ln(eps) at tobs (T ~ eps^(1/4)), * RESP_SCALE
@@ -919,7 +983,7 @@ pub const State = struct {
     turb_sigma: f32, // TURB_SIGMA, for the GPU path
     spot_rmax: f64, // SPOT_RMAX, for the GPU path
     sky_gain: f32, // SKY_VISIBLE, for the GPU path
-    fcol_follow: f32, // 0: the chosen look holds its colour under spots and turbulence
+    fcol_follow: f32, // FCOL_FOLLOWS, for the GPU path
     rho_row: [N_OCT]f32, // measured neighbour correlation of each noise plane: rows, phase cells
     rho_ph: [N_OCT]f32,
     foot_cr: [N_OCT]f32, // GPU footprint filter: cell constants of the box-averaged rendered field
@@ -1010,27 +1074,15 @@ pub const State = struct {
         diskProfile(self.geo.a, self.geo.r_in, R_OUT * 1.05, &flux, &disk);
         // Colour correction (Done et al. 2012): the scattering atmosphere hardens the spectrum to
         // f^-4 B(f T_s), the same bolometric flux at a bluer colour.
-        // Gargantua's chosen disk (see header): a steady Page-Thorne disk, T ~ F^(1/4) scaled to
-        // a T_DISPLAY_PEAK peak, and a translucent outer disk whose column rolls off as the
-        // Lynden-Bell & Pringle gamma = 1 profile, tau = GARG_TAU0 (GARG_RC / r) e^(-r / GARG_RC).
-        // (The computed quasar disk above is still solved: its tests and diagnostics run, and
-        // a self-consistent 6,500 K solution would be opaque everywhere; see header.)
-        _ = &disk;
-        var fmax: f64 = 0.0;
-        for (flux) |v| fmax = @max(fmax, v);
         var tcol: [PT_N]f32 = undefined;
-        var ltau: [PT_N]f32 = undefined;
         var ldil: [PT_N]f32 = undefined;
         for (0..PT_N) |k| {
-            const rk = self.geo.r_in * @exp(@log(R_OUT * 1.05 / self.geo.r_in) * @as(f64, @floatFromInt(k)) / @as(f64, PT_N - 1));
-            const ts = T_DISPLAY_PEAK * @sqrt(@sqrt(@max(flux[k], 0.0) / fmax));
-            const fc = colourFactor(ts); // 1 below 3e4 K: kept for the shared engine
-            tcol[k] = @floatCast(fc * ts);
+            const fc = colourFactor(disk.T[k]);
+            tcol[k] = @floatCast(fc * disk.T[k]);
             ldil[k] = @floatCast(-4.0 * @log(fc));
-            ltau[k] = @floatCast(@max(@log(GARG_TAU0 * (GARG_RC / rk)) - rk / GARG_RC, -60.0));
         }
-        self.dtab = .{ tcol, ltau, ltau, ldil }; // grey gas: emission and extinction depth alike
-        self.t_peak = T_DISPLAY_PEAK;
+        self.dtab = .{ tcol, disk.lt_ext, disk.lt_em, ldil };
+        self.t_peak = disk.t_peak;
         // Blackbody colors, normalised so the hottest disk blackbody has luminance 1.
         const y0 = luma(blackbodyRGB(self.t_peak));
         for (0..BB_N) |k| {
@@ -1070,7 +1122,7 @@ pub const State = struct {
         self.turb_sigma = TURB_SIGMA;
         self.spot_rmax = SPOT_RMAX;
         self.sky_gain = @floatCast(SKY_VISIBLE);
-        self.fcol_follow = 0.0;
+        self.fcol_follow = if (FCOL_FOLLOWS) 1.0 else 0.0;
         for (0..N_OCT) |oct| {
             const sc = math.pow(f64, 2.0, @floatFromInt(oct));
             const gr: usize = @max(1, @as(usize, @intFromFloat(@round(@as(f64, NR) / (cell_rows / sc)))));
@@ -1097,28 +1149,14 @@ pub const State = struct {
             const r = @exp(self.lnr_in + self.lnr_span * (@as(f64, @floatFromInt(ri)) + 0.5) / @as(f64, @floatFromInt(NR)));
             self.om_row[ri] = @floatCast(orbit(self.geo.a, r).om);
         }
-        // Neighbour correlations of each plane (for the GPU's variance-preserving interpolation),
-        // measured on the static planes: an upper bound for rows, which shear decorrelates as
-        // eddies age (Opus_Quasar uses values fitted on the rendered field). An approximation:
-        // between rows the variance may dip a little.
-        for (0..N_OCT) |oct| {
-            var srr: f64 = 0.0;
-            var spp: f64 = 0.0;
-            var s00: f64 = 0.0;
-            for (0..NR) |ri| {
-                for (0..NP) |pi| {
-                    const v0 = @as(f64, @floatFromInt(self.noise[oct][ri][pi])) - 128.0;
-                    srr += v0 * (@as(f64, @floatFromInt(self.noise[oct][(ri + 1) % NR][pi])) - 128.0);
-                    spp += v0 * (@as(f64, @floatFromInt(self.noise[oct][ri][(pi + 1) % NP])) - 128.0);
-                    s00 += v0 * v0;
-                }
-            }
-            self.rho_row[oct] = @floatCast(srr / s00);
-            self.rho_ph[oct] = @floatCast(spp / s00);
-        }
-        // Footprint filter: Opus_Quasar's fit, with the radial constant cut by GARG_LIFE: eddies
-        // that shear GARG_LIFE times longer are that much thinner radially (else they alias).
-        self.foot_cr = .{ @floatCast(0.865 / GARG_LIFE), @floatCast(1.284 / GARG_LIFE) };
+        // Effective neighbour correlations for the GPU's variance-preserving interpolation, fitted
+        // on the rendered (sheared, time-averaged) field: the row one is far below the static
+        // plane's 0.89 / 0.63 because shear decorrelates neighbouring rows as eddies age (notes:
+        // opus-audit2-turbulence-fit.md; re-fit if the eddy shape or lifetimes change).
+        self.rho_row = .{ 0.40, 0.26 };
+        self.rho_ph = .{ 0.31, 0.0 };
+        // Footprint filter, (1 + (f / c)^2)^(-1/4) per axis in cell units, fitted the same way.
+        self.foot_cr = .{ 0.865, 1.284 };
         self.foot_cp = .{ 1.513, 2.039 };
         // Each octave's eddies live ~ P(r) 2^(-2j/3) (correlation time ~0.5 P, Beckwith 2011),
         // quantised onto phase-locked bands so neighbouring radii never drift apart (no stripes).
@@ -1126,7 +1164,7 @@ pub const State = struct {
             const r = @exp(self.lnr_in + self.lnr_span * (@as(f64, @floatFromInt(b)) + 0.5) / @as(f64, @floatFromInt(R_BINS)));
             const period = 2.0 * math.pi * (r * @sqrt(r) + self.geo.a);
             for (0..N_OCT) |oct| {
-                const life = GARG_LIFE * period * math.pow(f64, 2.0, -2.0 * @as(f64, @floatFromInt(oct)) / 3.0);
+                const life = period * math.pow(f64, 2.0, -2.0 * @as(f64, @floatFromInt(oct)) / 3.0);
                 self.sband[oct][b] = @floatCast(math.clamp(std.math.log2(life / BAND_L0), 0.0, @as(f64, NBAND - 1) - 1e-3));
             }
             const sb = self.sband[0][b];
@@ -1243,7 +1281,7 @@ pub const State = struct {
 
     /// ln(1/mu) for a disk crossing: mu = g |p_theta| / r is the cosine of the angle between the
     /// photon and the disk normal in the gas's rest frame, so the light's path through the gas is
-    /// the vertical optical depth times 1/mu (at 80 deg most crossings are grazing, mu ~ 0.2).
+    /// the vertical optical depth times 1/mu (at this steep tilt most crossings are grazing).
     fn lnInvMu(self: *const State, x: f64, hit: Hit) f64 {
         const alpha = (x - 0.5 * @as(f64, @floatFromInt(self.w))) * self.mpp;
         const L = -alpha * self.geo.sin_i;
@@ -1734,7 +1772,7 @@ pub const State = struct {
                                 .rbin = first.rbin,
                                 .phi = first.phi,
                                 .cov = @intCast(nd * 255 / nsamp),
-                                .tobs = @floatCast(@min(first.tobs, 60000.0)),
+                                .tobs = @floatCast(first.tobs / 1000.0), // kK: f16 tops out at 65504
                                 .tq = first.tq,
                                 .bf = bf,
                                 .resp = self.respByte(first.tobs),
@@ -1968,6 +2006,23 @@ pub const State = struct {
         return !math.isFinite(self.t_m) or !math.isFinite(self.exposure);
     }
 
+    /// ARGUS-BENCH claim probe: equatorial photon with signed impact parameter b (M, b > 0
+    /// prograde), traced by traceRay, the geodesic code draw()'s tables come from, from a
+    /// camera on the equator at OBS_R. Deflection is the angle between the ray's start and
+    /// escape directions: exact below pi, which covers the checker's b >= 1.3 b_c.
+    pub fn probeEquatorialRay(self: *const State, b: f64) sdk.RayProbe {
+        _ = self;
+        const g = Geo.init(SPIN, 0.5 * math.pi, R_OUT);
+        const h = traceRay(&g, -b, 0.0, false); // L = -alpha sin(i) = b
+        if (h.kind != .sky) return .{ .captured = true, .deflection = 0.0 };
+        const st = initialState(&g, -b, 0.0);
+        const d = rhs(g.a, st.L, st.y);
+        var v0 = [3]f64{ d[0], OBS_R * d[2], -OBS_R * d[1] }; // as traceNext's escape direction, at theta = pi/2, phi = 0
+        const n0 = @sqrt(dot3(v0, v0));
+        for (&v0) |*x| x.* /= n0;
+        return .{ .captured = false, .deflection = math.acos(math.clamp(dot3(v0, h.dir), -1.0, 1.0)) };
+    }
+
     /// The CPU turbulence grid at a pixel: variance-preserving interpolation between nodes
     /// (separable, weights from tables).
     inline fn turbGrid(self: *const State, phi: u16, rbf: f32) f32 {
@@ -2120,10 +2175,21 @@ pub const State = struct {
                     if (boost > 1e-3 and rc.tobs > 0) {
                         // Hotter gas is a hotter blackbody (T ~ emission^(1/4)): Planck gives its
                         // new color and brightness; ratio carries this pixel's coverage/normalisation.
-                        const t0: f64 = @floatCast(@as(f32, rc.tobs));
-                        const hot = self.bbLookup(t0 * @sqrt(@sqrt(1.0 + @as(f64, boost))));
+                        const t0: f64 = @as(f64, @floatCast(@as(f32, rc.tobs))) * 1000.0; // stored in kK
+                        // FCOL_FOLLOWS: f_col at the spot's own T_s (f0 from the dilution table).
+                        const m2 = @sqrt(@sqrt(1.0 + @as(f64, boost)));
+                        var tf: f64 = 1.0; // colour-temperature factor f2 / f0
+                        var df: f64 = 1.0; // dilution change (f0 / f2)^4
+                        if (FCOL_FOLLOWS) {
+                            const r_px = @exp(self.lnr_in + self.lnr_span * @as(f64, rbf) / @as(f64, @floatFromInt(R_BINS)));
+                            const f0 = @exp(-0.25 * self.lnTable(&self.dtab[3], r_px));
+                            const f2 = colourFactor(self.temperature(r_px) / f0 * m2);
+                            tf = f2 / f0;
+                            df = math.pow(f64, f0 / f2, 4);
+                        }
+                        const hot = self.bbLookup(t0 * m2 * tf);
                         const lum0 = luma(.{ rc.rgb[0], rc.rgb[1], rc.rgb[2] });
-                        spot_scale = @floatCast(lum0 / @max(luma(self.bbLookup(t0)), 1e-12));
+                        spot_scale = @floatCast(lum0 / @max(luma(self.bbLookup(t0)), 1e-12) * df);
                         spot_rgb = .{ @floatCast(hot[0]), @floatCast(hot[1]), @floatCast(hot[2]) };
                     } else k *= 1.0 + boost;
                 }
@@ -2184,10 +2250,11 @@ pub fn turbSeed(j: u32, n: u32, k: u32) u32 {
 
 /// Colour-correction factor of an accretion-disk atmosphere at effective temperature T (Done,
 /// Davis, Jin, Blaes & Ward 2012, MNRAS 420, 1848): 1 below 3e4 K (hydrogen neutral, absorption
-/// thermalises), (T / 3e4 K)^0.83 to 1e5 K, (72 keV / kT)^(1/9) above (electron scattering).
+/// thermalises), (T / 3e4 K)^0.82 to 1e5 K (their eq. 2), (72 keV / kT)^(1/9) above (electron
+/// scattering). The published branches meet to 1.6% at 1e5 K; this disk never reaches it.
 pub fn colourFactor(T: f64) f64 {
     if (!(T > 3.0e4)) return 1.0;
-    if (T < 1.0e5) return math.pow(f64, T / 3.0e4, 0.83);
+    if (T < 1.0e5) return math.pow(f64, T / 3.0e4, 0.82);
     return math.pow(f64, 72.0 / (T * 8.617333e-8), 1.0 / 9.0);
 }
 
@@ -2210,22 +2277,34 @@ comptime {
 }
 
 // ============================================================================ physics tests
+// Every assertion goes through `claim`, which prints a ledger record (sdk.ledger) with the
+// same tolerance it asserts; `make ledger` collects them.
 
 const testing = std.testing;
 
+pub const LEDGER_PREFIX = "h1821."; // gpu_bench uses it for its records too
+const LEDGER_SRC = "zig test themes/H1821.zig";
+
+fn claim(id: []const u8, text: []const u8, reference: []const u8, conditions: []const u8, quantity: []const u8, measured: f64, lo: ?f64, hi: ?f64) !void {
+    try testing.expect(sdk.ledger(.{ .id = id, .claim = text, .reference = reference, .conditions = conditions, .quantity = quantity, .measured = measured, .lo = lo, .hi = hi, .source = LEDGER_SRC }));
+}
+
 test "ISCO: 6M without spin, -> 1M at extreme spin, and energy is minimal there" {
-    try testing.expectApproxEqAbs(6.0, isco(0.0), 1e-12);
-    try testing.expect(isco(0.999999) < 1.05);
+    const ref = "Bardeen, Press & Teukolsky 1972 closed form";
+    try claim("h1821.isco.schwarzschild", "ISCO is 6 M without spin", ref, "a = 0", "r_isco (M)", isco(0.0), 6.0 - 1e-12, 6.0 + 1e-12);
+    try claim("h1821.isco.extreme", "ISCO approaches 1 M at extreme prograde spin", ref, "a = 0.999999", "r_isco (M)", isco(0.999999), null, 1.05);
     const a = SPIN;
     const r = isco(a);
     const e = 1e-5;
     const dE = (orbit(a, r * (1 + e)).E - orbit(a, r * (1 - e)).E) / (2 * r * e);
-    try testing.expect(@abs(dE) < 1e-6);
-    try testing.expect(orbit(a, r * 1.01).E > orbit(a, r).E);
+    try claim("h1821.isco.energy_min", "Circular-orbit energy is stationary at the ISCO", "dE/dr = 0 at the marginally stable orbit", "a = 0.62, central difference dr = 1e-5 r", "|dE/dr| at r_isco", @abs(dE), null, 1e-6);
+    try claim("h1821.isco.energy_rises", "Energy rises outside the ISCO", "dE/dr > 0 outside the marginally stable orbit", "a = 0.62, r = 1.01 r_isco", "E(1.01 r_isco) - E(r_isco)", orbit(a, r * 1.01).E - orbit(a, r).E, 0.0, null);
+    _ = sdk.ledger(.{ .id = "h1821.isco.value", .claim = "ISCO radius and efficiency used by the disk (reported)", .reference = "Bardeen, Press & Teukolsky 1972", .conditions = "a = 0.62", .quantity = "r_isco (M)", .measured = r, .source = LEDGER_SRC });
+    _ = sdk.ledger(.{ .id = "h1821.isco.efficiency", .claim = "Radiative efficiency 1 - E_isco (reported)", .reference = "Bardeen, Press & Teukolsky 1972", .conditions = "a = 0.62", .quantity = "eta = 1 - E_isco", .measured = 1.0 - orbit(a, r).E, .source = LEDGER_SRC });
 }
 
 test "photon orbits and Schwarzschild shadow radius sqrt(27)" {
-    try testing.expectApproxEqAbs(3.0, photonOrbit(0.0, true), 1e-12);
+    try claim("h1821.photon_orbit.schwarzschild", "Photon orbit is 3 M without spin", "Bardeen 1973 closed form", "a = 0", "r_ph (M)", photonOrbit(0.0, true), 3.0 - 1e-12, 3.0 + 1e-12);
     const g = Geo.init(0.0, INCL, R_OUT);
     var lo: f64 = 4.0;
     var hi: f64 = 7.0;
@@ -2233,43 +2312,172 @@ test "photon orbits and Schwarzschild shadow radius sqrt(27)" {
         const mid = 0.5 * (lo + hi);
         if (traceRay(&g, 0.0, mid, false).kind == .hole) lo = mid else hi = mid;
     }
-    try testing.expectApproxEqAbs(@sqrt(27.0), 0.5 * (lo + hi), 2e-3);
+    try claim("h1821.shadow.schwarzschild_radius", "Traced Schwarzschild shadow radius is sqrt(27) M", "sqrt(27) M (Synge 1966; Luminet 1979)", "a = 0, i = 88 deg, r_obs = 1000 M, CPU f64, 40 bisections along alpha = 0", "|b_traced - sqrt(27)| (M)", @abs(0.5 * (lo + hi) - @sqrt(27.0)), null, 2e-3);
 }
 
-/// Bardeen (1973) critical curve: the exact edge of the Kerr shadow.
-fn bardeen(a: f64, incl: f64, r: f64) ?[2]f64 {
+/// Bardeen (1973) critical curve: screen point (alpha, beta^2) of the photon orbit at radius r.
+/// beta^2 < 0 off the visible arc.
+fn bardeenB2(a: f64, incl: f64, r: f64) [2]f64 {
     const lam = -(r * r * (r - 3.0) + a * a * (r + 1.0)) / (a * (r - 1.0));
     const eta = r * r * r * (4.0 * a * a - r * (r - 3.0) * (r - 3.0)) / (a * a * (r - 1.0) * (r - 1.0));
     const ci = @cos(incl);
     const si = @sin(incl);
-    const b2 = eta + a * a * ci * ci - lam * lam * ci * ci / (si * si);
-    if (b2 < 0) return null;
-    return .{ -lam / si, @sqrt(b2) };
+    return .{ -lam / si, eta + a * a * ci * ci - lam * lam * ci * ci / (si * si) };
 }
 
-test "Kerr shadow edge matches Bardeen's analytic critical curve" {
-    const g = Geo.init(SPIN, INCL, R_OUT);
-    const r1 = photonOrbit(SPIN, true);
-    const r2 = photonOrbit(SPIN, false);
-    var worst: f64 = 0.0;
-    var checked: usize = 0;
-    for (1..12) |k| {
-        const r = r1 + (r2 - r1) * @as(f64, @floatFromInt(k)) / 12.0;
-        const ab = bardeen(SPIN, INCL, r) orelse continue;
-        if (ab[1] < 0.3) continue; // too close to the equator line to bisect cleanly
-        var lo: f64 = 0.0;
-        var hi: f64 = ab[1] + 3.0;
-        if (traceRay(&g, ab[0], lo, false).kind != .hole) continue;
-        for (0..40) |_| {
+/// Bardeen (1973) critical curve: the exact edge of the Kerr shadow (upper half).
+fn bardeen(a: f64, incl: f64, r: f64) ?[2]f64 {
+    const ab = bardeenB2(a, incl, r);
+    if (ab[1] < 0) return null;
+    return .{ ab[0], @sqrt(ab[1]) };
+}
+
+// Full-contour shadow sweep. Points per half of the curve (upper and lower), spaced in
+// photon-orbit radius as (1 - cos(pi u)) / 2: dense toward both ends of the visible arc, where
+// the curve meets the equator and turns fastest in r (beta ~ sqrt(r - r_end)), so the spacing
+// there is ~uniform in arc length. Each point's edge is bisected along the ray from the shadow's
+// centre (the shadow is convex), so the equatorial ends bisect as cleanly as the top.
+// Rays at alpha ~ 0 have angular momentum L ~ 0 and pass over a pole of the Boyer-Lindquist
+// coordinates, where the integrator is least accurate; a sparse sweep can step over that
+// band, so it gets its own dense samples.
+pub const CONTOUR_N: usize = 256;
+pub const POLAR_N: usize = 128; // per half, uniform in alpha over the polar band (spacing 3e-5 M)
+pub const POLAR_BAND: f64 = 0.004; // M: |alpha| below this counts as the polar band (1/10 pixel)
+pub const CONTOUR_ITERS: usize = 32; // bracket 0.2 d ~ 1 M -> 2e-10 M
+pub const CONTOUR_PTS: usize = 2 * CONTOUR_N - 2 + 2 * POLAR_N;
+
+/// Fills `out` (CONTOUR_PTS points: the curve's upper half, its lower half without the two
+/// equator points, then the polar band, upper and lower) and returns the bisection centre.
+/// The first 2 CONTOUR_N - 2 points are the even sweep that RMS is taken over.
+pub fn shadowContour(a: f64, incl: f64, out: *[CONTOUR_PTS][2]f64) [2]f64 {
+    const n = CONTOUR_N;
+    const r1 = photonOrbit(a, true);
+    const r2 = photonOrbit(a, false);
+    const rm = 0.5 * (r1 + r2);
+    var ends: [2]f64 = undefined;
+    for ([_]f64{ r1, r2 }, &ends) |r_side, *e| { // beta^2 = 0 between the orbit radius and rm
+        var lo = r_side;
+        var hi = rm;
+        for (0..200) |_| {
             const mid = 0.5 * (lo + hi);
-            if (traceRay(&g, ab[0], mid, false).kind == .hole) lo = mid else hi = mid;
+            if (bardeenB2(a, incl, mid)[1] < 0) lo = mid else hi = mid;
         }
-        worst = @max(worst, @abs(0.5 * (lo + hi) - ab[1]));
-        checked += 1;
+        e.* = hi;
     }
-    std.debug.print("\n  Bardeen check: {d} points, worst |beta_traced - beta_exact| = {e:.2} M\n", .{ checked, worst });
-    try testing.expect(checked >= 6);
-    try testing.expect(worst < 0.01);
+    for (0..n) |k| {
+        const u = @as(f64, @floatFromInt(k)) / @as(f64, @floatFromInt(n - 1));
+        const ab = bardeenB2(a, incl, ends[0] + (ends[1] - ends[0]) * 0.5 * (1.0 - @cos(math.pi * u)));
+        const beta = @sqrt(@max(ab[1], 0.0));
+        out[k] = .{ ab[0], beta };
+        if (k > 0 and k < n - 1) out[n + k - 1] = .{ ab[0], -beta };
+    }
+    for (0..POLAR_N) |k| { // alpha(r) rises monotonically through 0 here: invert by bisection
+        const target = POLAR_BAND * (2.0 * @as(f64, @floatFromInt(k)) / @as(f64, @floatFromInt(POLAR_N - 1)) - 1.0);
+        var lo = ends[0];
+        var hi = ends[1];
+        for (0..200) |_| {
+            const mid = 0.5 * (lo + hi);
+            if (bardeenB2(a, incl, mid)[0] < target) lo = mid else hi = mid;
+        }
+        const ab = bardeen(a, incl, 0.5 * (lo + hi)).?;
+        out[2 * n - 2 + k] = ab;
+        out[2 * n - 2 + POLAR_N + k] = .{ ab[0], -ab[1] };
+    }
+    return .{ 0.5 * (out[0][0] + out[n - 1][0]), 0.0 };
+}
+
+pub const ContourStats = struct {
+    max: f64 = 0, // all points
+    max_at: [2]f64 = .{ 0, 0 },
+    rms: f64 = 0, // the even sweep
+    rms_off_axis: f64 = 0, // the even sweep outside the polar band
+    max_off_axis: f64 = 0, // |alpha| >= POLAR_BAND
+    max_polar: f64 = 0, // |alpha| < POLAR_BAND
+    bad: usize = 0, // bracket failures (NaN offsets)
+};
+
+/// Max and RMS of signed edge offsets `off` at points `pts` from shadowContour.
+pub fn contourStats(pts: *const [CONTOUR_PTS][2]f64, off: *const [CONTOUR_PTS]f64) ContourStats {
+    var s: ContourStats = .{};
+    var sum2: f64 = 0.0;
+    var n2: usize = 0;
+    var sum2_off: f64 = 0.0;
+    var n2_off: usize = 0;
+    for (pts, off, 0..) |p, o, i| {
+        if (math.isNan(o)) {
+            s.bad += 1;
+            continue;
+        }
+        if (i < 2 * CONTOUR_N - 2) {
+            sum2 += o * o;
+            n2 += 1;
+            if (@abs(p[0]) >= POLAR_BAND) {
+                sum2_off += o * o;
+                n2_off += 1;
+            }
+        }
+        if (@abs(o) > s.max) {
+            s.max = @abs(o);
+            s.max_at = p;
+        }
+        if (@abs(p[0]) < POLAR_BAND) s.max_polar = @max(s.max_polar, @abs(o)) else s.max_off_axis = @max(s.max_off_axis, @abs(o));
+    }
+    s.rms = @sqrt(sum2 / @as(f64, @floatFromInt(@max(n2, 1))));
+    s.rms_off_axis = @sqrt(sum2_off / @as(f64, @floatFromInt(@max(n2_off, 1))));
+    return s;
+}
+
+/// Signed radial offset (M) of the traced shadow edge from Bardeen point p along the ray from
+/// centre c: > 0 when the traced shadow is larger. NaN if the bracket 0.9-1.1 d fails.
+fn edgeOffset(g: *const Geo, c: [2]f64, p: [2]f64) f64 {
+    const dx = p[0] - c[0];
+    const dy = p[1] - c[1];
+    const d = @sqrt(dx * dx + dy * dy);
+    const ux = dx / d;
+    const uy = dy / d;
+    var lo = 0.9 * d;
+    var hi = 1.1 * d;
+    if (traceRay(g, c[0] + ux * lo, c[1] + uy * lo, false).kind != .hole) return math.nan(f64);
+    if (traceRay(g, c[0] + ux * hi, c[1] + uy * hi, false).kind == .hole) return math.nan(f64);
+    for (0..CONTOUR_ITERS) |_| {
+        const mid = 0.5 * (lo + hi);
+        if (traceRay(g, c[0] + ux * mid, c[1] + uy * mid, false).kind == .hole) lo = mid else hi = mid;
+    }
+    return 0.5 * (lo + hi) - d;
+}
+
+fn contourWorker(g: *const Geo, c: [2]f64, pts: []const [2]f64, off: []f64, first: usize, stride: usize) void {
+    var i = first;
+    while (i < pts.len) : (i += stride) off[i] = edgeOffset(g, c, pts[i]);
+}
+
+/// CPU (f64) edge offsets for every shadowContour point, on all cores.
+pub fn traceContour(c: [2]f64, pts: *const [CONTOUR_PTS][2]f64, off: *[CONTOUR_PTS]f64) !void {
+    const g = Geo.init(SPIN, INCL, R_OUT);
+    var threads: [16]std.Thread = undefined;
+    const nt = @min(threads.len, std.Thread.getCpuCount() catch 4);
+    for (threads[0..nt], 0..) |*t, k| t.* = try std.Thread.spawn(.{}, contourWorker, .{ &g, c, pts, off, k, nt });
+    for (threads[0..nt]) |t| t.join();
+}
+
+test "Kerr shadow edge matches Bardeen's analytic critical curve over the whole contour" {
+    var pts: [CONTOUR_PTS][2]f64 = undefined;
+    const c = shadowContour(SPIN, INCL, &pts);
+    var off: [CONTOUR_PTS]f64 = undefined;
+    try traceContour(c, &pts, &off);
+    const s = contourStats(&pts, &off);
+    std.debug.print("\n  Bardeen contour (CPU f64): {d} points, max |offset| {e:.2} M at (alpha {d:.4}, beta {d:.3}); off-axis max {e:.2} M, polar-band max {e:.2} M; rms {e:.2} M ({e:.2} M off-axis); {d} bracket failures\n", .{ pts.len, s.max, s.max_at[0], s.max_at[1], s.max_off_axis, s.max_polar, s.rms, s.rms_off_axis, s.bad });
+
+    var cond_buf: [512]u8 = undefined;
+    const cond = try std.fmt.bufPrint(&cond_buf, "a = 0.62, i = 88 deg, r_obs = 1000 M; {d} points on the full critical curve (both halves, clustered toward the equatorial ends) + {d} in the polar band |alpha| < {d} M; CPU f64; {d} bisections along rays from the shadow centre", .{ 2 * CONTOUR_N - 2, 2 * POLAR_N, POLAR_BAND, CONTOUR_ITERS });
+    const text = "Traced shadow edge lies on the Kerr critical curve over the whole contour";
+    const ref = "Bardeen 1973 analytic critical curve";
+    try claim("h1821.shadow.contour.cpu.max", text, ref, cond, "max |radial offset| over all points (M); tolerance 1/4 pixel", s.max, null, 1e-2);
+    try claim("h1821.shadow.contour.cpu.rms", text, ref, cond, "rms radial offset over the curve sweep (M)", s.rms, null, 1e-3);
+    try claim("h1821.shadow.contour.cpu.max_off_axis", text, ref, cond, "max |radial offset| outside the polar band (M)", s.max_off_axis, null, 1e-4);
+    try claim("h1821.shadow.contour.cpu.rms_off_axis", text, ref, cond, "rms radial offset over the curve sweep outside the polar band (M)", s.rms_off_axis, null, 1e-4);
+    _ = sdk.ledger(.{ .id = "h1821.shadow.contour.cpu.max_polar", .claim = "Shadow-edge error of rays passing over the spin axis (L ~ 0; reported)", .reference = ref, .conditions = cond, .quantity = "max |radial offset| in the polar band (M)", .measured = s.max_polar, .source = LEDGER_SRC });
+    try claim("h1821.shadow.contour.cpu.brackets", "Every contour sample brackets the edge (inside at 0.9 d, outside at 1.1 d)", ref, cond, "bracket failures (count)", @floatFromInt(s.bad), null, 0.0);
 }
 
 test "geodesic invariants: null condition and Carter constant are conserved" {
@@ -2290,8 +2498,9 @@ test "geodesic invariants: null condition and Carter constant are conserved" {
         worst_q = @max(worst_q, @abs(carter(a, L, y) - q0) / q0);
     }
     std.debug.print("\n  invariants: max |H|/r^2 = {e:.2}, max |dQ/Q| = {e:.2}\n", .{ worst_h, worst_q });
-    try testing.expect(worst_h < 1e-4);
-    try testing.expect(worst_q < 1e-4);
+    const cond = "a = 0.62, i = 88 deg, ray (alpha, beta) = (-2.4, 3.9) M, production stepper (RK4 + p_r projection), up to 4000 steps";
+    try claim("h1821.geodesic.null", "Rays stay null along the integration", "Kerr Hamiltonian H = 0 (Carter 1968)", cond, "max |H| / r^2", worst_h, null, 1e-4);
+    try claim("h1821.geodesic.carter", "Carter constant is conserved along the integration", "Carter 1968 constant Q", cond, "max |dQ / Q|", worst_q, null, 1e-4);
 }
 
 fn nullB(a: f64, L: f64, y: V6) f64 {
@@ -2313,8 +2522,10 @@ test "Page-Thorne flux: zero at the ISCO, positive outside, Newtonian at large r
     var f: [PT_N]f64 = undefined;
     const r_in = isco(0.3);
     pageThorne(0.3, r_in, 1.0e5, &f);
-    try testing.expectEqual(@as(f64, 0.0), f[0]);
-    for (f[1..]) |v| try testing.expect(v > 0.0);
+    const ref = "Page & Thorne 1974";
+    const cond = "a = 0.3, r from r_isco to 1e5 M, 4096 log-spaced nodes";
+    try claim("h1821.page_thorne.isco_zero", "Page-Thorne flux vanishes at the ISCO (zero-torque edge)", ref, cond, "F(r_isco)", f[0], 0.0, 0.0);
+    try claim("h1821.page_thorne.positive", "Page-Thorne flux is positive outside the ISCO", ref, cond, "min F(r > r_isco)", std.mem.min(f64, f[1..]), math.floatMin(f64), null);
     // far out F -> C (1 - sqrt(r_*/r)) / r^3 ; F r^3 must flatten to a constant
     const dl = @log(1.0e5 / r_in) / @as(f64, PT_N - 1);
     const k1: usize = @intFromFloat(@log(2.0e4 / r_in) / dl);
@@ -2322,19 +2533,19 @@ test "Page-Thorne flux: zero at the ISCO, positive outside, Newtonian at large r
     const ra = r_in * @exp(dl * @as(f64, @floatFromInt(k1)));
     const rb = r_in * @exp(dl * @as(f64, @floatFromInt(k2)));
     const ratio = (f[k1] * ra * ra * ra) / (f[k2] * rb * rb * rb);
-    try testing.expectApproxEqAbs(1.0, ratio, 0.02);
+    try claim("h1821.page_thorne.newtonian", "Page-Thorne flux becomes Newtonian (F r^3 -> const) far out", "Shakura & Sunyaev 1973 F ~ r^-3", cond, "(F r^3)(2e4 M) / (F r^3)(1e5 M)", ratio, 0.98, 1.02);
 }
 
-
 test "blackbody colours: 6500 K is near white, 3000 K is warm, 20000 K is blue" {
+    const ref = "Planck spectrum x CIE 1931 colour-matching functions";
     const w = blackbodyRGB(6500.0);
     const mx = @max(w[0], @max(w[1], w[2]));
     const mn = @min(w[0], @min(w[1], w[2]));
-    try testing.expect(mx / mn < 1.15);
+    try claim("h1821.blackbody.white", "A 6500 K blackbody is near white", ref, "T = 6500 K, linear sRGB", "max / min channel", mx / mn, null, 1.15);
     const c = blackbodyRGB(3000.0);
-    try testing.expect(c[0] > c[1] and c[1] > c[2]);
+    try claim("h1821.blackbody.warm", "A 3000 K blackbody is warm (R > G > B)", ref, "T = 3000 K, linear sRGB", "min(R - G, G - B)", @min(c[0] - c[1], c[1] - c[2]), math.floatMin(f64), null);
     const hot = blackbodyRGB(20000.0);
-    try testing.expect(hot[2] > hot[0]);
+    try claim("h1821.blackbody.blue", "A 20000 K blackbody is blue (B > R)", ref, "T = 20000 K, linear sRGB", "B / R", hot[2] / hot[0], 1.0, null);
 }
 
 test "redshift: approaching side is the prograde-photon side, and the shadow is flattened there" {
@@ -2342,43 +2553,65 @@ test "redshift: approaching side is the prograde-photon side, and the shadow is 
     const r = 6.0;
     const g_left = redshift(a, r, 6.0 * @sin(INCL)); // alpha = -6
     const g_right = redshift(a, r, -6.0 * @sin(INCL)); // alpha = +6
-    try testing.expect(g_left > 1.0 and g_right < 1.0);
-    const flat = bardeen(a, INCL, photonOrbit(a, true) + 0.05);
-    if (flat) |ab| try testing.expect(ab[0] < 0.0);
+    const ref = "g = 1 / (u^t (1 - Omega L)), prograde circular Kerr orbit";
+    try claim("h1821.redshift.approaching", "Gas on the prograde-photon side (alpha < 0) approaches: blueshift", ref, "a = 0.62, i = 88 deg, r = 6 M, alpha = -6 M", "g", g_left, 1.0, null);
+    try claim("h1821.redshift.receding", "Gas on the other side recedes: redshift", ref, "a = 0.62, i = 88 deg, r = 6 M, alpha = +6 M", "g", g_right, null, 1.0);
+    const flat = bardeen(a, INCL, photonOrbit(a, true) + 0.05) orelse return error.TestUnexpectedResult;
+    try claim("h1821.redshift.flat_side", "The shadow's flattened (prograde) side is the approaching side", "Bardeen 1973 critical curve", "a = 0.62, i = 88 deg, r_ph(prograde) + 0.05 M", "alpha (M)", flat[0], null, 0.0);
 }
 
 test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, translucent tail" {
     var pt: [PT_N]f64 = undefined;
     const r_in = isco(SPIN);
-    pageThorne(SPIN, r_in, 85.0, &pt);
+    pageThorne(SPIN, r_in, R_OUT, &pt);
     var d: DiskProfile = undefined;
-    diskProfile(SPIN, r_in, 85.0, &pt, &d);
-    const dl = @log(85.0 / r_in) / @as(f64, PT_N - 1);
+    diskProfile(SPIN, r_in, R_OUT, &pt, &d);
+    const dl = @log(R_OUT / r_in) / @as(f64, PT_N - 1);
     const at = struct {
         fn f(dd: *const DiskProfile, ri: f64, dll: f64, rr: f64) [3]f64 {
             const k: usize = @intFromFloat(@round(@log(rr / ri) / dll));
             return .{ dd.T[k], @exp(@as(f64, dd.lt_ext[k])), @exp(@as(f64, dd.lt_em[k])) };
         }
     }.f;
-    std.debug.print("\n  disk: T_peak {d:.0} K at r={d:.2}, tau_es {d:.0}, Sigma {e:.2}, H/r {d:.4}, mass budget {d:.4}, F/F_PT spread {d:.3}\n", .{ d.t_peak, d.r_peak, d.tau_es_peak, d.sigma_peak, d.h_over_r_peak, d.mass_budget, d.pt_ratio_spread });
+    std.debug.print("\n  disk: T_peak {d:.0} K at r={d:.2}, tau_es {d:.0}, Sigma {e:.2}, H/r {d:.4}, mass budget {d:.4}, F/F_PT spread {d:.3}, L/L_PT {d:.3}, L/L_Edd {d:.4} (inputs: {d:.4})\n", .{ d.t_peak, d.r_peak, d.tau_es_peak, d.sigma_peak, d.h_over_r_peak, d.mass_budget, d.pt_ratio_spread, d.lum_ratio, d.l_edd_abs, EDD_RATIO * d.lum_ratio });
     for (PT_CHECK_R, d.pt_ratio_at) |rr, q| std.debug.print("  F/F_PT at r {d}: {d:.3}\n", .{ rr, q });
-    for ([_]f64{ 3, 10, 20, 30, 40, 50, 60, 80 }) |rr| {
+    for ([_]f64{ 1.5, 5, 10, 15, 20, 25, 30, 40 }) |ri| {
+        const rr = ri * R_ISCO;
         const v = at(&d, r_in, dl, rr);
         std.debug.print("  r {d:>4}: T_s {d:>7.0} K  tau_ext {e:.3}  tau_* {e:.3}\n", .{ rr, v[0], v[1], v[2] });
     }
-    try testing.expectApproxEqAbs(1.0, d.mass_budget, 0.01);
-    try testing.expect(d.pt_ratio_spread < 1.15);
-    try testing.expect(d.t_peak > 30_000.0 and d.t_peak < 45_000.0);
-    try testing.expect(at(&d, r_in, dl, 20.0)[1] > 10.0); // opaque at 20 M
-    try testing.expect(at(&d, r_in, dl, 80.0)[1] < 1e-2); // gone by 80 M
+    const cond = "a = 0.62, 4e9 Msun, alpha = 0.1, ISCO inflow 0.36 Mdot_Edd, ring at 4 r_isco evolved to flux reversal at 5 r_isco";
+    const mb = "Mummery & Balbus 2019 GR thin-disk equation";
+    try claim("h1821.disk.mass_budget", "The evolved disk conserves mass (accreted + remaining = initial)", mb, cond, "mass budget", d.mass_budget, 0.99, 1.01);
+    try claim("h1821.disk.page_thorne_inner", "Near the ISCO the snapshot is steady inflow (Page-Thorne)", "Page & Thorne 1974, at the snapshot's ISCO inflow", cond, "F/F_PT spread inside 1.25 r_isco (SNAP_RREV / 4)", d.pt_ratio_spread, null, 1.15);
+    try claim("h1821.disk.t_peak", "Peak disk temperature is quasar-like", "H1821+643: L ~ 0.2 L_Edd at 4e9 Msun (Fukuchi, Ichikawa et al. 2022)", cond, "T_peak (K)", d.t_peak, 40_000.0, 60_000.0);
+    try claim("h1821.disk.eddington", "The snapshot shines at H1821+643's measured Eddington ratio", "lambda_Edd = 0.18 (full SED; Fukuchi, Ichikawa et al. 2022)", cond, "L / L_Edd: cgs flux integrated over both faces (flat area)", d.l_edd_abs, 0.17, 0.23);
+    try claim("h1821.disk.opaque_10", "The disk is opaque at 10 ISCO radii", "electron scattering + Kramers opacity", cond, "tau_ext at 10 r_isco", at(&d, r_in, dl, 10.0 * R_ISCO)[1], 10.0, null);
+    // The header's quoted numbers (HEADER) are the computed ones, to their quoted rounding.
+    const near = struct {
+        fn f(got: f64, quoted: f64, rel: f64) bool {
+            return @abs(got - quoted) <= rel * @abs(quoted);
+        }
+    }.f;
+    try std.testing.expect(near(R_ISCO, HEADER.r_isco, 0.01));
+    try std.testing.expect(near(d.pt_ratio_at[1], HEADER.pt_25, 0.02));
+    try std.testing.expect(near(d.pt_ratio_at[3], HEADER.pt_5, 0.02));
+    try std.testing.expect(near(d.lum_ratio, HEADER.lum, 0.02));
+    try std.testing.expect(near(d.l_edd_abs, HEADER.l_edd, 0.1));
+    try std.testing.expect(near(d.t_peak, HEADER.t_peak, 0.03));
+    try std.testing.expect(near(d.r_peak, HEADER.r_peak, 0.03));
+    try std.testing.expect(near(d.h_over_r_peak, HEADER.h_over_r, 0.12));
+    try std.testing.expect(near(colourFactor(d.t_peak), HEADER.f_peak, 0.03));
+    try claim("h1821.disk.thin_45", "The disk has faded to nothing by 45 ISCO radii (no edge)", "electron scattering + Kramers opacity", cond, "tau_ext at 45 r_isco", at(&d, r_in, dl, 45.0 * R_ISCO)[1], null, 1e-2);
 }
 
 test "colour correction and limb darkening: continuity, flux conservation, thin limit" {
-    // Done et al. 2012: f = 1 below 3e4 K and continuous at 1e5 K (the 0.83 exponent joins the
-    // Compton branch to 0.3%).
-    try testing.expectEqual(@as(f64, 1.0), colourFactor(2.9e4));
-    try testing.expectApproxEqRel(colourFactor(0.9999e5), colourFactor(1.0001e5), 5e-3);
-    try testing.expect(colourFactor(3.7e4) > 1.15 and colourFactor(3.7e4) < 1.2);
+    // Done et al. 2012: f = 1 below 3e4 K; their published branches meet to 1.6% at 1e5 K
+    // (the 0.82 exponent of their eq. 2 against the (72 keV/kT)^(1/9) Compton branch).
+    const done = "Done, Davis, Jin, Blaes & Ward 2012 colour correction";
+    try claim("h1821.fcol.cold", "No colour correction below 3e4 K", done, "T = 2.9e4 K", "f_col", colourFactor(2.9e4), 1.0, 1.0);
+    try claim("h1821.fcol.continuous", "Colour-correction branches meet within 2% at 1e5 K (published fits: 1.6%)", done, "T = 1e5 K +- 0.01%", "f(0.9999e5) / f(1.0001e5) - 1", colourFactor(0.9999e5) / colourFactor(1.0001e5) - 1.0, -2e-2, 2e-2);
+    try claim("h1821.fcol.mid", "Colour correction on the (T/3e4)^0.82 branch", done, "T = 3.7e4 K", "f_col", colourFactor(3.7e4), 1.15, 1.2);
     // Limb darkening on a thick atmosphere conserves the flux of an isotropic emitter:
     // 2 int_0^1 I(mu) mu dmu = 1; and it switches off where the gas is thin.
     var flux: f64 = 0.0;
@@ -2387,7 +2620,9 @@ test "colour correction and limb darkening: continuity, flux conservation, thin 
         const mu = (@as(f64, @floatFromInt(i)) + 0.5) / n;
         flux += 2.0 * limbFactor(-@log(mu), 1e6) * mu / n;
     }
-    try testing.expectApproxEqAbs(1.0, flux, 1e-6);
-    try testing.expectApproxEqAbs(1.0, limbFactor(-@log(0.1), 1e-6), 1e-5);
-    try testing.expect(limbFactor(-@log(0.2), 1e6) < 0.6); // grazing view of the thick disk: dimmer
+    const limb = "Chandrasekhar H-function, linear fit 1 + 2.06 mu (Laor 1991)";
+    try claim("h1821.limb.flux", "Limb darkening conserves an isotropic emitter's flux", limb, "tau_ext = 1e6, midpoint rule over 20000 mu", "2 int I(mu) mu dmu", flux, 1.0 - 1e-6, 1.0 + 1e-6);
+    try claim("h1821.limb.thin", "Limb darkening switches off where the gas is thin", limb, "tau_ext = 1e-6, mu = 0.1", "I(mu) / I_iso", limbFactor(-@log(0.1), 1e-6), 1.0 - 1e-5, 1.0 + 1e-5);
+    try claim("h1821.limb.grazing", "A grazing view of the thick disk is dimmer", limb, "tau_ext = 1e6, mu = 0.2", "I(mu) / I_iso", limbFactor(-@log(0.2), 1e6), null, 0.6);
 }
+

@@ -20,7 +20,7 @@ By contributing you agree that your work is released under the MIT License (see
 Prefer Metal unless the work really is sequential.
 
 Name the file `themes/<Author>_<Name>.metal` (or `.zig`), where `<Author>` is you or the model
-that wrote it, e.g. `Opus_Night_Tide.metal`, `Fable_Chimera.zig`.
+that wrote it, e.g. `Night_Tide.metal`, `Fable_Chimera.zig`.
 
 ### 2. The contract, in short
 
@@ -73,7 +73,7 @@ Argus paces frames at 30 FPS, and Apple GPUs clock down between paced frames, so
 prints it as `Paced 30 FPS`. Put that number in your PR, not an FPS ceiling.
 
 - Aim for under 2 ms of GPU time per frame, live. The tutorials cost 1.0–2.2 ms.
-- Heavier is fine when the image earns it (`Opus_Night_Tide` is 5.3–6.2 ms live), but say so.
+- Heavier is fine when the image earns it (`Night_Tide` is 5.3–6.2 ms live), but say so.
 - Speed-ups must not change the image. No upscaling, temporal reprojection, or approximations
   that shimmer or jitter. A cheaper theme that looks the same is welcome; a cheaper theme that
   looks worse is not.
@@ -127,8 +127,8 @@ The engine is `src/`: the app (`src/desktop_wallpaper.zig`, `src/desktop/`), the
 - Use Zig 0.17.0 exactly. The Makefile looks for `./.toolchain/zig` first.
 - Run `make test` before you open a PR. It also checks that the generated quasar themes match
   their source.
-- The quasar family (`Opus_Cygnus_A`, `Opus_J0834`, `Opus_PG1426`) is generated: edit
-  `themes/Opus_Quasar.zig` or `tools/gen_quasars.py`, then `make quasars`.
+- The quasar family (`Cygnus_A`, `J0834`, `PG1426`) is generated: edit
+  `themes/H1821.zig` or `tools/gen_quasars.py`, then `make quasars`.
 - Keep it lean: no new dependencies, no allocations in the frame loop, nothing that runs when
   no Space is visible.
 - Changes that affect frame cost: give before and after numbers, paced at 30 FPS for the GPU.

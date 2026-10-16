@@ -1,10 +1,10 @@
 # Majestic Glutton: a physical model of the quasar H1821+643
 
-*Working title of the Argus wallpaper `themes/Opus_Quasar.zig` (name may change). This document
+*Working title of the Argus wallpaper `themes/H1821.zig` (name may change). This document
 states what the renderer computes, from which equations and numbers, how it was checked, and
 what is chosen rather than computed. It is meant for review: please check the physics, not
 the code style. Numbers are from the code and its tests at commit `dd1cbf6`; §3 and §9 are from
-the test ledger [`docs/opus_quasar_ledger.json`](opus_quasar_ledger.json), which names its own
+the test ledger [`docs/h1821_ledger.json`](h1821_ledger.json), which names its own
 commit.*
 
 Units: G = c = M = 1 unless stated. M = mass of the black hole. For M = 4e9 Msun:
@@ -54,7 +54,7 @@ black hole fed by a thin, hot accretion disk.
   - Each edge is bisected along the ray from the shadow's centre (the shadow is convex), 32
     times, to 2e-10 M. The error is the radial offset along that ray, an upper bound on the
     distance to the curve.
-  - The same samples run on the CPU (f64, `zig test themes/Opus_Quasar.zig`) and the GPU
+  - The same samples run on the CPU (f64, `zig test themes/H1821.zig`) and the GPU
     (f32, the Metal probe kernel, `make gpu-bench`). Tolerances were set before measuring.
 
   | Path | max, all points | max off-axis | RMS, curve sweep | RMS off-axis | max, polar band |
@@ -80,7 +80,7 @@ black hole fed by a thin, hot accretion disk.
       now reflected, (θ, p_θ) → (π − θ, −p_θ). This is an exact symmetry of the Kerr equations,
       which see only sin θ and cos²θ, so near either pole the GPU works at small θ, where f32
       is relatively exact.
-    - The fold was later widened from 0.01 to 0.1 rad: at a = 0.99 (Opus_J0834) a ray turning
+    - The fold was later widened from 0.01 to 0.1 rad: at a = 0.99 (J0834) a ray turning
       at sin θ ≈ 0.01, just outside the old fold, missed the GPU's 1e-4 M off-axis tolerance
       (1.30e-4 M; 1.29e-5 M after). The GPU row of the table is with the 0.1 rad fold; the
       render figures below describe the original 0.01 rad fix.
@@ -270,7 +270,7 @@ tests or audits below.
   (null condition, Carter constant); Page-Thorne limits; blackbody colours; the redshift sign;
   the disk solution's mass budget, Page-Thorne limit, temperature and luminosity;
   colour-correction continuity and limb-darkening flux conservation.
-- **Test ledger:** `make ledger` writes [`docs/opus_quasar_ledger.json`](opus_quasar_ledger.json),
+- **Test ledger:** `make ledger` writes [`docs/h1821_ledger.json`](h1821_ledger.json),
   one record per checked claim, from the theme's tests, `make claims` and `make gpu-bench`.
   - Each record holds: the claim, the reference and its source, the test conditions, the
     measured quantity and its units, the bounds, pass/fail, and the command that produced it.

@@ -24,9 +24,9 @@ The git history records who did what; this is the summary.
 
 ### Themes
 
-- `themes/Opus_Quasar.zig`: written by Claude Opus. `themes/Opus_Cygnus_A.zig`,
-  `themes/Opus_J0834.zig` and `themes/Opus_PG1426.zig` are generated from it by
-  `tools/gen_quasars.py`; `themes/Opus_Gargantua.zig` is the same engine with a
+- `themes/H1821.zig`: written by Claude Opus. `themes/Cygnus_A.zig`,
+  `themes/J0834.zig` and `themes/PG1426.zig` are generated from it by
+  `tools/gen_quasars.py`; `themes/Gargantua.zig` is the same engine with a
   disk chosen for the look. The physics was reviewed by Argon (Google Gemini),
   GPT (OpenAI), two Claude Opus audits that wrote their own code, and an
   overnight panel of models including DeepSeek, Muse, Nemotron, Claude Sonnet and
@@ -41,31 +41,31 @@ The git history records who did what; this is the summary.
 - `themes/Claude_Textus.zig`: written by Claude Sonnet (Anthropic).
 - `themes/Claude_Descensus.zig`: written by Claude Sonnet, on the Textus cloth.
 - `themes/Textus_Puteus.zig`: written by Claude Opus, from Claude_Textus.
-- `themes/Opus_Coral_Reef.zig`: written by Claude Opus. Its fish schools come
+- `themes/Coral_Reef.zig`: written by Claude Opus. Its fish schools come
   from `Gemini_Aquarium` and its reef ridges from Gemini's canyon terrain. Nine
   of its species (shark, moray eel, lionfish, manta ray, sea turtle, moorish
   idol, parrotfish, seahorse, moon jellyfish) were each designed by a Claude
   Haiku agent.
-- `themes/Lizard_Island.zig`: written by Claude Opus on the Opus_Coral_Reef
+- `themes/Lizard_Island.zig`: written by Claude Opus on the Coral_Reef
   engine, from a site brief on Lizard Island (Great Barrier Reef) compiled from
   field sources; its header lists them. Six species (damselfish, fusilier,
   pickhandle barracuda, whitetip reef shark, tawny nurse shark, barramundi cod)
   were each designed by a Claude Haiku agent, and three more (blacktip reef
-  shark, green turtle, parrotfish) are carried over from Opus_Coral_Reef.
-- Metal ports `themes/Opus_Coral_Reef.metal`, `themes/Lizard_Island.metal`,
+  shark, green turtle, parrotfish) are carried over from Coral_Reef.
+- Metal ports `themes/Coral_Reef.metal`, `themes/Lizard_Island.metal`,
   `themes/Gemini_Wormhole.metal` and `themes/Gemini_Aquarium.metal`: by Claude
   Opus, from the Zig themes above (same authors and species credits).
-- `themes/Opus_Night_Tide.metal`: written by Claude Opus. A Metal theme of
+- `themes/Night_Tide.metal`: written by Claude Opus. A Metal theme of
   bioluminescent surf on a moonless night; the flash behaviour follows the
   published dinoflagellate research cited in its header.
-- `themes/Opus_Orion_Nebula.metal` and its data file `themes/Opus_Orion_Nebula.bin`:
+- `themes/Orion_Nebula.metal` and its data file `themes/Orion_Nebula.bin`:
   written by Claude Opus. The baking tool is `tools/orion_bake/bake.py`; the theme's
   header separates what is measured, fitted and assumed.
 
 ## Third-party data
 
-The repository contains no third-party source code. `themes/Opus_Orion_Nebula.bin`
-and the baked constants in `themes/Opus_Orion_Nebula.metal` are derived from:
+The repository contains no third-party source code. `themes/Orion_Nebula.bin`
+and the baked constants in `themes/Orion_Nebula.metal` are derived from:
 
 - **VLT/MUSE maps of the Orion Nebula**: Weilbacher, P. M. et al. 2015, A&A 582, A114,
   "A MUSE map of the central Orion Nebula (M 42)"; data published by the Leibniz-Institut
@@ -88,5 +88,5 @@ Physical constants and published parameters (line ratios, recombination coeffici
 extinction law, stellar temperatures, cluster structure) are cited where they are used.
 
 Other themes cite the published literature and field reports they draw on in their headers
-(for example `Opus_Night_Tide`, `Lizard_Island` and the quasar family); none of them
+(for example `Night_Tide`, `Lizard_Island` and the quasar family); none of them
 redistributes third-party data.

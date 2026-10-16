@@ -41,7 +41,7 @@
 // are present at Lizard), zone widths, most day/night habits.
 //
 // Engine: the voxel-space reef, depth-in-alpha occlusion and species system
-// of Opus_Coral_Reef. Choose species in the SPECIES list below.
+// of Coral_Reef. Choose species in the SPECIES list below.
 //
 // Contract: one alloc.create(State) at init (~33 MiB, mostly the reef map),
 // nothing after; no clocks or I/O; every write goes through `y * stride + x`

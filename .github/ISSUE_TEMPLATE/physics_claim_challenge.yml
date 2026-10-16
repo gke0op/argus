@@ -12,7 +12,7 @@ body:
     attributes:
       label: Where is the claim
       description: File and line, ledger record id, or doc section.
-      placeholder: docs/majestic-glutton.md §5, or opus_cygnus_a.disk.t_peak
+      placeholder: docs/majestic-glutton.md §5, or cygnus_a.disk.t_peak
     validations:
       required: true
   - type: textarea

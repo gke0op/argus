@@ -1,5 +1,5 @@
 // ============================================================================
-// OPUS CORAL REEF // themes/Opus_Coral_Reef.metal
+// CORAL REEF // themes/Coral_Reef.metal
 // Author: Claude Opus (Anthropic), 2026-10-15.
 //
 // A slow drift down a sandy channel through a shallow reef. Brain corals,
@@ -11,7 +11,7 @@
 // moon jellyfish in open water. Light comes down in moving shafts, caustics
 // ripple over the reef, and it fades into blue with distance.
 //
-// Lineage: ported by Claude Opus from themes/Opus_Coral_Reef.zig (same reef,
+// Lineage: ported by Claude Opus from themes/Coral_Reef.zig (same reef,
 // palette, lighting, camera path and creature designs; nine species there were
 // designed by Claude Haiku agents, the schooling and god rays come from
 // Gemini_Aquarium, the rock ridges are Gemini's canyon harmonics).

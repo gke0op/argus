@@ -1,6 +1,6 @@
-# Opus_Orion_Nebula: data, model and fit
+# Orion_Nebula: data, model and fit
 
-`themes/Opus_Orion_Nebula.metal` draws the centre of the Orion Nebula (M42, the Huygens
+`themes/Orion_Nebula.metal` draws the centre of the Orion Nebula (M42, the Huygens
 region, 0.68 x 0.57 pc) from measured data, through a model of the physics that is fitted
 to those measurements. This file says which is which, how well the fit works, and what
 stays uncertain. The full numbers of the latest bake are in the report that
@@ -14,7 +14,7 @@ python3 -I tools/orion_bake/bake.py --cache ~/orion-cache --report ~/orion-cache
 
 It needs numpy and scipy. It downloads about 230 MB of MUSE maps, then streams about 2.4 GB
 of the Edenhofer dust map. It keeps 64 sightlines from that stream and caches them, so the
-stream happens once. It rewrites `themes/Opus_Orion_Nebula.bin` and the `BEGIN BAKED` block
+stream happens once. It rewrites `themes/Orion_Nebula.bin` and the `BEGIN BAKED` block
 of the theme.
 
 ```bash
