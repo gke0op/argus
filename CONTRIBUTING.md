@@ -141,6 +141,7 @@ The engine is `src/`: the app (`src/desktop_wallpaper.zig`, `src/desktop/`), the
 - [ ] `make run` tried on a real Mac with more than one Space.
 - [ ] Before/after cost numbers, if the change could affect them.
 - [ ] Docs updated (README, BENCHMARK.md, the skills under `.claude/skills/`) if behaviour changed.
+- [ ] Theme authors (human or agent): added an entry to [`.claude/skills/FIELD_NOTES.md`](.claude/skills/FIELD_NOTES.md) about what the skills got right and wrong.
 
 ## Reporting problems
 

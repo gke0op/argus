@@ -203,3 +203,7 @@ Explain the one mental shift up front: you write the rule for one pixel, and the
 Zig + Metal hybrids (a Zig theme whose per-pixel draw runs as a Metal kernel over its
 CPU-built tables) exist as a prototype for `Opus_Quasar` only (`src/gpu/bh_*.zig`,
 `make gpu-bench`). They aren't a general SDK feature yet.
+
+## When you are done: leave field notes
+
+After finishing (or abandoning) a theme, append a short entry to [`../FIELD_NOTES.md`](../FIELD_NOTES.md): what in this skill helped, what was wrong or missing, what cost you time. The maintainers fold those notes back into this skill.

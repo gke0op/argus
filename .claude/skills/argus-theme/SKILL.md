@@ -120,3 +120,7 @@ Treat a failing harness like a compile error. The harness enforces:
 A passing harness only proves the theme doesn't crash, leak, or overrun stride. Before finishing:
 1. View `/tmp/argus_theme_out.png` with your image viewing tool.
 2. Verify the composition, color palette, lighting, depth, and motion cues genuinely match what the user asked for. If the frame looks flat, ugly, clipped, or empty, refine the rendering math and re-run `make harness` until both the telemetry and the visual output are exceptional.
+
+## When you are done: leave field notes
+
+After finishing (or abandoning) a theme, append a short entry to [`../FIELD_NOTES.md`](../FIELD_NOTES.md): what in this skill helped, what was wrong or missing, what cost you time. The maintainers fold those notes back into this skill.
