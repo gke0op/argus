@@ -169,6 +169,9 @@ const MacBridge = struct {
     NSURL: ?*anyopaque,
     desktop_level: isize,
     normal_window: bool,
+    /// `--offscreen`: screen-sized windows far off-screen, no menu-bar item. For measuring the
+    /// engine (memory, GPU) next to a running Argus without touching the live wallpaper.
+    offscreen: bool = false,
     native_data_providers: [MAX_SPACES]?*anyopaque = @splat(null),
     popover_win: ?*anyopaque,
     popover_layer: ?*anyopaque,
@@ -253,11 +256,13 @@ const MacBridge = struct {
     pub fn ensureSpaceWindow(self: *MacBridge, idx: usize) void {
         var sp = &self.obs.spaces[idx];
         if (sp.desktop_win == null) {
-            const win_rect = if (self.normal_window)
+            const win_rect = if (self.offscreen)
+                CGRect{ .origin = .{ .x = -30000.0, .y = -30000.0 }, .size = self.screen_rect.size }
+            else if (self.normal_window)
                 CGRect{ .origin = .{ .x = 120.0, .y = 120.0 }, .size = .{ .width = 960.0, .height = 600.0 } }
             else
                 self.screen_rect;
-            const style_mask: usize = if (self.normal_window) (1 | 2 | 4 | 8) else 0;
+            const style_mask: usize = if (self.normal_window and !self.offscreen) (1 | 2 | 4 | 8) else 0;
             const win = self.msgInitWin(
                 self.msg0(self.NSWindow, self.sel_registerName("alloc")),
                 self.sel_registerName("initWithContentRect:styleMask:backing:defer:"),
@@ -2027,6 +2032,7 @@ pub fn main(init: std.process.Init) !void {
 
     var headless_test = false;
     var normal_window = false;
+    var offscreen = false;
     var max_frames: usize = 0;
     var perf_log = false;
     var snapshot_dir: ?[]const u8 = null;
@@ -2063,6 +2069,9 @@ pub fn main(init: std.process.Init) !void {
             gpu.hdr_enabled = false; // GPU themes stay in standard range even on HDR displays
         } else if (std.mem.eql(u8, a, "--window")) {
             normal_window = true;
+        } else if (std.mem.eql(u8, a, "--offscreen")) {
+            normal_window = true;
+            offscreen = true;
         } else if (std.mem.eql(u8, a, "--frames") and i + 1 < args.len) {
             i += 1;
             max_frames = try std.fmt.parseInt(usize, args[i], 10);
@@ -2254,7 +2263,7 @@ pub fn main(init: std.process.Init) !void {
     // 2. Initialize NSApplication as Menu-Bar Accessory
     const NSApplication = objc_getClass("NSApplication") orelse return error.NoNSApp;
     const ns_app = msg0(NSApplication, sel_registerName("sharedApplication"));
-    msgInt(ns_app, sel_registerName("setActivationPolicy:"), if (normal_window) 0 else 1);
+    msgInt(ns_app, sel_registerName("setActivationPolicy:"), if (offscreen) 2 else if (normal_window) 0 else 1);
     msgVoid(ns_app, sel_registerName("finishLaunching"));
 
     // 3. Display Geometry & Classes for Per-Space NSWindows
@@ -2323,6 +2332,7 @@ pub fn main(init: std.process.Init) !void {
     const NSStatusBar = objc_getClass("NSStatusBar") orelse return error.NoStatusBar;
     const sys_bar = msg0(NSStatusBar, sel_registerName("systemStatusBar"));
     const status_item = msgStatusItem(sys_bar, sel_registerName("statusItemWithLength:"), -1.0);
+    if (offscreen) msgBool(status_item, sel_registerName("setVisible:"), false);
     _ = msg0(status_item, sel_registerName("retain"));
     const status_button = msg0(status_item, sel_registerName("button"));
     // The glyph image is the whole status item: no title text.
@@ -2439,6 +2449,7 @@ pub fn main(init: std.process.Init) !void {
         .NSURL = NSURL,
         .desktop_level = desktop_level,
         .normal_window = normal_window,
+        .offscreen = offscreen,
         .native_data_providers = native_data_providers,
         .popover_win = popover_win,
         .popover_layer = popover_layer,
