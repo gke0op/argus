@@ -870,7 +870,13 @@ static float vmix(float a, float b, float t, float rho) {
 // generations are sheared into arcs thinner than a pixel; boxed over the footprint they average
 // out, so that smear joins the pixel's azimuthal footprint `ep` (cells) in the same fitted filter,
 // (1 + (f/c)^2)^(-1/4). Without it they alias into pixel-fine rings (moire).
-constant float TURB_AA = 2.0f; // turbulence anti-aliasing footprint, pixels (radial)
+constant float TURB_AA = 2.0f; // turbulence anti-aliasing footprint in the outer disk, pixels (radial)
+// The anti-aliasing (Nyquist-width footprint and shear smear) ramps in with radius, from none at
+// AA_R0 to full at AA_R1 ISCO radii: the outer disk's sheared streaks sit near the pixel pitch and
+// beat into moire, while the inner disk's resolved texture is kept (owner's pick, measured on
+// Cygnus A: mid-disk texture 4.24 -> 3.03 levels, outer moire 0.43 -> 0.28).
+constant float AA_R0 = 6.0f;
+constant float AA_R1 = 16.0f;
 
 static float turbOctave(device const uchar* noise, constant Static& st, constant Frame& fr, uint j,
                         ushort phi, uint r0, float tr, float sb, float rows_fp, float cells_per_q, float ep,
@@ -939,19 +945,21 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     const float xb = clamp(rbf - 0.5f, 0.0f, float(R_BINS - 1) - 0.001f);
     const uint b0 = uint(xb);
     const float tb = xb - float(b0);
+    const float w_aa = smoothstep(AA_R0 * P.r_in, AA_R1 * P.r_in, r);
+    const float aa = 1.0f + (TURB_AA - 1.0f) * w_aa;
     float G = 0.0f;
     float var = 0.0f;
     for (uint j = 0; j < N_OCT; j++) {
         const float sc = float(1u << j);
         // Radially the filter sees a Nyquist-width footprint (TURB_AA pixels): structure finer than
         // ~2 px aliases into rings that crawl as the disk turns (most visible at 120 FPS).
-        const float er = TURB_AA * frf * sc / st.cell_r0;
+        const float er = aa * frf * sc / st.cell_r0;
         const float ep = fpf * sc / st.cell_p0;
         const float a = OCT_AMP[j] / OCT_NORM * rsqrt(sqrt((1.0f + er * er / (st.foot_cr[j] * st.foot_cr[j])) * (1.0f + ep * ep / (st.foot_cp[j] * st.foot_cp[j]))));
         if (a * st.turb_sigma < 0.002f) continue;
         const float sb = mix(st.sband[j][b0], st.sband[j][min(b0 + 1, R_BINS - 1)], tb);
         float vg = 1.0f;
-        G += a * turbOctave(noise, st, fr, j, rc.phi, r0, trow, sb, TURB_AA * frf * (float(NR) / float(R_BINS)), sc / st.cell_p0, ep, vg);
+        G += a * turbOctave(noise, st, fr, j, rc.phi, r0, trow, sb, w_aa * aa * frf * (float(NR) / float(R_BINS)), sc / st.cell_p0, ep, vg);
         var += a * a * vg;
     }
     // Log-normal dissipation with its mean kept at 1; the gas's temperature follows it, T ~ eps^(1/4).
