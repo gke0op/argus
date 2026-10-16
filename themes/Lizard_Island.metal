@@ -53,8 +53,8 @@
 //     the same finished table. After that it returns at once.
 //   - argus_draw marches each pixel's ray over the heightfield at the Zig's own
 //     depth-slice spacing (2 m blocks whose max height the ray clears are
-//     skipped), keeping the voxel look: walls take the colour at their top and
-//     tint toward the water further down. Fish, corals, anemones, clams and
+//     skipped), then bisects to the true surface, so the coral heads' sides
+//     take their own baked, lit colour. Fish, corals, anemones, clams and
 //     marine snow are culled per threadgroup tile into threadgroup lists, then
 //     depth-tested per pixel. Fish swim on closed-form paths (schools orbit an
 //     anchor bommie or anemone that is re-picked ahead every 40 s; loners
@@ -1450,16 +1450,19 @@ static bool marchReef(texture2d<float> st, Scene S, float rk, float ry, thread f
         if (hit) break;
     }
     if (!hit) return false;
-    const float d = sm.a - (S.camy + ry * z);   // how far below the column's top the ray hits
-    if (d < 0.135f && zp < z) {
-        // Ground seen at a slant: find the crossing between the last two samples.
-        const float4 s0 = reefAt(st, S.camx + rk * zp, S.scroll + zp);
-        const float f0 = S.camy + ry * zp - s0.a, f1 = S.camy + ry * z - sm.a;
-        if (f0 > 0.0f) {
-            const float zh = zp + (z - zp) * f0 / max(f0 - f1, 1e-6f);
-            sm = reefAt(st, S.camx + rk * zh, S.scroll + zh);
-            z = zh;
+    // Find where the ray really meets the surface between the last two samples,
+    // walls included: bisect on the height field. Its baked lighting already
+    // shades the slopes, so the coral heads' sides keep their own colour instead
+    // of a streak smeared down from the column top (which re-cut itself every
+    // frame as the diver drifted, so the heads seemed to dance).
+    if (zp < z) {
+        float za = zp, zb = z;
+        for (int k = 0; k < 7; k++) {
+            const float zm = 0.5f * (za + zb);
+            const float4 s2 = reefAt(st, S.camx + rk * zm, S.scroll + zm);
+            if (S.camy + ry * zm < s2.a) { zb = zm; sm = s2; } else za = zm;
         }
+        z = zb;
     }
     float3 c = sm.rgb;
     // Caustics: a moving net of light from the surface, fading with depth.
@@ -1468,8 +1471,6 @@ static bool marchReef(texture2d<float> st, Scene S, float rk, float ry, thread f
     const float caus = max(0.0f, sin(wx * 26.0f * KK + ph(S.t, 0.7f) + 0.6f * caus_z) * caus_z);
     c = min(c * ((220.0f + 120.0f * caus * caus * max(0.0f, 1.0f - z / 40.0f)) / 256.0f), 1.0f);
     c = mix(c, WATER_HOR, 1.0f - exp(-FOG_K * z));
-    // A wall (bommie side, sponge, ledge) tints toward the water below its top.
-    if (d >= 0.135f) c = mix(c, WATER_HOR, min(150.0f, 222.2f * (d - 0.135f)) / 256.0f);
     zhit = z;
     col = c;
     return true;
