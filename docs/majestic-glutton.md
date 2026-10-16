@@ -130,6 +130,8 @@ The disk is **computed**, not shaped by hand:
    - The snapshot radiates 0.544 of a steady Page-Thorne disk at that inflow.
    - So L = 0.36 × 0.544 = 0.196 L_Edd, matching the measured 0.18. (With a fixed 10% efficiency
      convention the same inflow would read 0.182.)
+   - Integrating the renderer's physical flux directly (cgs, both faces, flat area weight) gives
+     0.187 L_Edd; this is the ledger's test of the flux scale.
 5. **Local structure, at each radius:**
    - Σ comes from the flux and the stress.
    - Scale height comes from hydrostatic balance with gas + radiation pressure.
@@ -175,6 +177,13 @@ The disk ends at R_out = 48 r_isco = 180 M, where τ ≈ 1e-4, so the gas fades 
     f ≈ 1.5 at the 50,000 K peak.
   - The table of observed colours reaches 200 kK, above the hottest observed colour
     temperature (g f T_s ≈ 105 kK on the approaching inner disk).
+  - In the visible band, f⁻⁴ B(f T) goes as f⁻³ T (Rayleigh-Jeans), so above the 3e4 K knee a
+    hotter ring looks dimmer: T^−1.46 instead of T. The brightest visible ring therefore sits
+    where T_s crosses 30 kK (~15 M, 1.59× the 550 nm intensity of the 5.6 M flux peak, face-on and
+    unbeamed), not at the flux peak. A smoothed knee lowers this to ~1.3× but keeps it.
+    This comes from applying a fit to the spectral peak across the whole visible band: real
+    atmospheres thermalise optical light deeper, where it is less diluted, so the visible
+    suppression of the hot inner disk is overstated.
 - **Limb darkening:** I(μ) ∝ 1 + 2.06 μ (Chandrasekhar H-function, linear fit as in Laor 1991),
   normalised to an isotropic emitter's flux (tested to 1e-6).
   - μ is measured in the gas frame: μ = g |p_θ| / r.
@@ -314,7 +323,10 @@ tests or audits below.
     the faint outskirts beyond ~75 M were ~1 kK too hot), and an unused 12th lifetime band
     (lifetimes stopped tracking P(r) beyond ~75 M).
   - Disclosed: f_col held fixed under turbulence and spots (§6, §7), finite thickness (§10),
-    radiative smoothing of the turbulence (§6).
+    radiative smoothing of the turbulence (§6), the visible ring at the f_col knee (§5).
+  - The ledger's Eddington-ratio claim now integrates the physical flux the renderer uses (cgs,
+    both faces): L = 0.187 L_Edd, against 0.196 from the inputs (the flat area weight omits
+    relativistic factors).
   - Open for the owner: a steady Novikov-Thorne disk in place of the spreading-ring snapshot
     (three families raised it). A preview fills the frame with a hot opaque outer disk and loses
     the dark lane and the lower lensed image.

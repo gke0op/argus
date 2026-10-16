@@ -341,6 +341,7 @@ pub const DiskProfile = struct {
     pt_ratio_spread: f64, // max/min of F / F_PageThorne inside SNAP_RREV / 4
     pt_ratio_at: [5]f64, // F / F_PageThorne (normalised at the ISCO) at PT_CHECK_R
     lum_ratio: f64, // snapshot luminosity / a steady Page-Thorne disk's at the same ISCO inflow
+    l_edd_abs: f64, // both faces' integral of the physical (cgs) flux, flat area weight, / L_Edd
 };
 
 /// Solves the disk. `pt` is the Page-Thorne flux on the same grid (shape only), used to set the
@@ -481,6 +482,15 @@ pub fn diskProfile(a: f64, r_in: f64, r_tab: f64, pt: *const [PT_N]f64, out: *Di
     const eff = 1.0 - orbit(a, r_in).E;
     const mdot = EDD_RATIO * L_EDD_PER_MSUN * BH_MASS_SUN / (eff * C_CGS * C_CGS);
     const fscale = mdot * math.pow(f64, C_CGS, 6) / (G_CGS * G_CGS * m_g * m_g) / (4.0 * math.pi) / norm;
+    {
+        // Absolute check of fscale: the flux the renderer uses, integrated in cgs over both faces.
+        var l_abs: f64 = 0.0;
+        for (1..PT_N) |k| {
+            const rk = r_in * @exp(dl * @as(f64, @floatFromInt(k)));
+            l_abs += 2.0 * 2.0 * math.pi * fgAt(&r, &fg, rk) * fscale * rk * rk * dl * rg * rg;
+        }
+        out.l_edd_abs = l_abs / (L_EDD_PER_MSUN * BH_MASS_SUN);
+    }
     // Peak of the flux, then the stress there from the alpha closure (gas + radiation pressure).
     var ipk: usize = 1;
     for (1..N) |i| {
@@ -2530,7 +2540,7 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
             return .{ dd.T[k], @exp(@as(f64, dd.lt_ext[k])), @exp(@as(f64, dd.lt_em[k])) };
         }
     }.f;
-    std.debug.print("\n  disk: T_peak {d:.0} K at r={d:.2}, tau_es {d:.0}, Sigma {e:.2}, H/r {d:.4}, mass budget {d:.4}, F/F_PT spread {d:.3}, L/L_PT {d:.3}\n", .{ d.t_peak, d.r_peak, d.tau_es_peak, d.sigma_peak, d.h_over_r_peak, d.mass_budget, d.pt_ratio_spread, d.lum_ratio });
+    std.debug.print("\n  disk: T_peak {d:.0} K at r={d:.2}, tau_es {d:.0}, Sigma {e:.2}, H/r {d:.4}, mass budget {d:.4}, F/F_PT spread {d:.3}, L/L_PT {d:.3}, L/L_Edd {d:.4} (inputs: {d:.4})\n", .{ d.t_peak, d.r_peak, d.tau_es_peak, d.sigma_peak, d.h_over_r_peak, d.mass_budget, d.pt_ratio_spread, d.lum_ratio, d.l_edd_abs, EDD_RATIO * d.lum_ratio });
     for (PT_CHECK_R, d.pt_ratio_at) |rr, q| std.debug.print("  F/F_PT at r {d}: {d:.3}\n", .{ rr, q });
     for ([_]f64{ 1.5, 5, 10, 15, 20, 25, 30, 40 }) |ri| {
         const rr = ri * R_ISCO;
@@ -2542,7 +2552,7 @@ test "computed disk: mass budget, Page-Thorne limit, quasar-like temperature, tr
     try claim("opus_quasar.disk.mass_budget", "The evolved disk conserves mass (accreted + remaining = initial)", mb, cond, "mass budget", d.mass_budget, 0.99, 1.01);
     try claim("opus_quasar.disk.page_thorne_inner", "Near the ISCO the snapshot is steady inflow (Page-Thorne)", "Page & Thorne 1974, at the snapshot's ISCO inflow", cond, "F/F_PT spread inside 1.25 r_isco (SNAP_RREV / 4)", d.pt_ratio_spread, null, 1.15);
     try claim("opus_quasar.disk.t_peak", "Peak disk temperature is quasar-like", "H1821+643: L ~ 0.2 L_Edd at 4e9 Msun (Fukuchi, Ichikawa et al. 2022)", cond, "T_peak (K)", d.t_peak, 40_000.0, 60_000.0);
-    try claim("opus_quasar.disk.eddington", "The snapshot shines at H1821+643's measured Eddington ratio", "lambda_Edd = 0.18 (full SED; Fukuchi, Ichikawa et al. 2022)", cond, "L / L_Edd", EDD_RATIO * d.lum_ratio, 0.17, 0.23);
+    try claim("opus_quasar.disk.eddington", "The snapshot shines at H1821+643's measured Eddington ratio", "lambda_Edd = 0.18 (full SED; Fukuchi, Ichikawa et al. 2022)", cond, "L / L_Edd: cgs flux integrated over both faces (flat area)", d.l_edd_abs, 0.17, 0.23);
     try claim("opus_quasar.disk.opaque_10", "The disk is opaque at 10 ISCO radii", "electron scattering + Kramers opacity", cond, "tau_ext at 10 r_isco", at(&d, r_in, dl, 10.0 * R_ISCO)[1], 10.0, null);
     try claim("opus_quasar.disk.thin_45", "The disk has faded to nothing by 45 ISCO radii (no edge)", "electron scattering + Kramers opacity", cond, "tau_ext at 45 r_isco", at(&d, r_in, dl, 45.0 * R_ISCO)[1], null, 1e-2);
 }
