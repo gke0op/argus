@@ -10,8 +10,13 @@
 //! Status: NO CLAIM | DECLARED (no probe, unverified) | REFERENCE-VALIDATED | FALSIFIED.
 //! Limits: equatorial rays only (inclination untested); the probe is trusted to route
 //! through the same light-path code as draw().
+//! Each check at the declared spin also prints a `LEDGER {json}` record (src/ledger.zig);
+//! `make ledger` collects them.
 const std = @import("std");
 const theme = @import("theme");
+const ledger = @import("ledger.zig");
+
+const LEDGER_SRC = "make claims";
 
 // ---------------- Independent reference: equatorial Kerr null geodesics (G = c = M = 1) ----------------
 // Radial potential R(r) = (r^2 + a^2 - a b)^2 - Delta (b - a)^2, Delta = r^2 - 2r + a^2.
@@ -100,7 +105,21 @@ fn compare(st: *const theme.State, a: f64, verbose: bool) usize {
         const bc_err = @abs(th_bc - ref_bc) / @abs(ref_bc);
         const bc_ok = bc_err <= BC_REL_TOL;
         if (!bc_ok) fails += 1;
-        if (verbose) std.debug.print("  {s} b_c   theme {d:>8.4}  ref {d:>8.4}  rel err {d:>7.4}  {s}\n", .{ side, th_bc, ref_bc, bc_err, if (bc_ok) "PASS" else "FAIL" });
+        var cond_buf: [256]u8 = undefined;
+        var id_buf: [64]u8 = undefined;
+        if (verbose) {
+            std.debug.print("  {s} b_c   theme {d:>8.4}  ref {d:>8.4}  rel err {d:>7.4}  {s}\n", .{ side, th_bc, ref_bc, bc_err, if (bc_ok) "PASS" else "FAIL" });
+            _ = ledger.emit(.{
+                .id = std.fmt.bufPrint(&id_buf, "claims.b_c.{s}", .{if (sign > 0) "prograde" else "retrograde"}) catch unreachable,
+                .claim = "Equatorial photons are captured below the Kerr critical impact parameter b_c",
+                .reference = "Bardeen 1973 closed form b_c (checked against src/claim_check.zig's own numerical turning-point search)",
+                .conditions = std.fmt.bufPrint(&cond_buf, "{s} metric, declared a/M = {d:.3}, equatorial rays through the theme's probe, 60 bisections on capture; ref b_c = {d:.6} M", .{ @tagName(theme.claims.metric), a, ref_bc }) catch unreachable,
+                .quantity = "|b_c theme - b_c ref| / |b_c ref|",
+                .measured = bc_err,
+                .hi = BC_REL_TOL,
+                .source = LEDGER_SRC,
+            });
+        }
         for ([_]f64{ 1.3, 1.6, 2.2, 3.0 }) |k| {
             const b = k * ref_bc;
             const ref_d = refDeflection(a, b) orelse unreachable;
@@ -109,7 +128,19 @@ fn compare(st: *const theme.State, a: f64, verbose: bool) usize {
             const err = @abs(th_d - ref_d);
             const ok = !p.captured and err <= @max(DEFL_ABS_TOL, DEFL_REL_TOL * ref_d);
             if (!ok) fails += 1;
-            if (verbose) std.debug.print("  {s} b={d:>7.3}  deflection theme {d:>8.4}  ref {d:>8.4}  rad  {s}\n", .{ side, b, th_d, ref_d, if (ok) "PASS" else "FAIL" });
+            if (verbose) {
+                std.debug.print("  {s} b={d:>7.3}  deflection theme {d:>8.4}  ref {d:>8.4}  rad  {s}\n", .{ side, b, th_d, ref_d, if (ok) "PASS" else "FAIL" });
+                _ = ledger.emit(.{
+                    .id = std.fmt.bufPrint(&id_buf, "claims.deflection.{s}.{d:.1}b_c", .{ if (sign > 0) "prograde" else "retrograde", k }) catch unreachable,
+                    .claim = "Escaping equatorial photons are deflected by the Kerr angle",
+                    .reference = "independent quadrature of the equatorial Kerr orbit equation dphi/dr (src/claim_check.zig)",
+                    .conditions = std.fmt.bufPrint(&cond_buf, "{s} metric, declared a/M = {d:.3}, b = {d:.4} M ({d:.1} b_c); ref deflection {d:.6} rad", .{ @tagName(theme.claims.metric), a, b, k, ref_d }) catch unreachable,
+                    .quantity = "|deflection theme - deflection ref| (rad)",
+                    .measured = err,
+                    .hi = @max(DEFL_ABS_TOL, DEFL_REL_TOL * ref_d),
+                    .source = LEDGER_SRC,
+                });
+            }
         }
     }
     return fails;
