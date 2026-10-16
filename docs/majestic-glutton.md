@@ -60,11 +60,11 @@ black hole fed by a thin, hot accretion disk.
   | Path | max, all points | max off-axis | RMS, curve sweep | RMS off-axis | max, polar band |
   |---|---|---|---|---|---|
   | CPU f64 | 7.6e-6 M | 7.6e-6 M | 2.7e-6 M | 2.7e-6 M | 2.9e-6 M |
-  | GPU f32 | 7.8e-5 M | 7.8e-5 M | 7.2e-6 M | 7.3e-6 M | 8.1e-6 M |
+  | GPU f32 | 1.1e-5 M | 1.1e-5 M | 3.3e-6 M | 3.3e-6 M | 8.1e-6 M |
   | Tolerance | 1e-2 M (¼ pixel) | 1e-4 M | 1e-3 M | 1e-4 M | reported |
 
   - The ray solver matches the critical curve to < 1e-5 M on the CPU and < 1e-4 M on the GPU,
-    over the whole contour, the spin axis included. GPU and CPU agree per sample to 7.8e-5 M.
+    over the whole contour, the spin axis included. GPU and CPU agree per sample to 1.1e-5 M.
   - **Near the spin axis (found by the sweep, now fixed):** the old 11-point test (worst 7.5e-6 M)
     never sampled α ≈ 0. The first dense sweep found the edge off there by up to 8.2e-3 M (CPU)
     and 1.7e-2 M (GPU, 0.4 pixel). There were two causes.
@@ -80,6 +80,10 @@ black hole fed by a thin, hot accretion disk.
       now reflected, (θ, p_θ) → (π − θ, −p_θ). This is an exact symmetry of the Kerr equations,
       which see only sin θ and cos²θ, so near either pole the GPU works at small θ, where f32
       is relatively exact.
+    - The fold was later widened from 0.01 to 0.1 rad: at a = 0.99 (Opus_J0834) a ray turning
+      at sin θ ≈ 0.01, just outside the old fold, missed the GPU's 1e-4 M off-axis tolerance
+      (1.30e-4 M; 1.29e-5 M after). The GPU row of the table is with the 0.1 rad fold; the
+      render figures below describe the original 0.01 rad fix.
   - **The render:** only the rays these touch change, those passing within 0.01 rad of a pole
     (a wedge |α| ≲ 0.01 |β| around the axis column, 0.5% of the frame).
     - On the GPU, 0 pixels change outside that wedge (1920×1200 and 3024×1964).
@@ -278,8 +282,8 @@ tests or audits below.
     failure, the GPU's polar-band maximum; fixed, §3.)
 - **Reviews:** two independent physics reviews by Gemini 4 Argon, and two Claude Opus audits that
   wrote their own code (disk solver re-solved independently to 0.1%; turbulence measured on the
-  tables). Every finding was re-derived before fixing; rejected findings are recorded in the
-  project notes.
+  tables). Every finding was re-derived before fixing; findings that did not survive
+  re-derivation were not applied.
 - **Literature:** a Claude Sonnet check of H1821+643's parameters (§1). Its luminosity finding
   (λ_Edd = 0.18) was verified against the paper before adoption.
 
@@ -315,8 +319,8 @@ tests or audits below.
   stated. All verified and fixed here. It then asked for a dense full-contour shadow sweep and a
   machine-readable test ledger. Both are done (§3, §9). The sweep found a near-axis error the
   11-point test had missed; it is fixed (§3).
-- **Mixed-model fleet (2026-10-16, overnight):** DeepSeek, Muse, Nemotron, cat-jam, space-bunny,
-  Sonnet and Haiku, each finding checked by a second family and recomputed before acting.
+- **Mixed-model fleet (2026-10-16, overnight):** DeepSeek, Muse, Nemotron, Claude Sonnet, Claude
+  Haiku and other agents, each finding checked by a second family and recomputed before acting.
   - Fixed: the blackbody table cap (80 → 200 kK) and colour-temperature storage, an over-emitting
     slab/atmosphere blend, Done's exponent (0.82), the midplane boundary constant (+½, not +1:
     the faint outskirts beyond ~75 M were ~1 kK too hot), and an unused 12th lifetime band
@@ -327,7 +331,7 @@ tests or audits below.
   - The ledger's Eddington-ratio claim now integrates the physical flux the renderer uses (cgs,
     both faces): L = 0.187 L_Edd, against 0.196 from the inputs (the flat area weight omits
     relativistic factors).
-  - Open for the owner: a steady Novikov-Thorne disk in place of the spreading-ring snapshot
+  - Open question: a steady Novikov-Thorne disk in place of the spreading-ring snapshot
     (three families raised it). A preview fills the frame with a hot opaque outer disk and loses
     the dark lane and the lower lensed image.
 

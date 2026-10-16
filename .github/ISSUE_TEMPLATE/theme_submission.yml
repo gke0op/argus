@@ -1,0 +1,60 @@
+name: Theme submission
+description: Propose a theme for the repository (or open a PR directly and use the PR template).
+labels: ["theme"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read CONTRIBUTING.md first. A theme is one `.metal` or `.zig` file in `themes/`.
+  - type: input
+    id: file
+    attributes:
+      label: File name
+      placeholder: themes/You_Name.metal
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What it shows
+      description: One paragraph. Add a screenshot or a short clip.
+    validations:
+      required: true
+  - type: textarea
+    id: harness
+    attributes:
+      label: Harness output
+      description: Full output of `make harness THEME=...`. For Metal, include the "Paced 30 FPS" line.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: claims
+    attributes:
+      label: Computed vs chosen
+      description: If the theme depicts something real, what is computed (with sources), what is chosen, and what is not modelled. "Purely artistic" is a fine answer.
+    validations:
+      required: true
+  - type: input
+    id: author
+    attributes:
+      label: Author credit
+      description: Who wrote it, and which model if a model wrote it.
+    validations:
+      required: true
+  - type: textarea
+    id: data
+    attributes:
+      label: Data and licences
+      description: Any data file, where it comes from, its licence, and what you changed. "None" if none.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I ran it live on a Space for a few minutes (no seams, flicker or drift).
+          required: true
+        - label: I can release it under the MIT License.
+          required: true

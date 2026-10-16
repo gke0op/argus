@@ -124,8 +124,7 @@ in numpy from the shipped data and compares the two.
 
 ## Audit (2026-10-16)
 
-An independent audit (notes: `orion-audit.md` in the session's shared notes) found these,
-all now fixed:
+An independent audit found these, all now fixed:
 
 - **The star tables were short.** The bake wrote four stars per line with a `//` comment
   after the first, which commented out the rest of the line: 9 positions were lost and the
