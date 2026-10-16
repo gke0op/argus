@@ -65,7 +65,7 @@ zig:
 # Argus.app (ad-hoc signed) and the git-tracked files of themes/ (never a glob of the folder). Every .zig theme ships precompiled and verified in
 # Argus.app/Contents/Resources/prebuilt, so the app runs them with no Zig installed; a theme
 # that is edited or added later is compiled at runtime and needs Zig 0.17.0.
-VERSION ?= 0.1.1
+VERSION ?= 0.1.2
 RELEASE = Argus-v$(VERSION)-macos-arm64
 STAGE = dist/$(RELEASE)
 release: app

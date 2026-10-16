@@ -11,6 +11,10 @@ All notable changes to Argus are recorded here. The format follows
 - `Lizard_Island` (Metal) returns to the lineup: a diver's drift over the Lizard Island lagoon,
   Great Barrier Reef, at real scale, with seagrass and animals from field sources. Seven
   themes now ship.
+- A frame-rate setting in Settings: 30 (default), 60, or 120 fps on displays that support it,
+  saved as `fps=` in `.argus_settings.conf`. Motion is the same at every rate; frames follow
+  the display's refresh. Higher rates cost proportionally more GPU and battery.
+- `make harness THEME=… FPS=60|120` reports a theme's paced GPU cost at that rate.
 
 ## [0.1.1] - 2026-10-16
 
