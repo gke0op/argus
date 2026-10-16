@@ -4,7 +4,7 @@ Every theme frame is rendered offline by the themes' own code on the GPU path th
 
 | File | Size | What it is |
 |---|---|---|
-| `hero.mp4` | 9.6 MB | 1920×1080, **120 FPS**, 21.5 s, H.264 High (two-pass, 3.5 Mbit/s). All seven shipped themes in turn, 0.5 s crossfades: Cygnus_A (6.5 s, the camera tilting 72° → 88°), then Night_Tide, Lizard_Island, Orion_Nebula, Ebru_Studio, Tutorial_Reef and Tutorial_Tides (3 s each) |
+| `hero.mp4` | 9.7 MB | 1920×1080, **120 FPS**, 21.5 s, H.264 High (two-pass, 3.5 Mbit/s). All seven shipped themes in turn, 0.5 s crossfades: Cygnus_A (6.5 s, the camera tilting 72° → 88°), then Night_Tide, Lizard_Island, Orion_Nebula, Ebru_Studio, Tutorial_Reef and Tutorial_Tides (3 s each) |
 | `hero.gif` | 4.5 MB | 400×226, 25 FPS, 8.6 s loop. The same seven, shorter: Cygnus A at 2× speed, the others 1.2 s each, cut from the same 120 FPS masters |
 | `cygnus-a.png` | 0.5 MB | Cygnus_A at its live camera (88°), 1920×1080 |
 | `night-tide.png` | 1.0 MB | Night_Tide, 1920×1080, 12.8 s into the simulation |
@@ -16,7 +16,7 @@ Every theme frame is rendered offline by the themes' own code on the GPU path th
 
 ## Cygnus_A (video, GIF, stills, card)
 
-A small driver (`src/launch_render_bh.zig`, not committed) does what `make gpu-bench` does. It takes the theme's tables and `step()` state from `src/gpu/bh_tables.zig` and runs the app's engine `src/gpu/bh_gpu.zig` (meter → trace → footprint → shade, the kernels in `opus_black_hole.metal`) with sRGB 8-bit output. The theme's `init()` skips its CPU trace, as it does in the app. Time advances as the app's frame pacer (`src/desktop/frame_rate.zig`) advances it: `step(0.008)` per 30 Hz logic tick, spread over the frames, so `step(0.002)` per frame at 120 FPS. A held inclination is traced once and shaded every frame, as in the app. (The first, 30 FPS hero stepped 1/30 s per frame, which ran the disk's turbulence about 4× faster than the wallpaper; this one runs at the wallpaper's speed.)
+A small driver (`src/launch_render_bh.zig`, not committed) does what `make gpu-bench` does. It takes the theme's tables and `step()` state from `src/gpu/bh_tables.zig` and runs the app's engine `src/gpu/bh_gpu.zig` (meter → trace → footprint → shade, the kernels in `opus_black_hole.metal`) with sRGB 8-bit output. The theme's `init()` skips its CPU trace, as it does in the app. Time advances as the app's frame pacer (`src/desktop/frame_rate.zig`) advances it: `step(0.008)` per 30 Hz logic tick, spread over the frames, so `step(0.002)` per frame at 120 FPS. A held inclination is traced once and shaded every frame, as in the app. **The earlier hero (30 FPS, October 16) ran Cygnus A's turbulence too fast:** its driver stepped the theme 1/30 s per frame instead of 0.008 per tick, about 4.2× the wallpaper's speed. This render steps it exactly as the app does. It also includes the shear-aware turbulence filter that keeps the disk from shimmering at 120 FPS.
 
 The only departure from the live wallpaper is the camera move. The GPU trace takes the inclination as a runtime parameter (`TraceParams.incl/sin_i/cos_i`). The video holds 72° for 0.25 s, eases (smoothstep) to 88° over 4.5 s, then holds 88°. 88° is the theme's own `INCL`: the last 3 s are exactly what the wallpaper shows. Every frame is a fresh full geodesic trace at its inclination, with no interpolation between frames. Exposure is the engine's own meter at each frame's inclination, smoothed over time (Gaussian, σ = 32 frames at 120 FPS, in log space) so its 1/8-stop histogram bins don't flicker. On the held 88° frames it equals the live meter.
 
@@ -24,7 +24,7 @@ The only departure from the live wallpaper is the camera move. The GPU trace tak
 
 A driver (`src/launch_render_metal.zig`, not committed) compiles each theme through `src/gpu/metal_theme.zig`, the app's path (prelude + theme, `argus_init`/`argus_step`/`argus_draw`), into an 8-bit RGBA texture, paced like the app at 120 FPS: `f.time` advances 1/120 s every frame and `argus_step` runs only on the 30 Hz logic ticks with dt = 1/30 s (`Theme.encodeTimes`). So all motion at 120 FPS is the theme's own, never interpolated, and simulations run at their real speed. Warm-ups before the shot: 11 s for Night_Tide (to catch a breaking wave), 40 s for Ebru_Studio (so the marbling has developed), 8 s for the rest.
 
-One exception: Lizard_Island builds its static reef in `argus_step` on `f.frame` 0, 1 and 2. At 60 and 120 FPS the app's pacer skips the steps on frames 1 and 2, so the reef doesn't finish and the coral heads come out as flat streaks (an app bug, reported). The render forces a step on those first three frames, which is what the theme gets at 30 FPS.
+`f.frame` is the 30 Hz tick index in both kernels, as in the app since the frame-tick fix (`metal_theme.FrameCounter`): it moves only on frames that step, and draws in between reuse it. So Lizard_Island's reef build, Tutorial_Reef's seeding and Night_Tide's sparkle grain run exactly as they do at 30 FPS.
 
 ## Popover and Settings
 
