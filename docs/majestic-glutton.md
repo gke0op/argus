@@ -40,8 +40,12 @@ black hole fed by a thin, hot accretion disk.
 - **Geodesics:** exact Kerr null geodesics in Boyer–Lindquist coordinates, Hamiltonian form,
   integrated with RK4. p_r is re-solved from the null condition at every step; rays are traced
   backward from the camera.
-- **Shadow test:** the traced shadow edge matches Bardeen's analytic critical curve to
-  7.5e-6 M (11 points) on both the CPU (f64) and the GPU (f32).
+- **Shadow test:** at 11 sampled points the traced shadow edge matches Bardeen's analytic
+  critical curve to 7.5e-6 M, on both the CPU (f64) and the GPU (f32).
+  - This validates the ray solver at those points. It does not prove the maximum error over the
+    whole contour (a dense sweep with max and RMS per path would).
+  - It is also far finer than the display: one pixel is ~0.04 M (48 M over 1,200 pixels), so this
+    is not a claim about the drawn silhouette's pixel accuracy.
 - **ISCO:** Bardeen–Press–Teukolsky. r_isco = 3.745 M at a = 0.62, efficiency η = 1 − E_isco = 0.093.
 - **Light-travel time:** each pixel's pattern phase includes the photon's coordinate travel time,
   relative to T_ref = r_obs + 2 ln(r_obs/2). Lensed images therefore lag the direct one.
@@ -59,15 +63,19 @@ The disk is **computed**, not shaped by hand:
    - Boundary: zero stress at the ISCO.
    - Numerics: backward Euler with a Thomas solve.
 2. **Initial ring and snapshot:** a ring of gas at 4 r_isco (width 0.8 r_isco), evolved until the
-   radius where the mass flux reverses reaches 5 r_isco. All radii scale with the ISCO, so this is
-   the same solution at any spin.
+   radius where the mass flux reverses reaches 5 r_isco. The recipe (initial ring and snapshot
+   criterion) scales with the ISCO, so it applies unchanged at any spin. The solution does not:
+   the equation's Kerr coefficients depend on spin, so it is recomputed for each spin.
 3. **Flux:** F = −(U⁰)² ζ Ω′ / (2r).
    - Near the ISCO it is steady inflow: F/F_Page-Thorne = 0.99 at 1.5 r_isco.
    - It falls below Page-Thorne outward: 0.89 at 9 M, 0.55 at 19 M, 0.28 at 28 M.
    - Mass budget closes to 0.998.
 4. **Physical scaling:** the ISCO inflow is set to 0.36 Ṁ_Edd for 4e9 Msun, α = 0.1.
+   - Convention: Ṁ_Edd = L_Edd / (η c²), with η = 1 − E_isco = 0.093 for this spin and
+     L_Edd = 1.26e38 (M/Msun) erg s⁻¹.
    - The snapshot radiates 0.544 of a steady Page-Thorne disk at that inflow.
-   - So L ≈ 0.20 L_Edd, matching the measured 0.18.
+   - So L = 0.36 × 0.544 = 0.196 L_Edd, matching the measured 0.18. (With a fixed 10% efficiency
+     convention the same inflow would read 0.182.)
 5. **Local structure, at each radius:**
    - Σ comes from the flux and the stress.
    - Scale height comes from hydrostatic balance with gas + radiation pressure.
@@ -101,6 +109,8 @@ The disk ends at R_out = 48 r_isco = 180 M, where τ ≈ 1e-4, so the gas fades 
 
 - **Redshift:** g = 1/(u^t (1 − Ω L)), with u^t and Ω for prograde circular Kerr orbits and
   L = −α sin i, the photon's angular momentum (E = 1).
+  - This g is relative to an observer at infinity. A static camera at r = 1000 M would see every
+    frequency × 1/√(1 − 2/1000) ≈ 1.001; that uniform 0.1% is not applied.
   - The observed spectrum is a blackbody at g × the colour temperature.
   - Colour and brightness come from Planck's law integrated against the CIE 1931 colour-matching
     functions.
@@ -159,12 +169,20 @@ The camera sits inside the core of the cluster's giant central galaxy.
   - Host starlight: μ_V ≈ 14.5–16 mag arcsec⁻² over the whole sky.
   - The nearest companion galaxies: ~8–10 mag.
   - Cluster members: ~11–14 mag. (Argon research, not individually verified.)
-- **Why it is black:** a 50,000 K surface is ~133× brighter per area at 550 nm than the Sun's,
-  which is ≈ −16 mag arcsec⁻². That puts the disk ~31 magnitudes (~10¹²) above the sky. At any
-  exposure that shows the disk, the sky is black.
+- **Why it is black:**
+  - The Sun's surface brightness is −26.74 mag spread over π (959.6″)² = 2.89e6 arcsec²:
+    −26.74 + 2.5 log₁₀(2.89e6) = −10.6 mag arcsec⁻².
+  - At 550 nm a 50,000 K blackbody is ~133× brighter per area than the Sun's 5,772 K
+    (−2.5 log₁₀ 133 = −5.3 mag), so the disk is ≈ −15.9 mag arcsec⁻².
+  - Against the host's +14.5 to +16, the disk is ~30–32 magnitudes (~10¹²) brighter. At any
+    exposure that shows the disk, the sky is black.
 - Renders that show a sky expose it separately; this one does not.
 
 ## 9. How it was checked
+
+Each test validates only its own claim: the Bardeen comparison checks the light paths, not the
+disk's luminosity, the turbulence statistics or the radiative transfer, which have their own
+tests or audits below.
 
 - **Tests:** shadow edge vs Bardeen; photon orbits; geodesic invariants (null condition, Carter
   constant); Page-Thorne limits; blackbody colours; the redshift sign; the disk solution's mass
@@ -195,7 +213,16 @@ The camera sits inside the core of the cluster's giant central galaxy.
 - **Opacity mean:** the Rosseland-mean Kramers law is used where a Planck mean might suit
   emission better.
 
-## 11. Questions for reviewers
+## 11. Reviews so far
+
+- **GPT (2026-10-16):** confirmed the spin, ISCO, efficiency, mass conversion and the
+  inclination distinction. It corrected the Sun's surface brightness (−10.6, not −16 mag arcsec⁻²;
+  the conclusion stands) and the spin-independence claim (the recipe scales, not the solution).
+  It also asked for the Ṁ_Edd convention, the shadow test's scope and the observer lapse to be
+  stated. All verified and fixed here. Still open: a dense full-contour shadow sweep, and a
+  machine-readable test ledger (claim, reference, conditions, tolerance, result).
+
+## 12. Questions for reviewers
 
 1. Is a spreading-ring snapshot defensible for a quasar that has accreted for ~10⁸ yr, or should
    the disk be steady (Page-Thorne everywhere)? Does the drop below Page-Thorne past
