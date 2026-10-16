@@ -587,16 +587,21 @@ fn rk4k(a: f64, L: f64, y: V6, h: f64, k1: V6) V6 {
 
 /// Step size: geometric in r far away, proportional to distance from the horizon near it,
 /// and capped so theta and phi each move < 0.08 rad per step (rays skimming the spin axis).
-fn stepSize(g: *const Geo, y: V6, d: V6) f64 {
+fn stepSize(g: *const Geo, L: f64, y: V6, d: V6) f64 {
     const r = y[0];
     var h: f64 = if (r > 200.0) 0.25 * r else if (r > 60.0) 0.1 * r else K_NEAR * @min(r, 4.0 * (r - g.rh));
     if (r < 200.0) {
         h = @min(h, 0.08 / @max(@abs(d[1]), 1e-12));
         h = @min(h, 0.08 / @max(@abs(d[2]), 1e-12));
-        // Near the spin axis theta turns on a scale ~ sin(theta): resolve that bend.
-        h = @min(h, (0.05 * @abs(@sin(y[1])) + 2e-4) / @max(@abs(d[1]), 1e-12));
+        // Near the spin axis theta turns on a scale ~ sin(theta): resolve that bend. A ray with
+        // angular momentum L turns back at sin(theta) ~ |L| / sqrt(Q) ~ |L| / 5; the floor (which
+        // lets L ~ 0 rays cross the pole) stays under 5% of that, so the turn is resolved too.
+        // Unresolved, it threw the photon off its orbit: a sliver of false capture at alpha ~ 0.
+        // Steps shrink geometrically into the turn, so even L = 0 crosses in ~300 steps; the
+        // minimum step makes way for it only on such rays (|L| < 1e-3), so no other ray changes.
+        h = @min(h, (0.05 * @abs(@sin(y[1])) + math.clamp(0.01 * @abs(L), 1e-8, 2e-4)) / @max(@abs(d[1]), 1e-12));
     }
-    return @max(h, 1e-5);
+    return @max(h, math.clamp(0.01 * @abs(L), 1e-8, 1e-5));
 }
 
 /// Re-solve p_r from the null condition (keeping its sign). Far from the hole the
@@ -702,7 +707,7 @@ pub fn traceNext(g: *const Geo, ray: *Ray, with_disk: bool) Hit {
             return .{ .kind = .sky, .dir = v, .steps = steps };
         }
         const k1 = rhs(g.a, L, y);
-        const h = stepSize(g, y, k1);
+        const h = stepSize(g, L, y, k1);
         const prev = y;
         y = project(g.a, L, rk4k(g.a, L, y, h, k1));
         if (!std.math.isFinite(y[0]) or !std.math.isFinite(y[1])) return .{ .kind = .hole, .steps = steps };
@@ -2277,7 +2282,7 @@ test "geodesic invariants: null condition and Carter constant are conserved" {
         const r = y[0];
         if (r < g.rh + 0.05 or (y[4] > 0 and r > 200)) break;
         const k1 = rhs(a, L, y);
-        y = project(a, L, rk4k(a, L, y, stepSize(&g, y, k1), k1)); // the production stepper
+        y = project(a, L, rk4k(a, L, y, stepSize(&g, L, y, k1), k1)); // the production stepper
         worst_h = @max(worst_h, @abs(nullB(a, L, y)) / (y[0] * y[0]));
         worst_q = @max(worst_q, @abs(carter(a, L, y) - q0) / q0);
     }

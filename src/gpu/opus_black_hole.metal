@@ -44,6 +44,7 @@ constant float OBS_R = 1000.0f;
 constant float T_REF = 1012.4292161968444f; // OBS_R + 2 ln(OBS_R / 2)
 constant float K_NEAR = 0.08f;
 constant uint MAX_STEPS = 40000;
+constant float AXIS_FOLD_COS = 0.99995f; // cos(0.01)
 // Gas denser than this is drawn opaque. The theme uses TAU_THICK * e^TAU_NOISE = 16.6, which
 // hides a leak of e^-5 behind stirred gas: fine against the sky, but here light is composited
 // before tone mapping and the inner disk behind can be ~50x display white, so a leak that size
@@ -217,15 +218,17 @@ static V6 rk4k(float a, float L, V6 y, float h, V6 k1) {
     return v6add(y, v6mul(v6add(v6add(k1, v6mul(v6add(k2, k3), 2.0f)), k4), h / 6.0f));
 }
 
-static float stepSize(constant TraceParams& P, V6 y, V6 d) {
+// floor and h_min depend only on the ray's L: traceNext computes them once per ray.
+static float stepSize(constant TraceParams& P, float floor_th, float h_min, V6 y, V6 d) {
     const float r = y.p.x;
     float h = r > 200.0f ? 0.25f * r : (r > 60.0f ? 0.1f * r : K_NEAR * min(r, 4.0f * (r - P.rh)));
     if (r < 200.0f) {
         h = min(h, 0.08f / max(fabs(d.p.y), 1e-12f));
         h = min(h, 0.08f / max(fabs(d.p.z), 1e-12f));
-        h = min(h, (0.05f * fabs(sin(y.p.y)) + 2e-4f) / max(fabs(d.p.y), 1e-12f));
+        // The turn at sin(theta) ~ |L| / 5 is resolved too (the theme's stepSize).
+        h = min(h, (0.05f * fabs(sin(y.p.y)) + floor_th) / max(fabs(d.p.y), 1e-12f));
     }
-    return max(h, 1e-5f);
+    return max(h, h_min);
 }
 
 static V6 project(float a, float L, V6 y) {
@@ -242,11 +245,17 @@ static V6 project(float a, float L, V6 y) {
     return out;
 }
 
+// Near theta = pi an f32 holds sin(theta) only to ~2.4e-7, ~1% of the turn of an L ~ 1e-4 ray at
+// the axis: rays crossing the south pole were captured or freed at random. Near theta = 0 f32 is
+// relatively exact. So a ray that comes within AXIS_FOLD rad of theta = pi is reflected,
+// (theta, p_theta) -> (pi - theta, -p_theta): an exact symmetry of the Kerr equations (they see
+// only sin(theta) and cos^2(theta)); `south` records the parity. Other rays are untouched.
 struct Ray {
     V6 y;
     float L;
     uint n;
     uint steps;
+    uint south;
 };
 
 struct Hit {
@@ -270,7 +279,7 @@ static Ray startRay(constant TraceParams& P, float alpha, float beta) {
     const float pth = -beta;
     const float X = Pp * Pp / del - pth * pth - f;
     const float pr = -sqrt(max(X, 0.0f) / del);
-    return Ray{V6{float3(r, P.incl, 0.0f), float3(T_REF, pr, pth)}, L, 0, 0};
+    return Ray{V6{float3(r, P.incl, 0.0f), float3(T_REF, pr, pth)}, L, 0, 0, 0};
 }
 
 static Hit traceNext(constant TraceParams& P, thread Ray& ray, bool with_disk) {
@@ -278,17 +287,21 @@ static Hit traceNext(constant TraceParams& P, thread Ray& ray, bool with_disk) {
     const float L = ray.L;
     const float a = P.a;
     uint n = ray.n;
+    uint south = ray.south;
+    const float floor_th = clamp(0.01f * fabs(L), 1e-8f, 2e-4f); // turn at sin(theta) ~ |L| / 5
+    const float h_min = clamp(0.01f * fabs(L), 1e-8f, 1e-5f); // smaller only for |L| < 1e-3 rays
     for (uint steps = ray.steps; steps < MAX_STEPS; steps++) {
         const float r = y.p.x;
         if (r < P.rh + 0.02f) return hitNone();
         if (y.q.y > 0.0f && r > 2.0e4f) {
             const V6 d = rhs(a, L, y);
+            const float sg = south != 0 ? -1.0f : 1.0f; // unfold: cos(theta) and dtheta flip
             const float s = sin(y.p.y);
-            const float c = cos(y.p.y);
+            const float c = sg * cos(y.p.y);
             const float sp = sin(y.p.z);
             const float cp = cos(y.p.z);
             const float vr = d.p.x;
-            const float vt = r * d.p.y;
+            const float vt = sg * r * d.p.y;
             const float vp = r * s * d.p.z;
             const float3 v = float3(vr * s * cp + vt * c * cp - vp * sp,
                                     vr * s * sp + vt * c * sp + vp * cp,
@@ -296,11 +309,12 @@ static Hit traceNext(constant TraceParams& P, thread Ray& ray, bool with_disk) {
             return Hit{KIND_SKY, 0, 0.0f, 0.0f, 0.0f, normalize(v), 0.0f};
         }
         const V6 k1 = rhs(a, L, y);
-        const float h = stepSize(P, y, k1);
+        const float h = stepSize(P, floor_th, h_min, y, k1);
         const V6 prev = y;
         y = project(a, L, rk4k(a, L, y, h, k1));
         if (!isfinite(y.p.x) || !isfinite(y.p.y)) return hitNone();
         // Equator crossing via the sign of cos(theta): robust if theta wraps through a pole.
+        // (prev and y share the fold parity, so the working theta's cos changes sign with the true one.)
         const float e0 = cos(prev.p.y);
         const float e1 = cos(y.p.y);
         if ((e0 < 0.0f) != (e1 < 0.0f)) {
@@ -327,8 +341,13 @@ static Hit traceNext(constant TraceParams& P, thread Ray& ray, bool with_disk) {
                 ray.y = y;
                 ray.n = n;
                 ray.steps = steps + 1;
+                ray.south = south;
                 return Hit{KIND_DISK, n, rc, yc.p.z, yc.q.x, float3(0.0f), yc.q.z};
             }
+        }
+        if (e1 < -AXIS_FOLD_COS) { // near theta = pi: reflect (see struct Ray)
+            y = V6{float3(y.p.x, copysign(M_PI_F, y.p.y) - y.p.y, y.p.z), float3(y.q.x, y.q.y, -y.q.z)};
+            south ^= 1u;
         }
     }
     return hitNone();
