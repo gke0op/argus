@@ -918,6 +918,7 @@ pub const State = struct {
     turb_sigma: f32, // TURB_SIGMA, for the GPU path
     spot_rmax: f64, // SPOT_RMAX, for the GPU path
     sky_gain: f32, // SKY_VISIBLE, for the GPU path
+    fcol_follow: f32, // 0: the chosen look holds its colour under spots and turbulence
     rho_row: [N_OCT]f32, // measured neighbour correlation of each noise plane: rows, phase cells
     rho_ph: [N_OCT]f32,
     foot_cr: [N_OCT]f32, // GPU footprint filter: cell constants of the box-averaged rendered field
@@ -1068,6 +1069,7 @@ pub const State = struct {
         self.turb_sigma = TURB_SIGMA;
         self.spot_rmax = SPOT_RMAX;
         self.sky_gain = @floatCast(SKY_VISIBLE);
+        self.fcol_follow = 0.0;
         for (0..N_OCT) |oct| {
             const sc = math.pow(f64, 2.0, @floatFromInt(oct));
             const gr: usize = @max(1, @as(usize, @intFromFloat(@round(@as(f64, NR) / (cell_rows / sc)))));

@@ -219,10 +219,9 @@ Armitage & Simon 2011; Hirose et al. 2009):
   - σ = 0.2 is applied unfiltered at the photosphere, an upper bound: the vertical diffusion time
     τH/c ≈ 350 × 0.29 ≈ 100 M exceeds an orbit at the peak (87 M), so sub-orbit fluctuations
     would be partly smoothed before they escape.
-  - The colour correction f_col and the dilution stay at the unperturbed disk's values; the
-    ripple scales only the temperature. With f_col ∝ T^0.82 applied locally, a hotter patch above
-    ~30 kK would harden and look dimmer at 550 nm (d ln Y/d ln ε ≈ −0.29 at 50 kK, where the code
-    gives +0.30). Below ~30 kK the two agree.
+  - The colour correction f_col and the dilution are re-evaluated at each patch's own
+    temperature (FCOL_FOLLOWS, GPU path): above ~30 kK a hotter patch hardens, reading bluer and a
+    little dimmer at 550 nm (d ln Y/d ln ε ≈ −0.29 at 50 kK). Below ~30 kK nothing changes.
 - **Filtering:**
   - Variance-preserving interpolation between table cells, using fitted neighbour correlations.
   - Footprint filter (1 + (f/c)²)^{−1/4} per axis, fitted to box averaging (max error 0.045).
@@ -233,9 +232,9 @@ Armitage & Simon 2011; Hirose et al. 2009):
   living 90 M.
 - Each spot shears as it ages: every radius keeps its own Ω(r).
 - Emissivity × (1 + boost), so T rises as (1 + boost)^{1/4}.
-- f_col and the dilution stay at the unperturbed values (as in §6). A full spot (1 + boost = 7)
-  at the 50 kK peak renders at 1.74× the base 550 nm luminance; with f_col re-evaluated at the
-  spot's temperature it would be 0.54× and bluer (colour temperature ~185 kK, not ~124 kK).
+- f_col and the dilution follow the spot's temperature (as in §6, both paths): a full spot
+  (1 + boost = 7) at the 50 kK peak reads 0.54× the base 550 nm luminance and blue (colour
+  temperature ~185 kK); with f_col held it would be 1.74× and whiter (~124 kK).
 - Count, size and brightness are choices; the motion is computed.
 
 ## 8. The sky is black
@@ -322,7 +321,8 @@ tests or audits below.
     slab/atmosphere blend, Done's exponent (0.82), the midplane boundary constant (+½, not +1:
     the faint outskirts beyond ~75 M were ~1 kK too hot), and an unused 12th lifetime band
     (lifetimes stopped tracking P(r) beyond ~75 M).
-  - Disclosed: f_col held fixed under turbulence and spots (§6, §7), finite thickness (§10),
+  - Applied after review: f_col follows the gas under turbulence and spots (§6, §7). Disclosed:
+    finite thickness (§10),
     radiative smoothing of the turbulence (§6), the visible ring at the f_col knee (§5).
   - The ledger's Eddington-ratio claim now integrates the physical flux the renderer uses (cgs,
     both faces): L = 0.187 L_Edd, against 0.196 from the inputs (the flat area weight omits
