@@ -26,6 +26,19 @@ const mtl = @import("metal.zig");
 
 pub const PRELUDE = @embedFile("argus_prelude.metal");
 
+/// `f.time` wraps after this many seconds (4 h; ARGUS_TIME_PERIOD in the prelude). The clock
+/// itself is an f64; a float32 that kept growing would lose the frame step after days (dt
+/// rounds to 2x at ~6 days and to 0 at ~12, so animation races and then freezes). Wrapped,
+/// f.time stays within ~1 ms forever. A cycle of any whole number of minutes that divides 240
+/// (1-6, 8, 10, 12, 15, 16, 20, 24, 30, 40, 48, 60 ...) stays seamless across a wrap.
+pub const TIME_PERIOD: f64 = 14400.0;
+
+/// Advances the f64 `clock` by `dt` and returns the float32 `f.time` the kernels see.
+pub fn advanceClock(clock: *f64, dt: f32) f32 {
+    clock.* += dt;
+    return @floatCast(@mod(clock.*, TIME_PERIOD));
+}
+
 /// Mirrors `struct ArgusFrame` in the prelude.
 pub const Frame = extern struct {
     time: f32 = 0,
@@ -158,6 +171,8 @@ pub const Theme = struct {
     cur: usize = 0,
     needs_init: bool = true,
     frame: Frame = .{},
+    /// Seconds since load, in f64 (see TIME_PERIOD); frame.time is this, wrapped.
+    clock: f64 = 0,
 
     /// Compiles prelude + `src` for an `out_w` x `out_h` output. On failure `err_buf`
     /// holds the Metal compiler's message (with the theme's own line numbers). `data` is the
@@ -255,7 +270,7 @@ pub const Theme = struct {
         self.draw.dispatch(enc, self.frame.width, self.frame.height);
         mtl.msg(void, enc, "endEncoding", .{});
         self.frame.frame +%= 1;
-        self.frame.time += dt;
+        self.frame.time = advanceClock(&self.clock, dt);
     }
 
     /// Encodes only argus_draw for the current state, without advancing time or the state
@@ -294,6 +309,33 @@ test "directives" {
     try std.testing.expect(parseDirectives("// @argus data ../x.bin 4x4\n").dataName() == null);
     try std.testing.expect(parseDirectives("// @argus data a/x.bin 4x4\n").dataName() == null);
     try std.testing.expect(parseDirectives("// @argus data x.bin 4x4 rgb9\n").dataName() == null);
+}
+
+test "f.time keeps the frame step for 30 days" {
+    // 30 days of 30 FPS frames. A float32 accumulator stops advancing at ~12 days.
+    const dt: f32 = 1.0 / 30.0;
+    const frames: u64 = 30 * 86400 * 30;
+    var clock: f64 = 0;
+    var prev: f32 = 0;
+    var wraps: u32 = 0;
+    var worst: f64 = 0;
+    var i: u64 = 0;
+    while (i < frames) : (i += 1) {
+        const t = advanceClock(&clock, dt);
+        var step: f64 = @as(f64, t) - @as(f64, prev);
+        if (step < 0) {
+            step += TIME_PERIOD;
+            wraps += 1;
+        }
+        worst = @max(worst, @abs(step - @as(f64, dt)));
+        prev = t;
+    }
+    // Every step is dt to within the float32 resolution near the period (~1 ms), never 0 or 2 dt.
+    try std.testing.expect(worst < 1.0e-3);
+    try std.testing.expectEqual(@as(u32, 30 * 86400 / 14400), wraps);
+    const elapsed: f64 = @as(f64, @floatFromInt(frames)) * @as(f64, dt);
+    try std.testing.expectApproxEqAbs(elapsed, clock, 1.0e-3);
+    try std.testing.expect(prev >= 0 and prev < TIME_PERIOD);
 }
 
 test "loadData: the file must be exactly the declared size" {

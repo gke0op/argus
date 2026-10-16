@@ -18,6 +18,9 @@ const METAL_BUDGET_US: f64 = 8333.0;
 const METAL_DT: f32 = 1.0 / 30.0;
 /// `--no-budget` (CI on shared runners): frame time is reported but not part of the verdict.
 var enforce_budget = true;
+/// `--seed N` (Metal): the f.seed a theme sees. The app derives one per Space; the harness pins
+/// 0x5EED so renders are repeatable. Render a few seeds to check a seeded composition holds up.
+var metal_seed: u32 = 0x5EED;
 
 const MetalRun = struct { ok: bool, gpu_us_avg: f64 = 0, gpu_us_worst: f64 = 0, err: [*:0]const u8 = "" };
 
@@ -131,7 +134,7 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
     };
     defer if (data) |d| alloc.free(d);
 
-    var theme = metal_theme.Theme.compile(src, label, data, @intCast(width), @intCast(height), 0x5EED, &err_buf) catch {
+    var theme = metal_theme.Theme.compile(src, label, data, @intCast(width), @intCast(height), metal_seed, &err_buf) catch {
         std.debug.print("METAL COMPILE FAILED: {s}\n{s}\nVerdict           : FAIL\n", .{ path, std.mem.sliceTo(&err_buf, 0) });
         std.process.exit(1);
     };
@@ -320,6 +323,9 @@ pub fn main(init: std.process.Init) !void {
         } else if (std.mem.eql(u8, a, "--height") and i + 1 < args.len) {
             i += 1;
             height = try std.fmt.parseInt(usize, args[i], 10);
+        } else if (std.mem.eql(u8, a, "--seed") and i + 1 < args.len) {
+            i += 1;
+            metal_seed = try std.fmt.parseInt(u32, args[i], 0);
         } else if (std.mem.eql(u8, a, "--no-budget")) {
             enforce_budget = false;
         } else if (std.mem.eql(u8, a, "--probe-metal")) {
