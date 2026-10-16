@@ -15,7 +15,11 @@
 // 2026 reverberation lag is in tension, unresolved); its luminosity, ~0.2 of Eddington's
 // (Fukuchi, Ichikawa et al. 2022: lambda = 0.18 from the full SED, 0.59 from X-rays): a
 // radiatively efficient thin disk. From Earth we see its inner disk at 44.6 +- 3.3 deg (90%);
-// this camera sits elsewhere around it, at 88 deg (a choice).
+// this camera sits elsewhere around it, at 88 deg (a choice). It may also be a recoiling black
+// hole: its broad lines move ~1000-2100 km/s against the host and the nucleus looks offset from
+// the host's centre (Robinson et al. 2010; Jadhav et al. 2021, MNRAS 507, 484), as a hole kicked
+// by asymmetric gravitational waves in a merger would be. Unsettled (a binary or a wind could
+// also explain it); up close it would look the same, since the disk moves with the hole.
 // Audited independently (Gemini 4 Argon; Claude Opus with its own code): every item under
 // "computed" was re-derived and checked. Opus_Gargantua.zig is the same engine at a chosen,
 // cooler temperature.
