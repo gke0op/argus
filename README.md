@@ -7,7 +7,7 @@ right there on the desktop. Argus fixes that: ignite a relativistic quasar behin
 for a few milliseconds of GPU a frame, or really anything you can write a pixel for.
 
 <p align="center">
-  <img src="docs/media/hero.gif" alt="Cygnus A. Quasar: spinning (Kerr) black hole with its accretion disk; the camera tilts from 72 to 88 degrees, nearly edge-on, and back" width="100%">
+  <img src="docs/media/hero.gif" alt="The seven Argus themes in turn: Cygnus A, a quasar (spinning Kerr black hole with its accretion disk) as the camera tilts to nearly edge-on, then Night Tide, Lizard Island, Orion Nebula, Ebru Studio, Tutorial Reef and Tutorial Tides" width="100%">
 </p>
 <p align="center"><a href="docs/media/hero.mp4">Watch in full quality (MP4)</a></p>
 
