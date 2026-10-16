@@ -8,7 +8,7 @@
 // world unit is one metre.
 //
 // What the sources say, and how it shows here. [cited] = page read,
-// [snippet] = search result only, [atlas] = NbS atlas rows (York 2020,
+// [snippet] = search result only, [atlas] = habitat dataset rows (York 2020,
 // Gomis 2025). Sources: PCRF Lizard Island reef report; ISRA factsheet
 // (sharkrayareas.org); Australian Museum, Lizard Island Research Station;
 // eAtlas media 3988 (TropWATER/JCU); Fishes of Australia 317.

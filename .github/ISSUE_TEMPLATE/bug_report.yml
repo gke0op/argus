@@ -1,0 +1,51 @@
+name: Bug report
+description: Something in Argus or a bundled theme doesn't work.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security problems go to SECURITY.md, not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: theme
+    attributes:
+      label: Theme
+      description: Which theme (file name), if the bug is in a theme.
+      placeholder: themes/Opus_Night_Tide.metal
+  - type: input
+    id: mac
+    attributes:
+      label: Mac and macOS version
+      placeholder: MacBook Air M3, macOS 26.1
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Argus commit
+      description: Output of `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: input
+    id: zig
+    attributes:
+      label: Zig version
+      description: Output of `zig version` (or `./.toolchain/zig version`). Argus needs 0.17.0.
+  - type: textarea
+    id: spaces
+    attributes:
+      label: Displays and Spaces
+      description: How many displays and Desktop Spaces, full-screen apps, HDR display or not.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or harness output
+      description: Terminal output, `make harness THEME=...` output, crash report excerpt.
+      render: text

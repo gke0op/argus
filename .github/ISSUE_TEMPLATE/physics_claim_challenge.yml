@@ -1,0 +1,46 @@
+name: Physics claim challenge
+description: A theme, header, ledger record or doc states something about the physics that you think is wrong.
+labels: ["physics"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most useful kind of report we get. Every challenge is re-derived before anything
+        changes, so please give a source (paper, textbook, or a derivation we can follow).
+  - type: input
+    id: where
+    attributes:
+      label: Where is the claim
+      description: File and line, ledger record id, or doc section.
+      placeholder: docs/majestic-glutton.md §5, or opus_cygnus_a.disk.t_peak
+    validations:
+      required: true
+  - type: textarea
+    id: claim
+    attributes:
+      label: The claim, as written
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why you think it is wrong
+      description: What is wrong, what it should be, and how big the difference is.
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Source
+      description: Paper (with DOI or arXiv id), book and section, or your derivation.
+    validations:
+      required: true
+  - type: dropdown
+    id: visible
+    attributes:
+      label: Would it change the picture?
+      options:
+        - "Yes, visibly"
+        - "Slightly"
+        - "No, but the text is wrong"
+        - "Not sure"
