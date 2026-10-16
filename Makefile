@@ -60,7 +60,7 @@ zig:
 	tools/get-zig.sh
 
 # A download for a GitHub Release: dist/Argus-v$(VERSION)-macos-arm64.zip holds one folder with
-# Argus.app (ad-hoc signed) and themes/. Every .zig theme ships precompiled and verified in
+# Argus.app (ad-hoc signed) and the git-tracked files of themes/ (never a glob of the folder). Every .zig theme ships precompiled and verified in
 # Argus.app/Contents/Resources/prebuilt, so the app runs them with no Zig installed; a theme
 # that is edited or added later is compiled at runtime and needs Zig 0.17.0.
 VERSION ?= 0.1.0
@@ -68,8 +68,11 @@ RELEASE = Argus-v$(VERSION)-macos-arm64
 STAGE = dist/$(RELEASE)
 release: app
 	python3 -I tools/gen_quasars.py --check
-	@[ "$(ALLOW_DIRTY)" = 1 ] || { git diff --quiet HEAD -- themes src Argus.app docs/INSTALL.md && [ -z "$$(git ls-files --others --exclude-standard themes)" ]; } || \
-		{ echo "release: uncommitted changes in themes/, src/ or Argus.app (ALLOW_DIRTY=1 to ship them anyway)"; exit 1; }
+	@# Only committed themes ship: an untracked or edited file under themes/ fails the release.
+	@git diff --quiet HEAD -- themes && [ -z "$$(git ls-files --others --exclude-standard themes)" ] || \
+		{ echo "release: themes/ has untracked or modified files; commit or move them first:"; git status --short --untracked-files=all themes; exit 1; }
+	@[ "$(ALLOW_DIRTY)" = 1 ] || git diff --quiet HEAD -- src Argus.app docs/INSTALL.md || \
+		{ echo "release: uncommitted changes in src/, Argus.app or docs/INSTALL.md (ALLOW_DIRTY=1 to build anyway)"; exit 1; }
 	@grep -q "<string>$(VERSION)</string>" Argus.app/Contents/Info.plist || { echo "Info.plist CFBundleShortVersionString is not $(VERSION)"; exit 1; }
 	rm -rf $(STAGE) dist/$(RELEASE).zip
 	mkdir -p $(STAGE)
@@ -78,9 +81,9 @@ release: app
 	tar -c $$(git ls-files themes) | tar -x -C $(STAGE)
 	cp LICENSE NOTICE.md $(STAGE)/
 	cp docs/INSTALL.md $(STAGE)/INSTALL.md
-	for t in $(STAGE)/themes/*.zig; do \
+	for t in $$(git ls-files 'themes/*.zig'); do \
 		[ "$$(basename $$t)" = argus_theme_sdk.zig ] && continue; \
-		./argus-desktop --precompile $$t $(STAGE)/Argus.app/Contents/Resources/prebuilt || exit 1; \
+		./argus-desktop --precompile $(STAGE)/$$t $(STAGE)/Argus.app/Contents/Resources/prebuilt || exit 1; \
 	done
 	codesign --force --deep --sign - $(STAGE)/Argus.app
 	codesign --verify --deep --strict $(STAGE)/Argus.app

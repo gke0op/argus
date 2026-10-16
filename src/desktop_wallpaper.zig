@@ -2436,6 +2436,7 @@ pub fn main(init: std.process.Init) !void {
     bridge.launch_at_login = settings.getBool("launch_at_login", false);
     // A LaunchAgent from before the bundle ID change gives way to the current one.
     _ = login_item.removeLegacy();
+    sc.pruneDylibCache();
     // Keep the login item pointing at this copy of Argus.app if the folder moved.
     if (bridge.launch_at_login) {
         var app_buf: [1024]u8 = undefined;

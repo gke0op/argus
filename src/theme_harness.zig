@@ -344,7 +344,10 @@ pub fn main(init: std.process.Init) !void {
     var dylib_buf: [256]u8 = undefined;
     var emit_buf: [280]u8 = undefined;
     const now_ns = std.Io.Clock.real.now(io).nanoseconds;
-    const dylib_z = try std.fmt.bufPrintSentinel(&dylib_buf, "/tmp/argus_harness_{d}.dylib", .{now_ns}, 0);
+    // The per-user temp folder (0700 on macOS), not /tmp: nobody else can swap the library
+    // between the compile and the dlopen.
+    const tmp_dir = std.mem.trimEnd(u8, init.environ_map.get("TMPDIR") orelse "/tmp", "/");
+    const dylib_z = try std.fmt.bufPrintSentinel(&dylib_buf, "{s}/argus_harness_{d}.dylib", .{ tmp_dir, now_ns }, 0);
     const emit_arg = try std.fmt.bufPrint(&emit_buf, "-femit-bin={s}", .{dylib_z});
 
     // Resolve Zig 0.17+ toolchain portably across machines (.toolchain/zig -> $ZIG -> $HOME/zig-toolchains/zig-0.17.0/zig -> PATH zig)

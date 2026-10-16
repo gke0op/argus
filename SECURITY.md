@@ -38,6 +38,18 @@ process (`Argus --verify-dylib`) at 320x200 and rejects it if that process:
 Metal themes are compiled before they replace a Space's current theme, and rejected if they
 fail to compile, have no `argus_draw` kernel, or their data file has the wrong size.
 
+Where compiled themes live:
+
+- Argus compiles Zig themes into, and caches verified libraries in,
+  `~/Library/Caches/io.github.gke0op.argus/`. That folder is created as yours alone (mode
+  0700), and Argus tightens it back if it finds it open to others. Argus refuses the folder if
+  it belongs to someone else or is a symlink. Nothing is compiled into or loaded from `/tmp`,
+  where any local user could plant a library under a predictable name.
+- Argus uses a cached library only if it is a regular file (not a symlink) owned by you that no
+  one else can write. Otherwise it compiles and verifies the theme again.
+- Release builds ship every bundled Zig theme precompiled inside `Argus.app` (verified when the
+  release is built), so a downloaded Argus needs no Zig.
+
 ## What the watchdog does not protect against
 
 The watchdog catches **accidents**, so that a broken theme doesn't take the app down. It is
@@ -50,8 +62,11 @@ not a sandbox and not a malware scanner:
 - It has no time limit.
 - It does not look at what the code does: file access, network access and process launches
   are not detected.
-- Verified libraries are cached by a hash of the theme's source, so an unchanged theme is not
-  re-checked.
+- Verified libraries are cached by a hash of the theme's source file, so an unchanged theme is
+  not re-checked: a cache hit, or a theme precompiled into the app, loads without running the
+  watchdog again. The cache is private to your account (above), so only programs running as
+  you can change it, and those could change the theme or Argus itself anyway. The hash covers
+  the theme file only, not `argus_theme_sdk.zig` or `src/gpu/`.
 - Metal themes are not run before they go live; the harness (`make harness`) is the place to
   test them.
 

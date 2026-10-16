@@ -203,6 +203,133 @@ test "renamed themes: a saved Opus_Black_Hole Space loads Opus_Quasar from the s
     try std.testing.expectEqualStrings("themes/Echo.zig", renamedThemePath("themes/Echo.zig", &buf));
 }
 
+/// The app's bundle identifier (Argus.app/Contents/Info.plist): also the LaunchAgent label and
+/// the name of the dylib cache folder.
+pub const BUNDLE_ID = "io.github.gke0op.argus";
+
+const S_IFMT: u16 = 0o170000;
+const S_IFDIR: u16 = 0o040000;
+const S_IFREG: u16 = 0o100000;
+
+/// `path` itself (a symlink is not followed) is a `kind` (S_IFDIR/S_IFREG) owned by this user
+/// with none of the `forbid` permission bits set.
+fn ownedPrivately(path: [:0]const u8, kind: u16, forbid: u16) bool {
+    var st: std.c.Stat = undefined;
+    if (std.c.fstatat(std.c.AT.FDCWD, path.ptr, &st, std.c.AT.SYMLINK_NOFOLLOW) != 0) return false;
+    return (st.mode & S_IFMT) == kind and st.uid == std.c.getuid() and (st.mode & forbid) == 0;
+}
+
+/// Per-user folder for compiled and cached theme dylibs: ~/Library/Caches/<bundle id>, mode 0700.
+/// Never /tmp: anyone on the Mac can write there and cache names follow from public theme
+/// source, so a planted dylib would be loaded into Argus. Null if it can't be made private.
+pub fn dylibCacheDir(buf: *[512]u8) ?[:0]const u8 {
+    const home = std.c.getenv("HOME") orelse return null;
+    return cacheDirUnder(std.mem.span(home), buf);
+}
+
+fn cacheDirUnder(home: []const u8, buf: *[512]u8) ?[:0]const u8 {
+    const dir = std.fmt.bufPrintSentinel(buf, "{s}/Library/Caches/" ++ BUNDLE_ID, .{home}, 0) catch return null;
+    std.Io.Dir.cwd().createDirPath(g_io, dir[0 .. dir.len - BUNDLE_ID.len - 1]) catch {};
+    _ = std.c.mkdir(dir.ptr, 0o700);
+    if (ownedPrivately(dir, S_IFDIR, 0o077)) return dir;
+    // Ours but open to others (an old build, a umask): close it. Anyone else's: refuse.
+    if (!ownedPrivately(dir, S_IFDIR, 0) or std.c.chmod(dir.ptr, 0o700) != 0) return null;
+    return if (ownedPrivately(dir, S_IFDIR, 0o077)) dir else null;
+}
+
+/// A cache entry is used only if it is a regular file owned by this user that nobody else can
+/// write (the folder is private too; this also refuses a symlink or a copied-in foreign file).
+fn cacheEntryUsable(path: [:0]const u8) bool {
+    return ownedPrivately(path, S_IFREG, 0o022);
+}
+
+/// Unlike /tmp, ~/Library/Caches is never emptied for us, and live reload adds an entry per save:
+/// at app start, drop entries unused for 30 days (a cache hit refreshes the date) and per-load
+/// copies a crash left behind.
+pub fn pruneDylibCache() void {
+    var dir_buf: [512]u8 = undefined;
+    const dir_path = dylibCacheDir(&dir_buf) orelse return;
+    pruneDylibCacheIn(dir_path, std.Io.Clock.real.now(g_io).nanoseconds);
+}
+
+fn pruneDylibCacheIn(dir_path: []const u8, now_ns: i96) void {
+    const max_age_ns: i96 = 30 * std.time.ns_per_day;
+    var dir = std.Io.Dir.cwd().openDir(g_io, dir_path, .{ .iterate = true }) catch return;
+    defer dir.close(g_io);
+    var it = dir.iterate();
+    while (it.next(g_io) catch null) |e| {
+        if (e.kind != .file or !std.mem.endsWith(u8, e.name, ".dylib")) continue;
+        const stale = if (std.mem.startsWith(u8, e.name, "load_"))
+            true // a live load deletes its copy right after dlopen
+        else if (std.mem.startsWith(u8, e.name, "argus_theme_")) blk: {
+            const st = dir.statFile(g_io, e.name, .{}) catch continue;
+            break :blk now_ns - st.mtime.nanoseconds > max_age_ns;
+        } else false;
+        if (stale) dir.deleteFile(g_io, e.name) catch {};
+    }
+}
+
+test "dylib cache: private per-user folder; entries must be ours and not writable by others" {
+    g_io = std.testing.io;
+    var home_buf: [128]u8 = undefined;
+    const home = try std.fmt.bufPrint(&home_buf, "/tmp/argus_cache_test_{d}", .{std.c.getpid()});
+    defer std.Io.Dir.cwd().deleteTree(g_io, home) catch {};
+    var buf: [512]u8 = undefined;
+    const dir = cacheDirUnder(home, &buf).?;
+    try std.testing.expect(std.mem.endsWith(u8, dir, "/Library/Caches/" ++ BUNDLE_ID));
+    try std.testing.expect(ownedPrivately(dir, S_IFDIR, 0o077));
+
+    // Opened up to everyone: tightened back to 0700 on the next use.
+    try std.testing.expectEqual(@as(c_int, 0), std.c.chmod(dir.ptr, 0o777));
+    try std.testing.expect(cacheDirUnder(home, &buf) != null);
+    try std.testing.expect(ownedPrivately(dir, S_IFDIR, 0o077));
+
+    var entry_buf: [600]u8 = undefined;
+    const entry = try std.fmt.bufPrintSentinel(&entry_buf, "{s}/argus_theme_1.dylib", .{dir}, 0);
+    try std.Io.Dir.cwd().writeFile(g_io, .{ .sub_path = entry, .data = "x" });
+    try std.testing.expectEqual(@as(c_int, 0), std.c.chmod(entry.ptr, 0o644));
+    try std.testing.expect(cacheEntryUsable(entry));
+    try std.testing.expectEqual(@as(c_int, 0), std.c.chmod(entry.ptr, 0o666)); // writable by others
+    try std.testing.expect(!cacheEntryUsable(entry));
+    try std.testing.expectEqual(@as(c_int, 0), std.c.chmod(entry.ptr, 0o664)); // by the group
+    try std.testing.expect(!cacheEntryUsable(entry));
+
+    // A symlink is refused even when it points at a good file.
+    try std.testing.expectEqual(@as(c_int, 0), std.c.chmod(entry.ptr, 0o644));
+    var link_buf: [600]u8 = undefined;
+    const link = try std.fmt.bufPrintSentinel(&link_buf, "{s}/argus_theme_2.dylib", .{dir}, 0);
+    try std.Io.Dir.cwd().symLink(g_io, entry, link, .{});
+    try std.testing.expect(!cacheEntryUsable(link));
+    try std.testing.expect(!cacheEntryUsable("/tmp/argus_no_such_entry.dylib"));
+
+    // Pruning: an entry 31 days old and a crashed run's load copy go, a fresh entry stays.
+    var load_buf: [600]u8 = undefined;
+    const load = try std.fmt.bufPrintSentinel(&load_buf, "{s}/load_1_sp0_g1.dylib", .{dir}, 0);
+    try std.Io.Dir.cwd().writeFile(g_io, .{ .sub_path = load, .data = "x" });
+    const day: i96 = std.time.ns_per_day;
+    const now = std.Io.Clock.real.now(g_io).nanoseconds;
+    pruneDylibCacheIn(dir, now);
+    try std.testing.expect(cacheEntryUsable(entry));
+    try std.testing.expect(!cacheEntryUsable(load));
+    pruneDylibCacheIn(dir, now + 31 * day);
+    try std.testing.expect(!cacheEntryUsable(entry));
+
+    // A cache folder that is a symlink (say, to a shared folder) is refused.
+    var home2_buf: [128]u8 = undefined;
+    const home2 = try std.fmt.bufPrint(&home2_buf, "/tmp/argus_cache_test2_{d}", .{std.c.getpid()});
+    defer std.Io.Dir.cwd().deleteTree(g_io, home2) catch {};
+    var caches_buf: [256]u8 = undefined;
+    const caches = try std.fmt.bufPrint(&caches_buf, "{s}/Library/Caches", .{home2});
+    try std.Io.Dir.cwd().createDirPath(g_io, caches);
+    var target_buf: [256]u8 = undefined;
+    const target = try std.fmt.bufPrint(&target_buf, "{s}/shared", .{home2});
+    try std.Io.Dir.cwd().createDirPath(g_io, target);
+    var dlink_buf: [256]u8 = undefined;
+    const dlink = try std.fmt.bufPrint(&dlink_buf, "{s}/" ++ BUNDLE_ID, .{caches});
+    try std.Io.Dir.cwd().symLink(g_io, target, dlink, .{ .is_directory = true });
+    try std.testing.expect(cacheDirUnder(home2, &buf) == null);
+}
+
 /// Precompiled themes that `make release` ships inside the app, relative to the app's folder
 /// (the working directory). Named like the /tmp cache, by source hash.
 pub const BUNDLED_THEMES_DIR = "Argus.app/Contents/Resources/prebuilt";
@@ -473,35 +600,42 @@ pub const SpaceConfig = struct {
         } else |_| {}
 
         self.dylib_gen +%= 1;
-        var dylib_buf: [256]u8 = undefined;
+        var dir_buf: [512]u8 = undefined;
+        const cache_dir = dylibCacheDir(&dir_buf) orelse return false;
+        var dylib_buf: [600]u8 = undefined;
         // PID in the path: the live app, tests and harness must never overwrite each other's loaded dylibs.
-        const dylib_z = std.fmt.bufPrintSentinel(&dylib_buf, "/tmp/argus_shader_{d}_sp{d}_g{d}.dylib", .{
+        const dylib_z = std.fmt.bufPrintSentinel(&dylib_buf, "{s}/load_{d}_sp{d}_g{d}.dylib", .{
+            cache_dir,
             std.c.getpid(),
             space_idx,
             self.dylib_gen,
         }, 0) catch return false;
+        // The loaded image stays mapped; the per-load copy is not needed after dlopen.
+        defer _ = std.c.unlink(dylib_z.ptr);
 
         const gpu_port = gpu_ports and isGpuPortTheme(path);
 
         // Content-addressed verified .dylib cache: hash source content so unchanged shaders
         // across app restarts or multiple Spaces skip `zig build-lib` and `--verify-dylib`!
         const src_hash = themeSourceHash(path, gpu_port);
-        // v2: v1 cache entries carry path-derived install names that collide across themes.
-        var cache_buf: [256]u8 = undefined;
-        const cache_path: ?[]const u8 = if (src_hash != 0)
-            std.fmt.bufPrint(&cache_buf, "/tmp/argus_cache_v2_{x}.dylib", .{src_hash}) catch null
+        var cache_buf: [600]u8 = undefined;
+        const cache_path: ?[:0]const u8 = if (src_hash != 0)
+            std.fmt.bufPrintSentinel(&cache_buf, "{s}/argus_theme_{x}.dylib", .{ cache_dir, src_hash }, 0) catch null
         else
             null;
         var bundled_buf: [256]u8 = undefined;
         const bundled_path: ?[]const u8 = if (src_hash != 0) bundledThemePath(src_hash, &bundled_buf) else null;
 
         // A theme shipped precompiled inside the app (`make release`, verified there) needs no
-        // Zig on this Mac; then the verified cache from an earlier run; then a fresh compile.
+        // Zig on this Mac; then the verified cache from an earlier run (only if it is still ours
+        // alone); then a fresh compile.
         var loaded_prebuilt = false;
-        for ([_]?[]const u8{ bundled_path, cache_path }, [_][]const u8{ "bundled", "cached" }) |maybe, how| {
+        const usable_cache: ?[]const u8 = if (cache_path) |cp| (if (cacheEntryUsable(cp)) cp else null) else null;
+        for ([_]?[]const u8{ bundled_path, usable_cache }, [_][]const u8{ "bundled", "cached" }) |maybe, how| {
             const src = maybe orelse continue;
             if (std.Io.Dir.cwd().copyFile(src, std.Io.Dir.cwd(), dylib_z, g_io, .{})) |_| {
                 loaded_prebuilt = true;
+                if (std.mem.eql(u8, how, "cached")) _ = std.c.utimes(cache_path.?.ptr, null); // in use: not pruned
                 std.debug.print("argus: {s}: {s} dylib\n", .{ path, how });
                 break;
             } else |_| {}
@@ -526,7 +660,9 @@ pub const SpaceConfig = struct {
 
             // Cache the verified .dylib for instant multi-Space & cold-start reuse
             if (cache_path) |cp| {
-                std.Io.Dir.cwd().copyFile(dylib_z, std.Io.Dir.cwd(), cp, g_io, .{}) catch {};
+                if (std.Io.Dir.cwd().copyFile(dylib_z, std.Io.Dir.cwd(), cp, g_io, .{})) |_| {
+                    _ = std.c.chmod(cp.ptr, 0o700); // whatever the umask, usable next time
+                } else |_| {}
             }
         }
 
