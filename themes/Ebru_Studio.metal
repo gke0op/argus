@@ -1,5 +1,5 @@
 // ============================================================================
-// OPUS EBRU STUDIO // themes/Opus_Ebru_Studio.metal
+// EBRU STUDIO // themes/Ebru_Studio.metal
 // Author: Claude Opus (Anthropic), 2026-10-16.
 //
 // A marbling bath in a daylight studio, seen from straight above in a frame of
