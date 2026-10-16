@@ -242,7 +242,16 @@ pub const Theme = struct {
 
     /// Encodes one frame into `cb`: init once, `steps` state updates, then the draw into `out`.
     pub fn encode(self: *Theme, cb: mtl.Id, out: mtl.Id, dt: f32) void {
-        self.frame.dt = dt;
+        self.encodeTimes(cb, out, dt, dt);
+    }
+
+    /// `encode` with the clock and the state steps decoupled: f.time advances by `clock_dt`
+    /// (the frame interval) and `argus_step` runs with f.dt = `step_dt`, or is skipped when null.
+    /// Steps happen at the fixed 30 Hz logic rate whatever the frame rate, so every simulation
+    /// moves the same at 30, 60 and 120 FPS (desktop/frame_rate.zig). With equal dts this is
+    /// exactly `encode`.
+    pub fn encodeTimes(self: *Theme, cb: mtl.Id, out: mtl.Id, clock_dt: f32, step_dt: ?f32) void {
+        self.frame.dt = step_dt orelse clock_dt;
         const enc = mtl.msg(mtl.Id, cb, "computeCommandEncoder", .{});
         const fb: *const anyopaque = &self.frame;
         mtl.msg(void, enc, "setBytes:length:atIndex:", .{ fb, @as(usize, @sizeOf(Frame)), @as(usize, 0) });
@@ -256,21 +265,26 @@ pub const Theme = struct {
                 if (self.data_tex != null) mtl.msg(void, enc, "setTexture:atIndex:", .{ self.data_tex, @as(usize, 1) });
                 p.dispatch(enc, sw, sh);
             }
-            if (self.step) |p| {
+            if (self.step) |p| if (step_dt != null) {
                 for (0..self.dir.steps) |_| {
                     mtl.msg(void, enc, "setTexture:atIndex:", .{ self.tex[self.cur], @as(usize, 0) });
                     mtl.msg(void, enc, "setTexture:atIndex:", .{ self.tex[self.cur ^ 1], @as(usize, 1) });
                     p.dispatch(enc, sw, sh);
                     self.cur ^= 1;
                 }
-            }
+            };
             mtl.msg(void, enc, "setTexture:atIndex:", .{ self.tex[self.cur], @as(usize, 1) });
+        }
+        if (self.frame.dt != clock_dt) {
+            // The draw sees the frame interval (the bytes were copied at setBytes time).
+            self.frame.dt = clock_dt;
+            mtl.msg(void, enc, "setBytes:length:atIndex:", .{ fb, @as(usize, @sizeOf(Frame)), @as(usize, 0) });
         }
         mtl.msg(void, enc, "setTexture:atIndex:", .{ out, @as(usize, 0) });
         self.draw.dispatch(enc, self.frame.width, self.frame.height);
         mtl.msg(void, enc, "endEncoding", .{});
         self.frame.frame +%= 1;
-        self.frame.time = advanceClock(&self.clock, dt);
+        self.frame.time = advanceClock(&self.clock, clock_dt);
     }
 
     /// Encodes only argus_draw for the current state, without advancing time or the state

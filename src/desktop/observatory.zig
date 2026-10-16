@@ -232,19 +232,29 @@ pub const Observatory = struct {
 
     /// Advances a Space's SDK theme one step without drawing (GPU-presented Spaces draw on the GPU).
     pub fn stepSpace(self: *Observatory, space_idx: usize) void {
+        self.stepSpaceBy(space_idx, 0.008 * self.spin_mult);
+    }
+
+    /// Steps by `dt` simulated seconds (the app passes desktop/frame_rate.zig's per-frame step).
+    pub fn stepSpaceBy(self: *Observatory, space_idx: usize, dt: f64) void {
         if (space_idx >= MAX_SPACES or self.paused) return;
         const sp = &self.spaces[space_idx];
-        if (sp.theme_state != null and sp.theme_step_fn != null) sp.theme_step_fn.?(sp.theme_state, 0.008 * self.spin_mult);
+        if (sp.theme_state != null and sp.theme_step_fn != null) sp.theme_step_fn.?(sp.theme_state, dt);
     }
 
     pub fn renderNativeShaderForSpaceIsolated(self: *Observatory, space_idx: usize, phase_cycles: f64) bool {
+        return self.renderSpaceStepping(space_idx, phase_cycles, 0.008 * self.spin_mult);
+    }
+
+    /// Steps an SDK theme by `step_dt` and draws it into the Space's buffer.
+    pub fn renderSpaceStepping(self: *Observatory, space_idx: usize, phase_cycles: f64, step_dt: f64) bool {
         if (space_idx >= MAX_SPACES) return false;
         const sp = &self.spaces[space_idx];
         if (sp.mode != .custom_shader) return false;
         const dst_buf = &self.space_native_pixels[space_idx];
         if (sp.theme_state != null and sp.theme_step_fn != null and sp.theme_draw_fn != null) {
             if (!self.paused) {
-                sp.theme_step_fn.?(sp.theme_state, 0.008 * self.spin_mult);
+                sp.theme_step_fn.?(sp.theme_state, step_dt);
             }
             sp.theme_draw_fn.?(sp.theme_state, dst_buf, NATIVE_PIXELS, NATIVE_W);
             return true;

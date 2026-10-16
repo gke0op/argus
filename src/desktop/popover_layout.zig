@@ -103,6 +103,16 @@ pub fn cell(col: usize, row_idx: usize) Rect {
     };
 }
 
+/// Frame-rate control (bottom-right cell): "FPS" then one segment per offered rate.
+pub const fps_ctl = Rect{ .x = GX + CELL_W + 32, .y = ROW_B_Y + 2, .w = CELL_W - 38, .h = ROW_H - 4 };
+
+/// Which of `n` segments popover x falls in.
+pub fn fpsSegment(x: f64, n: usize) usize {
+    const k = @max(n, 1);
+    const t = std.math.clamp((x - fps_ctl.x) / fps_ctl.w, 0.0, 0.9999);
+    return @intFromFloat(@floor(t * @as(f64, @floatFromInt(k))));
+}
+
 /// Speed slider detents; 1x sits in the middle.
 pub const SPEEDS = [_]f64{ 0.25, 0.5, 1.0, 1.5, 2.0 };
 
@@ -141,6 +151,8 @@ pub const Hit = union(enum) {
     smooth_swipes,
     reload_on_edit,
     launch_at_login,
+    /// A click on the frame-rate control at this x; `fpsSegment` says which rate.
+    fps: f64,
 };
 
 pub fn hitSpaces(x: f64, y: f64, n_spaces: usize, paused: bool, scroll: f64) ?Hit {
@@ -166,6 +178,7 @@ pub fn hitSettings(x: f64, y: f64) ?Hit {
     if (cell(0, 0).contains(x, y)) return .smooth_swipes;
     if (cell(1, 0).contains(x, y)) return .reload_on_edit;
     if (cell(0, 1).contains(x, y)) return .launch_at_login;
+    if (fps_ctl.contains(x, y)) return .{ .fps = x };
     return null;
 }
 
@@ -264,7 +277,13 @@ test "popover layout: every control hits where it is drawn, inside the box" {
     try std.testing.expectEqual(Hit.smooth_swipes, hitSettings(GX + 10, ROW_A_Y + 10).?);
     try std.testing.expectEqual(Hit.reload_on_edit, hitSettings(GX + CELL_W + 10, ROW_A_Y + 10).?);
     try std.testing.expectEqual(Hit.launch_at_login, hitSettings(GX + 10, ROW_B_Y + 10).?);
-    try std.testing.expect(hitSettings(GX + CELL_W + 10, ROW_B_Y + 10) == null);
+    // Frame rate: 2 or 3 segments across the control, inside the box.
+    const fx = fps_ctl.x + fps_ctl.w * 0.9;
+    try std.testing.expectEqual(Hit{ .fps = fx }, hitSettings(fx, ROW_B_Y + 10).?);
+    try std.testing.expectEqual(@as(usize, 2), fpsSegment(fx, 3));
+    try std.testing.expectEqual(@as(usize, 1), fpsSegment(fx, 2));
+    try std.testing.expectEqual(@as(usize, 0), fpsSegment(fps_ctl.x + 1, 3));
+    try std.testing.expect(fps_ctl.x + fps_ctl.w <= W - 14);
     // Nothing leaves the original box or crosses the block divider.
     try std.testing.expect(ROW_B_Y + ROW_H <= SPACES_H - 6);
     try std.testing.expect(cell(1, 1).x + cell(1, 1).w <= W - 14);
