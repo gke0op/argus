@@ -581,8 +581,20 @@ static void addSample(thread Px& px, constant TraceParams& P, constant Static& s
             const float y0 = luma(smp.rgb);
             const float peak_t = exp(2.6f * st.turb_sigma / 4.0f); // T at +2.6 sigma of the dissipation
             const float boost = y0 > 0.0f ? max(luma(bbLookup(st, smp.tobs * peak_t)) / y0, 1.0f) : 1.0f;
-            const bool dim = y0 * emitFrac(P, ttab, alpha, h0) * P.exposure * boost < EMIT_FLOOR;
-            if (tau < TAU_MIN || dim) {
+            const float ef = emitFrac(P, ttab, alpha, h0);
+            const bool dim = y0 * ef * P.exposure * boost < EMIT_FLOOR;
+            bool promote = tau < TAU_MIN || dim;
+            if (!promote && tau < TAU_BEHIND && h1.kind == KIND_DISK) {
+                // Glowing but translucent gas over a brighter crossing behind it (the lensed underside
+                // seen through the warm outer disk): the brighter layer is the animated one; this
+                // one's faint glow goes to the background.
+                const Sample sb = shadeDisk(P, st, ttab, alpha, h1.r, h1.ph, h1.t);
+                if (y0 * ef < luma(sb.rgb) * emitFrac(P, ttab, alpha, h1) * exp(-tau)) {
+                    px.bg += front_tr * smp.rgb * (P.exposure * ef);
+                    promote = true;
+                }
+            }
+            if (promote) {
                 if (tau >= TAU_BEHIND) return; // dim and opaque: nothing shows here
                 front_tr *= exp(-tau);
                 h0 = h1;
