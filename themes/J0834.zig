@@ -1,7 +1,7 @@
 // @argus-theme: custom_shader
 // ============================================================================
 // J0834 // themes/J0834.zig
-// GENERATED from themes/H1821.zig by tools/gen_quasars.py: edit the source, then
+// GENERATED from themes/Majestic_Glutton.zig by tools/gen_quasars.py: edit the source, then
 // `make quasars`. Same engine; this object's paragraph, spin, mass and Eddington ratio.
 //
 // A quasar: a spinning (Kerr) supermassive black hole feeding a luminous thin accretion

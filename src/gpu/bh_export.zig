@@ -1,7 +1,7 @@
 // ============================================================================
 // ARGUS GPU // src/gpu/bh_export.zig
 //
-// Root of the GPU build of themes/H1821.zig (the default; `--cpu` turns it off).
+// Root of the GPU build of themes/Majestic_Glutton.zig (the default; `--cpu` turns it off).
 // Compiled as
 //   zig build-lib --dep theme -Mroot=src/gpu/bh_export.zig -Mtheme=<theme path>
 // it exports the theme's normal SDK symbols (from the theme's own `comptime` block)

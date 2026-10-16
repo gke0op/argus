@@ -1,7 +1,7 @@
 // ============================================================================
 // ARGUS GPU // src/gpu/bh_tables.zig
 //
-// Copies themes/H1821.zig's tables into the layouts the Metal kernels read
+// Copies themes/Majestic_Glutton.zig's tables into the layouts the Metal kernels read
 // (src/gpu/opus_black_hole.metal: struct Static / Frame / TraceParams / View).
 // `st` is the theme's `*State`; nothing in the theme is modified.
 //

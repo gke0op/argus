@@ -2,7 +2,7 @@
 // ============================================================================
 // GARGANTUA // themes/Gargantua.zig
 //
-// Interstellar's mood on H1821's engine. The gravity is all computed, exactly as there:
+// Interstellar's mood on Majestic Glutton's engine. The gravity is all computed, exactly as there:
 // Kerr light paths (GPU-traced at native resolution, the same shadow-edge check), redshift and
 // beaming, light-travel delays, photon rings, shearing hot spots on Kerr orbits, limb
 // darkening, and the turbulence machinery. The disk itself is CHOSEN, for the look, and says so:
@@ -18,7 +18,7 @@
 //  * Turbulence: bolder than a thermal thin disk (sigma 0.4, not 0.2), eddies 6x the quasar's
 //    (H/r 0.06) living 2x the measured time, so the shear winds them into broad bands; the GPU
 //    footprint filter is narrowed to match so they never alias.
-// The notes below are H1821's and describe the shared engine; where they quote the
+// The notes below are Majestic Glutton's and describe the shared engine; where they quote the
 // quasar's disk (37,000 K, the computed profile, Eddington ratios) Gargantua's choices above
 // replace them. The computed quasar disk is still solved at init (its test runs here too).
 //
@@ -1099,7 +1099,7 @@ pub const State = struct {
         }
         // Neighbour correlations of each plane (for the GPU's variance-preserving interpolation),
         // measured on the static planes: an upper bound for rows, which shear decorrelates as
-        // eddies age (H1821 uses values fitted on the rendered field). An approximation:
+        // eddies age (Majestic Glutton uses values fitted on the rendered field). An approximation:
         // between rows the variance may dip a little.
         for (0..N_OCT) |oct| {
             var srr: f64 = 0.0;
@@ -1116,7 +1116,7 @@ pub const State = struct {
             self.rho_row[oct] = @floatCast(srr / s00);
             self.rho_ph[oct] = @floatCast(spp / s00);
         }
-        // Footprint filter: H1821's fit, with the radial constant cut by GARG_LIFE: eddies
+        // Footprint filter: Majestic Glutton's fit, with the radial constant cut by GARG_LIFE: eddies
         // that shear GARG_LIFE times longer are that much thinner radially (else they alias).
         self.foot_cr = .{ @floatCast(0.865 / GARG_LIFE), @floatCast(1.284 / GARG_LIFE) };
         self.foot_cp = .{ 1.513, 2.039 };

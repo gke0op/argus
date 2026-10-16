@@ -35,9 +35,9 @@ First public release, as source. Built with Zig 0.17.0 for macOS on Apple Silico
 
 ### Themes
 
-- **Quasar family**, one engine generated from `H1821.zig` by `tools/gen_quasars.py`:
-  `H1821` (H1821+643), `Cygnus_A`, `J0834` (F2MS J0834+3506), `PG1426`
-  (PG 1426+015). Exact Kerr null geodesics; a computed general-relativistic thin disk with gas
+- **Quasar family**, one engine generated from `Majestic_Glutton.zig` by `tools/gen_quasars.py`:
+  `Majestic_Glutton` (an artwork modelled on H1821+643), and the real quasars `Cygnus_A`,
+  `J0834` (F2MS J0834+3506) and `PG1426` (PG 1426+015). Exact Kerr null geodesics; a computed general-relativistic thin disk with gas
   and radiation pressure, electron scattering and Kramers opacity; colour-corrected,
   limb-darkened emission through CIE 1931; MRI-like turbulence statistics; shearing hot spots;
   supersampled photon rings. The colour correction follows hotter gas in turbulence and spots.
@@ -57,10 +57,10 @@ First public release, as source. Built with Zig 0.17.0 for macOS on Apple Silico
 - `make harness`: headless gates for Zig and Metal themes, with the live cost paced at 30 FPS.
 - `make test`, `make claims` (equatorial light paths against an independent reference),
   `make gpu-bench`, and `make ledger`, which writes one JSON record per checked physics claim
-  (`docs/h1821_ledger.json`, `docs/cygnus_a_ledger.json`).
+  (`docs/majestic_glutton_ledger.json`, `docs/cygnus_a_ledger.json`).
 - Full-contour shadow test against Bardeen's critical curve on the CPU and the GPU; a near-axis
   error it found is fixed.
-- `docs/majestic-glutton.md`: the physical model behind `H1821`, with its checks, choices
+- `docs/majestic-glutton.md`: the physical model behind `Majestic_Glutton`, with its checks, choices
   and open questions.
 
 ### Tools and docs

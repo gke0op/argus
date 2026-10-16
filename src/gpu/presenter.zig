@@ -6,7 +6,7 @@
 //  - ThemePresenter: Metal-only themes (themes/*.metal, see metal_theme.zig).
 //  - Presenter: Zig + Metal hybrids. The Zig theme steps on the CPU; the GPU traces the
 //    image itself at the window's native pixel size and shades it every frame from the
-//    theme's tables, into an extended-range (HDR) layer. Today: H1821 and Gargantua via
+//    theme's tables, into an extended-range (HDR) layer. Today: Majestic Glutton and Gargantua via
 //    src/gpu/bh_export.zig and src/gpu/bh_gpu.zig.
 // ============================================================================
 
