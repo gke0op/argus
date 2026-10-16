@@ -12,3 +12,4 @@ Argus.app/Contents/_CodeSignature/
 *.ppm
 .toolchain/
 .argus_settings.conf
+dist/

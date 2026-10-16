@@ -5,16 +5,26 @@ own theme, a single `.metal` (GPU) or `.zig` (CPU) file compiled on the fly.
 
 > The full README is on its way.
 
+## Install
+
+Download the release zip and open Argus.app. No Zig is needed: every theme ships precompiled.
+macOS asks you to approve an app that isn't notarized the first time you open it;
+[docs/INSTALL.md](docs/INSTALL.md) has the steps.
+
 ## Build and run
 
-Requires macOS on Apple Silicon and Zig 0.17.0.
+Requires macOS on Apple Silicon and Zig 0.17.0 (`make zig` installs it into `.toolchain/`,
+checksum-verified; `brew install zig` also works).
 
 ```sh
+make zig                                  # install the pinned Zig 0.17.0 into .toolchain/
 make run                                  # build Argus.app and start it
 make stop                                 # quit it
 make test                                 # run the test suites
 make harness THEME=themes/Echo.zig        # verify and benchmark a theme headlessly
 make harness THEME=themes/Tutorial_Tides.metal   # same, on the GPU for Metal themes
+make check-themes                         # the harness on every theme
+make release                              # dist/Argus-v0.1.0-macos-arm64.zip for a GitHub Release
 ```
 
 ## Menu bar controls

@@ -1,7 +1,7 @@
 // ============================================================================
 // ARGUS DESKTOP // src/desktop/login_item.zig
 //
-// Launch at login: a per-user LaunchAgent (~/Library/LaunchAgents/io.egregore.argus.plist) that
+// Launch at login: a per-user LaunchAgent (~/Library/LaunchAgents/io.github.gke0op.argus.plist) that
 // opens Argus.app at login. Plain file, no ServiceManagement registration: `launch_at_login` in
 // .argus_settings.conf is the switch, and the plist simply follows it.
 // ============================================================================
@@ -9,7 +9,11 @@
 const std = @import("std");
 const sc = @import("space_config.zig");
 
-pub const LABEL = "io.egregore.argus";
+/// Matches CFBundleIdentifier in Argus.app/Contents/Info.plist.
+pub const LABEL = "io.github.gke0op.argus";
+/// Labels of earlier builds: their LaunchAgents are removed on start (`removeLegacy`), and the
+/// app writes the current one if "Open at login" is on.
+const LEGACY_LABELS = [_][]const u8{"io.egregore.argus"};
 
 /// The LaunchAgent plist that opens the app bundle at `app_path` at login.
 pub fn plist(app_path: []const u8, out: []u8) ?[]const u8 {
@@ -36,8 +40,24 @@ pub fn plist(app_path: []const u8, out: []u8) ?[]const u8 {
 }
 
 fn agentPath(out: []u8) ?[]const u8 {
+    return agentPathFor(LABEL, out);
+}
+
+fn agentPathFor(label: []const u8, out: []u8) ?[]const u8 {
     const home = std.c.getenv("HOME") orelse return null;
-    return std.fmt.bufPrint(out, "{s}/Library/LaunchAgents/" ++ LABEL ++ ".plist", .{std.mem.span(home)}) catch null;
+    return std.fmt.bufPrint(out, "{s}/Library/LaunchAgents/{s}.plist", .{ std.mem.span(home), label }) catch null;
+}
+
+/// One-time migration: deletes LaunchAgents left under an old label. Returns how many it removed.
+pub fn removeLegacy() usize {
+    var removed: usize = 0;
+    for (LEGACY_LABELS) |label| {
+        var path_buf: [1024]u8 = undefined;
+        const path = agentPathFor(label, &path_buf) orelse continue;
+        std.Io.Dir.cwd().deleteFile(sc.g_io, path) catch continue;
+        removed += 1;
+    }
+    return removed;
 }
 
 /// Installs (or refreshes, if Argus.app moved) or removes the LaunchAgent. `app_path` is the
@@ -64,7 +84,14 @@ pub fn apply(on: bool, app_path: []const u8) bool {
 test "login item: plist opens the app bundle at login" {
     var buf: [2048]u8 = undefined;
     const p = plist("/Users/me/Desktop/argus/Argus.app", &buf).?;
-    try std.testing.expect(std.mem.indexOf(u8, p, "<string>io.egregore.argus</string>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, p, "<string>io.github.gke0op.argus</string>") != null);
     try std.testing.expect(std.mem.indexOf(u8, p, "<string>/usr/bin/open</string>\n        <string>/Users/me/Desktop/argus/Argus.app</string>") != null);
     try std.testing.expect(std.mem.indexOf(u8, p, "<key>RunAtLoad</key>\n    <true/>") != null);
+}
+
+test "login item: label matches the bundle identifier in Info.plist" {
+    sc.g_io = std.testing.io;
+    var buf: [4096]u8 = undefined;
+    const info = try std.Io.Dir.cwd().readFile(sc.g_io, "Argus.app/Contents/Info.plist", &buf);
+    try std.testing.expect(std.mem.indexOf(u8, info, "<string>" ++ LABEL ++ "</string>") != null);
 }

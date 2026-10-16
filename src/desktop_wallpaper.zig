@@ -879,7 +879,11 @@ const MacBridge = struct {
 
         // Header: themes folder (left), "Argus" (centre), pause/play and Settings (right).
         self.themesIcon(ctx, H, 20.0, 11.0);
-        self.drawLabel(ctx, H, W * 0.5, 10.5, "Argus", self.dict_title, C_TITLE, .center);
+        if (self.note_len > 0 and self.note_error) {
+            self.drawLabel(ctx, H, W * 0.5, 12.0, self.note_buf[0..self.note_len], self.dict_small, C_ERROR, .center);
+        } else {
+            self.drawLabel(ctx, H, W * 0.5, 10.5, "Argus", self.dict_title, C_TITLE, .center);
+        }
         if (paused) {
             self.fillR(ctx, H, pl.paused_chip, 10.0, .{ 1.0, 1.0, 1.0, 0.07 });
             self.drawLabel(ctx, H, pl.paused_chip.x + pl.paused_chip.w * 0.5, pl.paused_chip.y + 4.5, "Paused", self.dict_small, C_AMBER, .center);
@@ -1161,9 +1165,9 @@ const MacBridge = struct {
         const path = std.fmt.bufPrint(&path_buf, "themes/{s}", .{file}) catch return;
         if (self.assignFileToSpace(idx, path)) {
             self.note_len = 0;
-        } else {
+        } else if (sc.zig_status == .ok) {
             self.setNote(true, "Couldn't load {s}", .{name});
-        }
+        } // else assignFileToSpace said what Zig is missing
     }
 
     /// Gives the Space back to macOS: unloads its theme and hides Argus's window there.
@@ -1323,9 +1327,25 @@ const MacBridge = struct {
 
     pub fn assignFileToSpace(self: *MacBridge, space_idx: usize, path: []const u8) bool {
         if (space_idx >= self.obs.n_spaces) return false;
+        sc.zig_status = .ok;
         const ok = if (isImagePath(path)) self.loadImageIntoSpace(space_idx, path) else self.loadCodeFileIntoSpace(space_idx, path);
         std.debug.print("argus: {s} -> Space {d}: {s}\n", .{ path, space_idx + 1, if (ok) "loaded" else "refused" });
+        if (!ok and std.mem.endsWith(u8, path, ".zig")) self.noteZigProblem(path);
         return ok;
+    }
+
+    /// A Zig theme that is not shipped precompiled (new or edited) needs Zig 0.17.0 to build:
+    /// say so when that is why it failed. Stays 10 s.
+    fn noteZigProblem(self: *MacBridge, path: []const u8) void {
+        var name_buf: [64]u8 = undefined;
+        const name = displayName(std.Io.Dir.path.basename(path), &name_buf);
+        switch (sc.zig_status) {
+            .ok => return,
+            .missing => self.setNote(true, "{s} needs Zig 0.17.0 to build: brew install zig", .{name}),
+            .wrong_version => self.setNote(true, "{s} needs Zig 0.17.0 (found {s})", .{ name, sc.zig_found_buf[0..sc.zig_found_len] }),
+        }
+        self.note_until = self.frame_idx + 300;
+        self.flushPopoverLayer();
     }
 
     pub fn bakeCGImageCover(self: *MacBridge, raw_img: ?*anyopaque) ?*anyopaque {
@@ -1898,6 +1918,37 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
 }
 
 extern "c" fn chdir(path: [*:0]const u8) c_int;
+
+/// For an executable inside an App Translocation mirror (/private/var/folders/.../AppTranslocation/
+/// <uuid>/d/Argus.app/...), the same executable at the app's real location, via Security.framework;
+/// null when not translocated or unresolvable.
+fn untranslocatedExePath(exe: []const u8, out: *[1024]u8) ?[]const u8 {
+    if (std.mem.indexOf(u8, exe, "/AppTranslocation/") == null) return null;
+    const marker = "/Argus.app/";
+    const pos = std.mem.indexOf(u8, exe, marker) orelse return null;
+    const bundle = exe[0 .. pos + marker.len - 1];
+    const rest = exe[pos + marker.len - 1 ..]; // "/Contents/MacOS/Argus"
+
+    const sec = std.c.dlopen("/System/Library/Frameworks/Security.framework/Security", .{ .LAZY = true }) orelse return null;
+    const cf = std.c.dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", .{ .LAZY = true }) orelse return null;
+    const UrlFromPath = *const fn (?*anyopaque, [*]const u8, isize, bool) callconv(.c) ?*anyopaque;
+    const OriginalPath = *const fn (?*anyopaque, ?*?*anyopaque) callconv(.c) ?*anyopaque;
+    const PathFromUrl = *const fn (?*anyopaque, bool, [*]u8, isize) callconv(.c) bool;
+    const Release = *const fn (?*anyopaque) callconv(.c) void;
+    const url_from_path: UrlFromPath = @ptrCast(@alignCast(std.c.dlsym(cf, "CFURLCreateFromFileSystemRepresentation") orelse return null));
+    const original_path: OriginalPath = @ptrCast(@alignCast(std.c.dlsym(sec, "SecTranslocateCreateOriginalPathForURL") orelse return null));
+    const path_from_url: PathFromUrl = @ptrCast(@alignCast(std.c.dlsym(cf, "CFURLGetFileSystemRepresentation") orelse return null));
+    const release: Release = @ptrCast(@alignCast(std.c.dlsym(cf, "CFRelease") orelse return null));
+
+    const url = url_from_path(null, bundle.ptr, @intCast(bundle.len), true) orelse return null;
+    defer release(url);
+    const orig = original_path(url, null) orelse return null;
+    defer release(orig);
+    var path_buf: [1024]u8 = undefined;
+    if (!path_from_url(orig, true, &path_buf, path_buf.len)) return null;
+    const orig_bundle = std.mem.sliceTo(&path_buf, 0);
+    return std.fmt.bufPrint(out, "{s}{s}", .{ orig_bundle, rest }) catch null;
+}
 extern "c" fn _NSGetExecutablePath(buf: [*]u8, bufsize: *u32) c_int;
 
 pub fn main(init: std.process.Init) !void {
@@ -1916,10 +1967,14 @@ pub fn main(init: std.process.Init) !void {
         args[0]
     else
         "";
-    if (std.mem.indexOf(u8, exe_slice, "/Argus.app/Contents/MacOS/")) |pos| {
+    // A quarantined app opened where it was unzipped runs from a read-only App Translocation
+    // mirror with nothing beside it: anchor to the folder the user actually put it in.
+    var orig_buf: [1024]u8 = undefined;
+    const anchor_exe = untranslocatedExePath(exe_slice, &orig_buf) orelse exe_slice;
+    if (std.mem.indexOf(u8, anchor_exe, "/Argus.app/Contents/MacOS/")) |pos| {
         if (pos > 0 and pos < 960) {
             var dir_z_buf: [1024]u8 = undefined;
-            if (std.fmt.bufPrintSentinel(&dir_z_buf, "{s}", .{exe_slice[0..pos]}, 0)) |dir_z| {
+            if (std.fmt.bufPrintSentinel(&dir_z_buf, "{s}", .{anchor_exe[0..pos]}, 0)) |dir_z| {
                 _ = chdir(dir_z.ptr);
             } else |_| {}
         }
@@ -1937,7 +1992,10 @@ pub fn main(init: std.process.Init) !void {
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const a = args[i];
-        if (std.mem.eql(u8, a, "--verify-dylib") and i + 1 < args.len) {
+        if (std.mem.eql(u8, a, "--precompile") and i + 2 < args.len) {
+            // `make release`: Argus --precompile themes/X.zig <Argus.app/Contents/Resources/prebuilt>
+            std.process.exit(if (sc.precompileTheme(args[i + 1], args[i + 2])) 0 else 1);
+        } else if (std.mem.eql(u8, a, "--verify-dylib") and i + 1 < args.len) {
             var path_z_buf: [512]u8 = undefined;
             const dylib_z = std.fmt.bufPrintSentinel(&path_z_buf, "{s}", .{args[i + 1]}, 0) catch std.process.exit(1);
             if (sc.verifyDylibSafety(dylib_z)) {
@@ -2376,6 +2434,8 @@ pub fn main(init: std.process.Init) !void {
     bridge.warm_neighbors = settings.getBool("smooth_swipes", true);
     bridge.hot_reload = settings.getBool("reload_on_edit", true);
     bridge.launch_at_login = settings.getBool("launch_at_login", false);
+    // A LaunchAgent from before the bundle ID change gives way to the current one.
+    _ = login_item.removeLegacy();
     // Keep the login item pointing at this copy of Argus.app if the folder moved.
     if (bridge.launch_at_login) {
         var app_buf: [1024]u8 = undefined;

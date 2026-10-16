@@ -7,7 +7,7 @@
     <key>CFBundleExecutable</key>
     <string>Argus</string>
     <key>CFBundleIdentifier</key>
-    <string>io.egregore.argus</string>
+    <string>io.github.gke0op.argus</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -15,7 +15,7 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>0.1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
