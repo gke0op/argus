@@ -28,12 +28,20 @@ Some things that run themes without a click:
 ## What the watchdog checks
 
 Before a newly compiled Zig theme is loaded into Argus, Argus runs it once in a separate
-process (`Argus --verify-dylib`) at 320x200 and rejects it if that process:
+process (`Argus --verify-dylib`, started from Argus's own executable) at 320x200 and rejects it
+if that process:
 
+- does not finish within 10 seconds (Argus then kills it): a theme whose `init`, `step` or
+  `draw` never returns can't freeze the app. The heaviest bundled theme, Cygnus A, takes under
+  a second, about 2.3 s on efficiency cores alone;
 - crashes, or the library is missing the theme entry points;
 - reports NaN or Inf in its state;
 - allocates memory after `init`;
 - writes outside its rows (canary values in the row padding change).
+
+A rejected theme never replaces what a Space shows: the Space keeps the theme it had (with
+live reload, the last version of the file that passed; at launch, when it has none yet, the
+macOS wallpaper). Argus logs why and shows a note in the menu.
 
 Metal themes are compiled before they replace a Space's current theme, and rejected if they
 fail to compile, have no `argus_draw` kernel, or their data file has the wrong size.
@@ -59,7 +67,10 @@ not a sandbox and not a malware scanner:
   `init`, `step` or `draw` (or in a library constructor) runs during the check.
 - It runs one frame at one size. A theme that misbehaves later, at another size, or on a
   condition it chooses, passes.
-- It has no time limit.
+- The time limit is there for accidents (an endless loop), not for hostile code. Ten seconds
+  of the check process is ten seconds of native code running as you, and a theme that is slow
+  only when it isn't being checked passes. A theme that hangs after it has been loaded freezes
+  Argus; force-quit it and remove the theme.
 - It does not look at what the code does: file access, network access and process launches
   are not detected.
 - Verified libraries are cached by a hash of the theme's source file, so an unchanged theme is

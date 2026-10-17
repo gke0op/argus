@@ -4,6 +4,16 @@ All notable changes to Argus are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- A Zig theme that never returns from `init`, `step` or `draw` no longer freezes Argus: its
+  safety check is killed after 10 seconds, the theme is refused with a note in the menu, and the
+  Space keeps the theme it had (on live reload, the last version that passed). The check now
+  always runs in Argus's own executable, never inside the app, so a renamed `Argus.app` is
+  protected too.
+
 ## [0.1.6] - 2026-10-18
 
 ### Fixed
