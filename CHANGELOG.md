@@ -4,7 +4,7 @@ All notable changes to Argus are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.4] - 2026-10-17
 
 ### Added
 
@@ -19,6 +19,7 @@ All notable changes to Argus are recorded here. The format follows
   bar when the eye is hidden behind the notch) and resumes a paused Argus, instead of doing
   nothing. A second copy that starts anyway (`open -n`, another folder) hands over to the
   running one and exits.
+- `NOTE.md`, a short note from the creator, ships in the download.
 
 ### Fixed
 
@@ -29,6 +30,11 @@ All notable changes to Argus are recorded here. The format follows
   and, while tracing, draws only when new rows are done; the peak is the steady ~300 MB.
 - Cygnus A cost ~10% CPU on the GPU path, almost all of it building a turbulence table only the
   CPU draw uses. GPU builds skip it: ~2% CPU.
+
+### Changed
+
+- Cygnus A keeps its fine inner-disk texture: the anti-moiré filter from 0.1.3 now ramps in with
+  radius, so it works only on the outer disk, where the fringes were.
 
 ## [0.1.3] - 2026-10-16
 
@@ -168,5 +174,8 @@ First public release, as source and as a download (ad-hoc signed, not notarized)
   Zig and Metal themes, an Apple GPU architecture guide, GPU probe kernels (`make gpu-probes`,
   `make gpu-arch`) and a MetalFX upscaling demo (`make metalfx-demo`).
 
+[0.1.4]: https://github.com/gke0op/argus/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/gke0op/argus/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/gke0op/argus/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/gke0op/argus/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/gke0op/argus/releases/tag/v0.1.0

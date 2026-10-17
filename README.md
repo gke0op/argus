@@ -193,7 +193,7 @@ BENCHMARK.md records who wrote each one.
 ## How it was made
 
 Argus started as a 24-hour build. Most of the code was written by AI systems directed by
-Ekmel Ozdemir: Argon (Google Gemini) wrote the first engine, the SDK, the harness and the
+Operator: Argon (Google Gemini) wrote the first engine, the SDK, the harness and the
 benchmark; Claude Opus wrote most of the later engine work and the physics themes; 10+ agents
 from various model families contributed themes and species. The git history is the full
 record, and [NOTICE.md](NOTICE.md) credits each piece.
