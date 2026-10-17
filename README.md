@@ -67,10 +67,16 @@ Every shipped theme is in [`themes/`](themes/): drag any of them onto a Space.
 
 ## Install
 
-Download the release zip and open Argus.app. No Zig needed: every theme ships precompiled.
-The first time, macOS asks you to approve an app that isn't notarized;
-[docs/INSTALL.md](docs/INSTALL.md) has the steps. The download also carries the theme-writing
-guides: open `WRITING_THEMES.md` in the unzipped folder, or open Claude Code there and ask for a
+```bash
+curl -fsSL https://raw.githubusercontent.com/gke0op/argus/main/install.sh | sh
+```
+
+That's it: it downloads the latest release, checks it against the release's SHA-256, puts it in
+`~/Applications/Argus` and opens it. Run it again to update. No Zig needed: every theme ships
+precompiled. The script is short; [read it](install.sh) first if you like. Because it installs
+from the command line, macOS doesn't ask you to approve the app, which isn't notarized. Prefer
+the zip? [docs/INSTALL.md](docs/INSTALL.md) has the steps. The download also carries the theme-writing
+guides: open `WRITING_THEMES.md` in the Argus folder, or open Claude Code there and ask for a
 theme (it finds the skills in `.claude/skills/` on its own).
 
 **Themes are native code.** A Zig theme becomes a dynamic library inside Argus, and a Metal

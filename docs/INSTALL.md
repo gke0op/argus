@@ -3,6 +3,20 @@
 Argus runs on a Mac with Apple silicon (arm64). It was tested on macOS 26.6 Tahoe, and the
 app asks for macOS 13 or later.
 
+## One command
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gke0op/argus/main/install.sh | sh
+```
+
+[`install.sh`](../install.sh) downloads the latest release zip and its `.sha256` from GitHub
+Releases, refuses to install if they don't match, puts the folder at `~/Applications/Argus`
+and opens `Argus.app`. A file that `curl` downloads isn't marked "downloaded from the
+internet", so macOS opens the app without the approval steps below; only do this for software
+you trust. Run it again to update: your settings and your own themes stay, and a shipped theme
+you edited is kept as `themes/<name>.before-<version>`. `ARGUS_DIR=<folder>` installs
+somewhere else; `ARGUS_VERSION=0.1.3` picks a release.
+
 ## Download a release (nothing else to install)
 
 1. Download `Argus-v<version>-macos-arm64.zip` (currently `Argus-v0.1.3-macos-arm64.zip`)

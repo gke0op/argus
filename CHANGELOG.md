@@ -4,6 +4,16 @@ All notable changes to Argus are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- One-command install: `curl -fsSL https://raw.githubusercontent.com/gke0op/argus/main/install.sh | sh`
+  downloads the latest release, checks its SHA-256 and installs it to `~/Applications/Argus`;
+  run it again to update.
+- `AGENTS.md`, the repository map for coding agents, and a two-mode ARGUS-BENCH (zero-shot and
+  agentic) whose skeleton passes the harness as it stands.
+
 ## [0.1.3] - 2026-10-16
 
 ### Fixed
