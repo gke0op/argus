@@ -60,6 +60,12 @@ somewhere else; `ARGUS_VERSION=0.1.3` picks a release.
    thumbnail (or tap it with two fingers) to eject its theme and return that Space to the
    macOS default. To start Argus when you log in, turn on **Open at login** in its Settings.
 
+   **Can't see the eye?** On a MacBook with a notch, macOS hides the menu-bar items that don't
+   fit, and the eye can be one of them. Open `Argus.app` again (double-click it in Finder, or
+   `open Argus.app`): the running Argus shows its popover centred under the menu bar and
+   resumes if it was paused; no second copy starts. To get the eye back, quit a few other
+   menu-bar apps; once it shows, hold ⌘ and drag it to the right so it keeps its place.
+
 ### What works without Zig
 
 Every theme in the release works with no developer tools:

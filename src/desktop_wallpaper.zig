@@ -11,6 +11,7 @@ const login_item = @import("desktop/login_item.zig");
 const pl = @import("desktop/popover_layout.zig");
 const frame_rate = @import("desktop/frame_rate.zig");
 const popover_dismiss = @import("desktop/popover_dismiss.zig");
+const reopen = @import("desktop/reopen.zig");
 
 pub const NATIVE_W = sc.NATIVE_W;
 pub const NATIVE_H = sc.NATIVE_H;
@@ -1871,34 +1872,147 @@ fn onPerformDragOperation(_: ?*anyopaque, _: ?*anyopaque, sender: ?*anyopaque) c
 
 fn onStatusItemClick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     const b = g_bridge orelse return;
-    b.popover_visible = !b.popover_visible;
     if (b.popover_visible) {
-        // Every opening starts on the Spaces strip.
-        b.pop_face = .spaces;
-        b.slider_drag = false;
-        b.note_len = 0;
-        b.pending_thumb = null;
-        b.last_thumb = null;
-        b.syncSpacesFromSkyLight(false);
-        b.strip_scroll = pl.scrollToShow(b.obs.active_space_idx, b.strip_scroll, b.obs.n_spaces);
-        b.renderAllSpaces();
-        const mouse = b.msgRetPoint(b.NSEvent, b.sel_registerName("mouseLocation"));
-        const pop_w: f64 = @floatFromInt(POPOVER_W);
-        const pop_h: f64 = @floatFromInt(POPOVER_H);
-        const px = math.clamp(mouse.x - pop_w * 0.5, 12.0, b.screen_rect.size.width - pop_w - 12.0);
-        const py = b.screen_rect.size.height - 30.0 - pop_h;
-        const frame = CGRect{
-            .origin = .{ .x = px, .y = py },
-            .size = .{ .width = pop_w, .height = pop_h },
-        };
-        b.msgSetFrame(b.popover_win, b.sel_registerName("setFrame:display:"), frame, true);
-        b.flushPopoverLayer();
-        b.msgBool(b.ns_app, b.sel_registerName("activateIgnoringOtherApps:"), true);
-        b.msgId(b.popover_win, b.sel_registerName("makeKeyAndOrderFront:"), null);
-        b.msgId(b.popover_win, b.sel_registerName("orderFrontRegardless"), null);
-    } else {
         closePopover(b);
+    } else {
+        const mouse = b.msgRetPoint(b.NSEvent, b.sel_registerName("mouseLocation"));
+        openPopover(b, mouse.x);
     }
+}
+
+/// Shows the popover on its Spaces face, centred on `mid_x` (the eye, or the screen's middle).
+fn openPopover(b: *MacBridge, mid_x: f64) void {
+    b.popover_visible = true;
+    // Every opening starts on the Spaces strip.
+    b.pop_face = .spaces;
+    b.slider_drag = false;
+    b.note_len = 0;
+    b.pending_thumb = null;
+    b.last_thumb = null;
+    b.syncSpacesFromSkyLight(false);
+    b.strip_scroll = pl.scrollToShow(b.obs.active_space_idx, b.strip_scroll, b.obs.n_spaces);
+    b.renderAllSpaces();
+    const pop_w: f64 = @floatFromInt(POPOVER_W);
+    const pop_h: f64 = @floatFromInt(POPOVER_H);
+    const px = reopen.popoverX(mid_x, b.screen_rect.size.width, pop_w);
+    const py = b.screen_rect.size.height - 30.0 - pop_h;
+    const frame = CGRect{
+        .origin = .{ .x = px, .y = py },
+        .size = .{ .width = pop_w, .height = pop_h },
+    };
+    b.msgSetFrame(b.popover_win, b.sel_registerName("setFrame:display:"), frame, true);
+    b.flushPopoverLayer();
+    raisePopover(b);
+}
+
+fn raisePopover(b: *MacBridge) void {
+    b.msgBool(b.ns_app, b.sel_registerName("activateIgnoringOtherApps:"), true);
+    b.msgId(b.popover_win, b.sel_registerName("makeKeyAndOrderFront:"), null);
+    b.msgId(b.popover_win, b.sel_registerName("orderFrontRegardless"), null);
+}
+
+/// Middle of the eye on screen, or null when macOS hid it (behind the notch on a full menu bar).
+fn eyeMidX(b: *MacBridge) ?f64 {
+    const win = b.msg0(b.status_button, b.sel_registerName("window")) orelse return null;
+    const f = b.msgRetRect(win, b.sel_registerName("frame"));
+    const has_screen = b.msg0(win, b.sel_registerName("screen")) != null;
+    const s = b.screen_rect;
+    const eye = reopen.Box{ .x = f.origin.x, .y = f.origin.y, .w = f.size.width, .h = f.size.height };
+    const screen = reopen.Box{ .x = 0, .y = 0, .w = s.size.width, .h = s.size.height };
+    if (!reopen.eyeOnScreen(eye, has_screen, screen)) return null;
+    return f.origin.x + f.size.width * 0.5;
+}
+
+/// Argus.app was opened again (desktop/reopen.zig): resume if paused and show the popover, so
+/// Argus can always be reached even when its eye is hidden.
+fn revealArgus(b: *MacBridge) void {
+    const was_paused = b.obs.paused;
+    if (was_paused) b.setPaused(false);
+    const eye = eyeMidX(b);
+    std.debug.print("argus: opened again: popover {s}{s}\n", .{
+        if (eye != null) "under the eye" else "centred (eye hidden)",
+        if (was_paused) ", resumed" else "",
+    });
+    if (b.popover_visible) {
+        b.flushPopoverLayer();
+        raisePopover(b);
+    } else {
+        openPopover(b, eye orelse b.screen_rect.size.width * 0.5);
+    }
+}
+
+/// NSApplicationDelegate: LaunchServices sends a reopen event when the running Argus.app is
+/// opened again (Finder double-click, `open Argus.app`, Spotlight).
+fn onApplicationShouldHandleReopen(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque, _: bool) callconv(.c) bool {
+    if (g_bridge) |b| revealArgus(b);
+    return false;
+}
+
+/// REVEAL_NOTE from a second copy that found this one running and exited.
+fn onRevealNote(_: ?*anyopaque, _: ?*anyopaque, note: ?*anyopaque) callconv(.c) void {
+    const b = g_bridge orelse return;
+    const obj = b.msg0(note, b.sel_registerName("object")) orelse return;
+    const text = b.msgRetCStr(obj, b.sel_registerName("UTF8String")) orelse return;
+    if (reopen.noteIsForUs(std.mem.span(text), std.c.getpid())) revealArgus(b);
+}
+
+/// Listens for both ways of being opened again: the reopen event and REVEAL_NOTE.
+fn installReopenHandlers(b: *MacBridge, msg_send: *align(4) const anyopaque, ctrl: ?*anyopaque) void {
+    b.msgId(b.ns_app, b.sel_registerName("setDelegate:"), ctrl);
+    const NSDistributedNotificationCenter = b.objc_getClass("NSDistributedNotificationCenter") orelse return;
+    const center = b.msg0(NSDistributedNotificationCenter, b.sel_registerName("defaultCenter")) orelse return;
+    const name = b.msgUTF8(b.NSString, b.sel_str_utf8, reopen.REVEAL_NOTE);
+    const MsgObserve = *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, usize) callconv(.c) void;
+    const observe: MsgObserve = @ptrCast(msg_send);
+    // NSNotificationSuspensionBehaviorDeliverImmediately = 4: Argus is rarely the active app.
+    observe(center, b.sel_registerName("addObserver:selector:name:object:suspensionBehavior:"), ctrl, b.sel_registerName("onRevealNote:"), name, null, 4);
+}
+
+/// Before a menu-bar Argus sets anything up: if another one is running, ask it to show itself
+/// and return true (the caller exits), so two copies never fight over the desktop.
+fn handOverToRunningCopy(
+    objc_getClass: *const fn ([*:0]const u8) callconv(.c) ?*anyopaque,
+    sel: *const fn ([*:0]const u8) callconv(.c) ?*anyopaque,
+    msg_send: *align(4) const anyopaque,
+) bool {
+    const msg0: MsgSend0 = @ptrCast(msg_send);
+    const msgUTF8: MsgSendUTF8 = @ptrCast(msg_send);
+    const msgRetInt: MsgSendRetInt = @ptrCast(msg_send);
+    const msgUIntRetId: MsgSendUIntRetId = @ptrCast(msg_send);
+    const msgIdRetId: MsgSendIdRetId = @ptrCast(msg_send);
+    const msgRetBool: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) bool = @ptrCast(msg_send);
+    const NSString = objc_getClass("NSString") orelse return false;
+    const NSRunningApplication = objc_getClass("NSRunningApplication") orelse return false;
+    const bundle_id = msgUTF8(NSString, sel("stringWithUTF8String:"), sc.BUNDLE_ID);
+    const apps = msgIdRetId(NSRunningApplication, sel("runningApplicationsWithBundleIdentifier:"), bundle_id) orelse return false;
+    var peers: [16]reopen.Peer = undefined;
+    const n: usize = @min(peers.len, @as(usize, @intCast(@max(0, msgRetInt(apps, sel("count"))))));
+    for (0..n) |k| {
+        const app = msgUIntRetId(apps, sel("objectAtIndex:"), k);
+        peers[k] = .{
+            .pid = @truncate(msgRetInt(app, sel("processIdentifier"))),
+            .policy = msgRetInt(app, sel("activationPolicy")),
+            .terminated = msgRetBool(app, sel("isTerminated")),
+        };
+    }
+    const pid = reopen.runningCopy(peers[0..n], std.c.getpid()) orelse return false;
+
+    const NSDistributedNotificationCenter = objc_getClass("NSDistributedNotificationCenter") orelse return false;
+    const center = msg0(NSDistributedNotificationCenter, sel("defaultCenter")) orelse return false;
+    var pid_buf: [16]u8 = undefined;
+    const pid_z = std.fmt.bufPrintSentinel(&pid_buf, "{d}", .{pid}, 0) catch return false;
+    const MsgPost = *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, bool) callconv(.c) void;
+    const post: MsgPost = @ptrCast(msg_send);
+    post(
+        center,
+        sel("postNotificationName:object:userInfo:deliverImmediately:"),
+        msgUTF8(NSString, sel("stringWithUTF8String:"), reopen.REVEAL_NOTE),
+        msgUTF8(NSString, sel("stringWithUTF8String:"), pid_z.ptr),
+        null,
+        true,
+    );
+    std.debug.print("argus: already running (pid {d}): showing its popover instead\n", .{pid});
+    return true;
 }
 
 fn closePopover(b: *MacBridge) void {
@@ -2736,6 +2850,8 @@ pub fn main(init: std.process.Init) !void {
     _ = class_addMethod(ctrl_cls, sel_registerName("onFrame:"), @ptrCast(&onFrame), "v@:@");
     _ = class_addMethod(ctrl_cls, sel_registerName("onStatusItemClick:"), @ptrCast(&onStatusItemClick), "v@:@");
     _ = class_addMethod(ctrl_cls, sel_registerName("onAppResignActive:"), @ptrCast(&onAppResignActive), "v@:@");
+    _ = class_addMethod(ctrl_cls, sel_registerName("applicationShouldHandleReopen:hasVisibleWindows:"), @ptrCast(&onApplicationShouldHandleReopen), "B@:@B");
+    _ = class_addMethod(ctrl_cls, sel_registerName("onRevealNote:"), @ptrCast(&onRevealNote), "v@:@");
     objc_registerClassPair(ctrl_cls);
     const ctrl_instance = msg0(msg0(ctrl_cls, sel_registerName("alloc")), sel_registerName("init"));
 
@@ -2757,6 +2873,9 @@ pub fn main(init: std.process.Init) !void {
     // 2. Initialize NSApplication as Menu-Bar Accessory
     const NSApplication = objc_getClass("NSApplication") orelse return error.NoNSApp;
     const ns_app = msg0(NSApplication, sel_registerName("sharedApplication"));
+    // Argus is already in the menu bar: that copy shows itself instead (desktop/reopen.zig).
+    // Only a menu-bar copy checks, so --window and --offscreen runs start as before.
+    if (!normal_window and snapshot_dir == null and handOverToRunningCopy(objc_getClass, sel_registerName, msgSend_raw)) return;
     msgInt(ns_app, sel_registerName("setActivationPolicy:"), if (offscreen) 2 else if (normal_window) 0 else 1);
     msgVoid(ns_app, sel_registerName("finishLaunching"));
 
@@ -3029,6 +3148,7 @@ pub fn main(init: std.process.Init) !void {
     bridge.syncSpacesFromSkyLight(true);
     bridge.updateStatusGlyph();
     installPopoverDismissal(&bridge, msgSend_raw, ctrl_instance);
+    installReopenHandlers(&bridge, msgSend_raw, ctrl_instance);
     if (!normal_window) {
         g_pictures.init();
         _ = signal(15, onQuitSignal); // SIGTERM
@@ -3345,6 +3465,7 @@ test {
     _ = @import("desktop/popover_layout.zig");
     _ = @import("desktop/frame_rate.zig");
     _ = @import("desktop/popover_dismiss.zig");
+    _ = @import("desktop/reopen.zig");
 }
 
 test "Metal-only themes load into a Space and render on the GPU" {

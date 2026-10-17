@@ -15,6 +15,10 @@ All notable changes to Argus are recorded here. The format follows
   agentic) whose skeleton passes the harness as it stands.
 - An app icon: Cygnus A, nearly edge-on, in the macOS icon shape (`make icon` rebuilds it from
   `docs/media/cygnus-a.png`).
+- Opening `Argus.app` while it is already running shows its popover (centred under the menu
+  bar when the eye is hidden behind the notch) and resumes a paused Argus, instead of doing
+  nothing. A second copy that starts anyway (`open -n`, another folder) hands over to the
+  running one and exits.
 
 ### Fixed
 
