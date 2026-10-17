@@ -1304,9 +1304,9 @@ const MacBridge = struct {
         const path = std.fmt.bufPrint(&path_buf, "themes/{s}", .{file}) catch return;
         if (self.assignFileToSpace(idx, path)) {
             self.note_len = 0;
-        } else if (sc.zig_status == .ok) {
+        } else if (!loadProblemNoted()) {
             self.setNote(true, "Couldn't load {s}", .{name});
-        } // else assignFileToSpace said what Zig is missing
+        } // else assignFileToSpace said why (Zig missing, or the theme hung in its check)
     }
 
     /// Gives the Space back to macOS: unloads its theme and hides Argus's window there.
@@ -1534,6 +1534,11 @@ const MacBridge = struct {
                         if (self.obs.loadShaderIntoSpace(idx, p)) {
                             self.renderSpaceAtIndex(idx);
                             self.saveStateToDisk();
+                        } else if (std.mem.endsWith(u8, p, ".zig") and loadProblemNoted()) {
+                            self.noteLoadProblem(p); // the Space keeps the version it was running
+                        } else {
+                            var name_buf: [64]u8 = undefined;
+                            self.setNote(true, "{s} didn't reload: kept the running version", .{displayName(std.Io.Dir.path.basename(p), &name_buf)});
                         }
                     }
                 } else |_| {}
@@ -1558,19 +1563,29 @@ const MacBridge = struct {
     pub fn assignFileToSpace(self: *MacBridge, space_idx: usize, path: []const u8) bool {
         if (space_idx >= self.obs.n_spaces) return false;
         sc.zig_status = .ok;
+        sc.verify_status = .ok;
         const ok = if (isImagePath(path)) self.loadImageIntoSpace(space_idx, path) else self.loadCodeFileIntoSpace(space_idx, path);
         std.debug.print("argus: {s} -> Space {d}: {s}\n", .{ path, space_idx + 1, if (ok) "loaded" else "refused" });
-        if (!ok and std.mem.endsWith(u8, path, ".zig")) self.noteZigProblem(path);
+        if (!ok and std.mem.endsWith(u8, path, ".zig")) self.noteLoadProblem(path);
         return ok;
     }
 
-    /// A Zig theme that is not shipped precompiled (new or edited) needs Zig 0.17.0 to build:
-    /// say so when that is why it failed. Stays 10 s.
-    fn noteZigProblem(self: *MacBridge, path: []const u8) void {
+    /// The last Zig theme load failed for a reason `noteLoadProblem` names.
+    fn loadProblemNoted() bool {
+        return sc.zig_status != .ok or sc.verify_status == .timed_out;
+    }
+
+    /// A Zig theme that is not shipped precompiled (new or edited) needs Zig 0.17.0 to build, and
+    /// is checked in a separate process that may run `sc.verify_timeout_ms`: say so when that is
+    /// why it failed. Stays 10 s.
+    fn noteLoadProblem(self: *MacBridge, path: []const u8) void {
         var name_buf: [64]u8 = undefined;
         const name = displayName(std.Io.Dir.path.basename(path), &name_buf);
         switch (sc.zig_status) {
-            .ok => return,
+            .ok => if (sc.verify_status == .timed_out)
+                self.setNote(true, "{s} hung in its safety check (over {d} s): not loaded", .{ name, sc.verify_timeout_ms / 1000 })
+            else
+                return,
             .missing => self.setNote(true, "{s} needs Zig 0.17.0 to build: brew install zig", .{name}),
             .wrong_version => self.setNote(true, "{s} needs Zig 0.17.0 (found {s})", .{ name, sc.zig_found_buf[0..sc.zig_found_len] }),
         }
@@ -2629,6 +2644,8 @@ pub fn main(init: std.process.Init) !void {
         args[0]
     else
         "";
+    // `--verify-dylib` runs in this same executable, never a different build found in the folder.
+    sc.setVerifierExe(exe_slice);
     // A quarantined app opened where it was unzipped runs from a read-only App Translocation
     // mirror with nothing beside it: anchor to the folder the user actually put it in.
     var orig_buf: [1024]u8 = undefined;
@@ -3367,6 +3384,63 @@ test "Native 1920x1200 Retina shader rendering (stateful fixture) and Watchdog i
     try std.testing.expect(!rejected);
     // The previous valid shader remains intact on Space 1!
     try std.testing.expectEqualStrings("Fixture_Stateful.zig", obs.spaces[1].getLabel());
+}
+
+test "Watchdog time limit: a hanging theme is killed in time and the Space keeps its theme" {
+    g_io = std.testing.io;
+    sc.g_io = std.testing.io;
+    const alloc = std.testing.allocator;
+
+    // The test binary has no `--verify-dylib`: build the standalone one (same check).
+    const verifier = ".zig-cache/argus_verify_child";
+    const built = try std.process.run(alloc, g_io, .{ .argv = &[_][]const u8{
+        sc.zigBin(), "build-exe", "src/desktop/verify_child.zig", "-target", "aarch64-macos", "-lc", "-femit-bin=" ++ verifier,
+    } });
+    alloc.free(built.stdout);
+    alloc.free(built.stderr);
+    try std.testing.expect(built.term.success());
+    sc.setVerifierExe(verifier);
+    defer sc.setVerifierExe("");
+    // Short, to keep the test fast. A good theme is checked under the app's real limit: the first
+    // run of a freshly linked binary waits on macOS's code check.
+    const limit_ms: u64 = 500;
+    defer sc.verify_timeout_ms = 10_000;
+
+    // In isolation: a good theme passes in the child; the hanging one is killed close to the limit.
+    var good_buf: [128]u8 = undefined;
+    const good = try std.fmt.bufPrintSentinel(&good_buf, "/tmp/argus_verify_good_{d}.dylib", .{std.c.getpid()}, 0);
+    defer _ = std.c.unlink(good.ptr);
+    var hang_buf: [128]u8 = undefined;
+    const hang = try std.fmt.bufPrintSentinel(&hang_buf, "/tmp/argus_verify_hang_{d}.dylib", .{std.c.getpid()}, 0);
+    defer _ = std.c.unlink(hang.ptr);
+    try std.testing.expect(sc.buildThemeDylib("tests/fixtures/Fixture_Stateful.zig", good, "@rpath/argus_verify_good.dylib", false));
+    try std.testing.expect(sc.buildThemeDylib("tests/fixtures/Fixture_Hang.zig", hang, "@rpath/argus_verify_hang.dylib", false));
+    try std.testing.expectEqual(sc.VerifyStatus.ok, sc.runVerifier(verifier, good, sc.verify_timeout_ms));
+    const t0 = std.Io.Clock.awake.now(g_io).nanoseconds;
+    try std.testing.expectEqual(sc.VerifyStatus.timed_out, sc.runVerifier(verifier, hang, limit_ms));
+    const waited_ms = @divTrunc(std.Io.Clock.awake.now(g_io).nanoseconds - t0, std.time.ns_per_ms);
+    try std.testing.expect(waited_ms >= limit_ms and waited_ms < limit_ms + 1000);
+
+    // Live reload: a working theme file is edited into one that hangs. The reload is refused as a
+    // timeout and the Space keeps drawing the version it had.
+    const obs = try Observatory.init(alloc);
+    defer obs.deinit(alloc);
+    obs.n_spaces = 2;
+    var src_buf: [16384]u8 = undefined;
+    var path_buf: [128]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "/tmp/argus_reload_hang_{d}.zig", .{std.c.getpid()});
+    defer std.Io.Dir.cwd().deleteFile(g_io, path) catch {};
+    try std.Io.Dir.cwd().writeFile(g_io, .{ .sub_path = path, .data = try std.Io.Dir.cwd().readFile(g_io, "tests/fixtures/Fixture_Stateful.zig", &src_buf) });
+    try std.testing.expect(obs.loadShaderIntoSpace(1, path));
+    try std.Io.Dir.cwd().writeFile(g_io, .{ .sub_path = path, .data = try std.Io.Dir.cwd().readFile(g_io, "tests/fixtures/Fixture_Hang.zig", &src_buf) });
+    sc.verify_timeout_ms = limit_ms;
+    try std.testing.expect(!obs.loadShaderIntoSpace(1, path));
+    try std.testing.expectEqual(sc.VerifyStatus.timed_out, sc.verify_status);
+    try std.testing.expectEqual(sc.SpaceMode.custom_shader, obs.spaces[1].mode);
+    try std.testing.expectEqualStrings(path, obs.spaces[1].getPath());
+    @memset(&obs.space_native_pixels[1], 0);
+    try std.testing.expect(obs.renderNativeShaderForSpaceIsolated(1, 0.1));
+    try std.testing.expect(obs.space_native_pixels[1][(NATIVE_H / 2) * NATIVE_W + (NATIVE_W / 2)] != 0);
 }
 
 test "Isolated per-Space shader buffers never alias each other" {

@@ -400,7 +400,7 @@ pub fn bundledThemePath(src_hash: u64, buf: []u8) ?[]const u8 {
 
 /// The Zig to compile themes with: ./.toolchain/zig (`make zig`), else `zig` on PATH, else
 /// Homebrew's (an app opened from Finder gets launchd's PATH, which has no Homebrew).
-fn zigBin() []const u8 {
+pub fn zigBin() []const u8 {
     if (std.Io.Dir.cwd().access(g_io, ZIG_017_BIN, .{})) |_| return ZIG_017_BIN else |_| {}
     if (onPath()) return "zig";
     for ([_][]const u8{ "/opt/homebrew/bin/zig", "/usr/local/bin/zig" }) |cand| {
@@ -464,26 +464,89 @@ pub fn buildThemeDylib(path: []const u8, out_z: [:0]const u8, iname: []const u8,
     return false;
 }
 
-/// Watchdog isolation: if ./argus-desktop or Argus.app/Contents/MacOS/Argus exists, probe the
-/// compiled .dylib in a child process BEFORE dlopen-ing it into Argus.app!
+/// How long the `--verify-dylib` check may run before it counts as a hang. Cygnus_A.zig, the
+/// heaviest shipped theme (its CPU init builds large tables), verifies in 0.8 s on an M-series
+/// Mac, 1.5 s with every core busy and 2.3 s on efficiency cores alone; process start-up is
+/// negligible. 10 s leaves a wide margin over that and still blocks the app only briefly. `var`
+/// so tests can shorten it.
+pub var verify_timeout_ms: u64 = 10_000;
+
+/// Why the last check of a compiled Zig theme failed (the app turns `timed_out` into a note).
+pub const VerifyStatus = enum { ok, failed, timed_out };
+pub var verify_status: VerifyStatus = .ok;
+
+var verifier_buf: [1024]u8 = undefined;
+var verifier_len: usize = 0;
+
+/// The app's own executable, which runs `--verify-dylib` (set by `main`, before it changes the
+/// working directory). Pinned so the check never depends on what happens to be in the working
+/// directory: a downloaded app's folder has no `argus-desktop`, and a renamed `Argus.app` would
+/// otherwise leave the check to run inside the app, where a hang freezes it. A path that doesn't
+/// resolve (or "") clears it.
+pub fn setVerifierExe(path: []const u8) void {
+    verifier_len = 0;
+    var z_buf: [1024]u8 = undefined;
+    const z = std.fmt.bufPrintSentinel(&z_buf, "{s}", .{path}, 0) catch return;
+    const real = std.c.realpath(z.ptr, &verifier_buf) orelse return;
+    verifier_len = std.mem.len(real);
+}
+
+fn verifierExe() ?[]const u8 {
+    if (verifier_len > 0) return verifier_buf[0..verifier_len];
+    // Not set (the test binary, which has no `--verify-dylib`): a built app in the working directory.
+    for ([_][]const u8{ "./argus-desktop", "Argus.app/Contents/MacOS/Argus" }) |cand| {
+        if (std.Io.Dir.cwd().access(g_io, cand, .{})) |_| return cand else |_| {}
+    }
+    return null;
+}
+
+/// Watchdog isolation: probes the compiled .dylib in a child process (`<exe> --verify-dylib`)
+/// BEFORE it is dlopen-ed into Argus, and kills the child if it runs past `verify_timeout_ms`.
+/// Sets `verify_status`. Only a binary with no verifier (tests) checks in-process.
 pub fn verifyInChild(dylib_z: [:0]const u8) bool {
-    const watchdog_bin: ?[]const u8 = if (std.Io.Dir.cwd().access(g_io, "argus-desktop", .{})) |_|
-        "./argus-desktop"
-    else |_| if (std.Io.Dir.cwd().access(g_io, "Argus.app/Contents/MacOS/Argus", .{})) |_|
-        "Argus.app/Contents/MacOS/Argus"
-    else |_|
-        null;
-    const wbin = watchdog_bin orelse return verifyDylibSafety(dylib_z);
-    const alloc = std.heap.page_allocator;
-    const wres = std.process.run(alloc, g_io, .{
-        .argv = &[_][]const u8{ wbin, "--verify-dylib", dylib_z },
-    }) catch return false;
-    defer alloc.free(wres.stdout);
-    defer alloc.free(wres.stderr);
-    return switch (wres.term) {
-        .exited => |code| code == 0,
-        else => false,
-    };
+    verify_status = if (verifierExe()) |exe|
+        runVerifier(exe, dylib_z, verify_timeout_ms)
+    else if (verifyDylibSafety(dylib_z)) .ok else .failed;
+    return verify_status == .ok;
+}
+
+/// Logs why the last check failed: `<who>: <path><variant>: verify ...`.
+fn printVerifyFailure(who: []const u8, path: []const u8, variant: []const u8) void {
+    if (verify_status == .timed_out)
+        std.debug.print("{s}: {s}{s}: verify timed out after {d} ms (check process killed)\n", .{ who, path, variant, verify_timeout_ms })
+    else
+        std.debug.print("{s}: {s}{s}: verify failed\n", .{ who, path, variant });
+}
+
+/// Runs `exe --verify-dylib dylib` and waits at most `timeout_ms`; a child still running then is
+/// killed (SIGKILL: a hung theme can't ignore it) and reaped.
+pub fn runVerifier(exe: []const u8, dylib: []const u8, timeout_ms: u64) VerifyStatus {
+    const child = std.process.spawn(g_io, .{
+        .argv = &[_][]const u8{ exe, "--verify-dylib", dylib },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    }) catch return .failed;
+    const pid = child.id.?; // no pipes to clean up: reaped here with waitpid
+    const deadline = std.Io.Clock.awake.now(g_io).nanoseconds + @as(i96, timeout_ms) * std.time.ns_per_ms;
+    var status: c_int = 0;
+    while (true) {
+        const r = std.c.waitpid(pid, &status, std.c.W.NOHANG);
+        if (r == pid) break;
+        if (r == -1 and std.c.errno(r) != .INTR) return .failed; // already reaped elsewhere
+        if (std.Io.Clock.awake.now(g_io).nanoseconds >= deadline) {
+            _ = std.c.kill(pid, .KILL);
+            while (true) {
+                const w = std.c.waitpid(pid, &status, 0);
+                if (w != -1 or std.c.errno(w) != .INTR) break;
+            }
+            return .timed_out;
+        }
+        const nap: std.c.timespec = .{ .sec = 0, .nsec = 2 * std.time.ns_per_ms };
+        _ = std.c.nanosleep(&nap, null);
+    }
+    const s: u32 = @bitCast(status);
+    return if (std.c.W.IFEXITED(s) and std.c.W.EXITSTATUS(s) == 0) .ok else .failed;
 }
 
 /// `make release`: compiles `path` (and its Kerr-disk GPU build, if it has one) into `out_dir`
@@ -505,7 +568,7 @@ pub fn precompileTheme(path: []const u8, out_dir: []const u8) bool {
             return false;
         }
         if (!verifyInChild(out_z)) {
-            std.debug.print("precompile: {s}{s}: verify failed\n", .{ path, if (gpu_port) " [gpu]" else "" });
+            printVerifyFailure("precompile", path, if (gpu_port) " [gpu]" else "");
             return false;
         }
         std.debug.print("precompile: {s}{s} -> {s}\n", .{ path, if (gpu_port) " [gpu]" else "", std.Io.Dir.path.basename(out_z) });
@@ -636,6 +699,7 @@ pub const SpaceConfig = struct {
     pub fn compileAndLoadShader(self: *SpaceConfig, space_idx: usize, path: []const u8) bool {
         if (std.mem.endsWith(u8, path, ".metal")) return self.loadMetalTheme(path);
         zig_status = .ok;
+        verify_status = .ok;
         if (std.Io.Dir.cwd().statFile(g_io, path, .{})) |st| {
             self.last_mtime = st.mtime.nanoseconds;
         } else |_| {}
@@ -696,7 +760,10 @@ pub const SpaceConfig = struct {
                 std.debug.print("argus: {s}: compile failed (zig: {s})\n", .{ path, @tagName(zig_status) });
                 return false;
             }
-            if (!verifyInChild(dylib_z)) return false;
+            if (!verifyInChild(dylib_z)) {
+                printVerifyFailure("argus", path, "");
+                return false;
+            }
             std.debug.print("argus: {s}: compiled\n", .{path});
 
             // Cache the verified .dylib for instant multi-Space & cold-start reuse
