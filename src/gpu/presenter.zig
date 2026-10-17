@@ -428,6 +428,11 @@ pub const Presenter = struct {
         return true;
     }
 
+    /// True while the traced image is still being built (rows not traced yet draw black).
+    pub fn tracing(self: *const Presenter) bool {
+        return !self.engine.done;
+    }
+
     /// The current frame, again, into `dst` (packRGBA, w x h, SDR) for the menu preview.
     /// The texture lives only for the call: previews are occasional.
     pub fn snapshot(self: *Presenter, dst: []u32, w: usize, h: usize) bool {

@@ -2275,6 +2275,14 @@ fn renderSpacesForFrame(b: *MacBridge, logic: bool) bool {
         for (0..b.obs.n_spaces) |idx| {
             if (isAnimatedSpaceMode(b.obs.spaces[idx].mode) and b.renderIfDue(idx, 0)) rendered_any = true;
         }
+    } else if (b.obs.paused and !b.screen_locked) {
+        // Paused: nothing animates, but a quasar Space whose image is still being traced keeps
+        // drawing until the trace is done. Otherwise the frozen frame keeps the untraced rows black
+        // (Argus started paused shows half a black hole).
+        for (0..b.obs.n_spaces) |idx| {
+            const tracing = if (b.gpu[idx]) |*p| p.tracing() else false;
+            if (tracing and b.renderIfDue(idx, 0)) rendered_any = true;
+        }
     }
 
     return rendered_any;
