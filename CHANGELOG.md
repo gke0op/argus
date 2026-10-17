@@ -13,6 +13,10 @@ All notable changes to Argus are recorded here. The format follows
   run it again to update.
 - `AGENTS.md`, the repository map for coding agents, and a two-mode ARGUS-BENCH (zero-shot and
   agentic) whose skeleton passes the harness as it stands.
+- Opening `Argus.app` while it is already running shows its popover (centred under the menu
+  bar when the eye is hidden behind the notch) and resumes a paused Argus, instead of doing
+  nothing. A second copy that starts anyway (`open -n`, another folder) hands over to the
+  running one and exits.
 
 ## [0.1.3] - 2026-10-16
 
