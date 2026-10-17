@@ -9,7 +9,7 @@
 # edited is kept as <name>.before-<version> next to the new one.
 #
 # ARGUS_DIR=<folder>   install somewhere else
-# ARGUS_VERSION=0.1.5  a specific release instead of the latest
+# ARGUS_VERSION=0.1.6  a specific release instead of the latest
 # ARGUS_NO_OPEN=1      don't open the app afterwards
 set -eu
 

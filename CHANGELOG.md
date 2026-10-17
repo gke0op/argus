@@ -4,7 +4,7 @@ All notable changes to Argus are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.6] - 2026-10-18
 
 ### Fixed
 
@@ -190,6 +190,7 @@ First public release, as source and as a download (ad-hoc signed, not notarized)
   Zig and Metal themes, an Apple GPU architecture guide, GPU probe kernels (`make gpu-probes`,
   `make gpu-arch`) and a MetalFX upscaling demo (`make metalfx-demo`).
 
+[0.1.6]: https://github.com/gke0op/argus/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/gke0op/argus/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/gke0op/argus/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/gke0op/argus/compare/v0.1.2...v0.1.3
