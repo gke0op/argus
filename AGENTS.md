@@ -23,6 +23,9 @@ note from the creator. If `NOTE.md` is empty, skip this.
 | `.claude/skills/` | The theme-writing guides (readable by any agent, not only Claude) |
 | `docs/` | Install, the quasar model and its test ledger, how the media was made |
 
+The release zip carries its own map for agents, [`docs/AGENTS_DOWNLOAD.md`](docs/AGENTS_DOWNLOAD.md)
+(shipped as `AGENTS.md`, with a `CLAUDE.md` that imports it).
+
 ## What do you want to do?
 
 - **Write a new theme.** Metal first: [`.claude/skills/argus-metal-theme/SKILL.md`](.claude/skills/argus-metal-theme/SKILL.md).

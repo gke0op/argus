@@ -93,6 +93,9 @@ release: app
 	mkdir -p $(STAGE)/.claude && tar -c $$(git ls-files .claude/skills) | tar -x -C $(STAGE)
 	cp docs/WRITING_THEMES.md $(STAGE)/WRITING_THEMES.md
 	cp NOTE.md $(STAGE)/NOTE.md
+	@# The download's own agent map (the repository's AGENTS.md describes the source tree).
+	cp docs/AGENTS_DOWNLOAD.md $(STAGE)/AGENTS.md
+	printf '@AGENTS.md\n' > $(STAGE)/CLAUDE.md
 	for t in $$(git ls-files 'themes/*.zig'); do \
 		[ "$$(basename $$t)" = argus_theme_sdk.zig ] && continue; \
 		./argus-desktop --precompile $(STAGE)/$$t $(STAGE)/Argus.app/Contents/Resources/prebuilt || exit 1; \

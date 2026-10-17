@@ -4,6 +4,14 @@ All notable changes to Argus are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- The download carries `AGENTS.md` and `CLAUDE.md`: a map of the installed folder for coding
+  agents (where the guides are, how to change a theme, the creator's note), so an agent opened
+  in the Argus folder finds them on its own.
+
 ## [0.1.4] - 2026-10-17
 
 ### Added
