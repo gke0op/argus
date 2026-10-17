@@ -15,11 +15,11 @@ and opens `Argus.app`. A file that `curl` downloads isn't marked "downloaded fro
 internet", so macOS opens the app without the approval steps below; only do this for software
 you trust. Run it again to update: your settings and your own themes stay, and a shipped theme
 you edited is kept as `themes/<name>.before-<version>`. `ARGUS_DIR=<folder>` installs
-somewhere else; `ARGUS_VERSION=0.1.6` picks a release.
+somewhere else; `ARGUS_VERSION=0.1.7` picks a release.
 
 ## Download a release (nothing else to install)
 
-1. Download `Argus-v<version>-macos-arm64.zip` (currently `Argus-v0.1.6-macos-arm64.zip`)
+1. Download `Argus-v<version>-macos-arm64.zip` (currently `Argus-v0.1.7-macos-arm64.zip`)
    from the project's GitHub Releases page. To check it, download the `.sha256` file next to
    it and run `shasum -a 256 -c Argus-v<version>-macos-arm64.zip.sha256` in the same folder.
 2. Double-click the zip. You get a folder `Argus-v<version>-macos-arm64` that holds `Argus.app`
@@ -34,7 +34,7 @@ somewhere else; `ARGUS_VERSION=0.1.6` picks a release.
    mark from the folder, so macOS opens it like an app you built yourself:
 
    ```bash
-   V=0.1.6   # the version you downloaded
+   V=0.1.7   # the version you downloaded
    xattr -dr com.apple.quarantine ~/Downloads/Argus-v$V-macos-arm64
    open ~/Downloads/Argus-v$V-macos-arm64/Argus.app
    ```
