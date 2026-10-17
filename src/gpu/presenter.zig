@@ -23,6 +23,7 @@ pub var hdr_enabled = true;
 
 /// `--perf-log`: print layer and engine events (create, park, rehost, retire) to stderr.
 pub var log_events = false;
+const CB_COMPLETED: usize = 4; // MTLCommandBufferStatusCompleted
 fn ev(comptime fmt: []const u8, args: anytype) void {
     if (log_events) std.debug.print("[gpu] " ++ fmt ++ "\n", args);
 }
@@ -332,6 +333,9 @@ pub const Presenter = struct {
     hdr: bool,
     color_space: ?*anyopaque,
     parked: bool = false,
+    /// The last frame's command buffer (retained) and the trace rows it showed: see render().
+    last_cb: mtl.Id = null,
+    shown_rows: u32 = 0,
 
     /// Returns null when the dylib isn't a GPU build or Metal is unavailable.
     /// `w` x `h` is the fallback size; the GPU traces at the window's native pixel size.
@@ -414,6 +418,18 @@ pub const Presenter = struct {
         const pool = mtl.poolPush();
         defer mtl.poolPop(pool);
         _ = self.engine.poll();
+        // One frame on the GPU at a time. While the trace fills the GPU, a frame takes far longer
+        // than 1/30 s, and frames queued behind it each hold a native-size drawable: ~40 of them
+        // (900 MB at 3024x1964 HDR) piled up during Cygnus A's trace. While tracing, a new frame
+        // is drawn only when more rows are done.
+        if (self.last_cb) |cb| {
+            if (mtl.msg(usize, cb, "status", .{}) < CB_COMPLETED) return true;
+            mtl.release(cb);
+            self.last_cb = null;
+        }
+        const rows = if (self.engine.done) self.engine.params.height else self.engine.rows_done;
+        if (!self.engine.done and rows == self.shown_rows and !self.parked) return true;
+        self.shown_rows = rows;
         if (self.parked) {
             setDrawables(self.layer, self.engine.params.width, self.engine.params.height);
             self.parked = false;
@@ -425,6 +441,7 @@ pub const Presenter = struct {
         self.engine.encodeShade(cb, &self.frame, mtl.msg(mtl.Id, drawable, "texture", .{}), p.width, p.height, if (self.hdr) edrHeadroom() else 1.0, if (self.hdr) .pq else .srgb);
         mtl.msg(void, cb, "presentDrawable:", .{drawable});
         mtl.msg(void, cb, "commit", .{});
+        self.last_cb = mtl.msg(mtl.Id, cb, "retain", .{});
         return true;
     }
 
@@ -456,6 +473,7 @@ pub const Presenter = struct {
     /// Lets go of the traced image and hands back the layer for the Space's next GPU theme.
     pub fn release(self: *Presenter, tick: usize) mtl.Id {
         const layer = self.layer;
+        mtl.release(self.last_cb);
         mtl.release(self.queue);
         releaseEngine(self.engine, tick);
         self.* = undefined;

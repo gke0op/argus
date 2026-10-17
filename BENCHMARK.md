@@ -101,7 +101,7 @@ Apple GPUs stay at low clocks when Argus paces frames at 30 FPS, so a theme's li
 | `themes/Orion_Nebula.metal` | 1.69–1.71 ms | 2.02–2.75 ms | 14.3% (14.3–18.4) | 1.5–2.2% | 93 MB | 152 MB |
 | `themes/Night_Tide.metal` | 2.52 ms | 2.73–2.90 ms | 25.3% (17.9–36.8) | 1.6–1.9% | 89–98 MB | 143 MB |
 | `themes/Lizard_Island.metal` | 2.98–3.05 ms | 3.9–4.2 ms | ~32% (21–55)\* | 1.7–2.8% | 186–195 MB | 414–506 MB |
-| `themes/Cygnus_A.zig` on the GPU (HDR10, native 3024×1964) | 1.57–1.60 ms | 2.58–2.78 ms | 12.0% (11.9–12.3) | 12.5–12.6% | 278–301 MB | 387 MB |
+| `themes/Cygnus_A.zig` on the GPU (HDR10, native 3024×1964) | 1.57–1.60 ms | 2.58–2.78 ms | 12.0% (11.9–12.3) | 1.0–3.1% | 276–299 MB | 387 MB |
 
 - \*Lizard_Island was measured later with the live app running alongside (itself showing Lizard Island), which inflates its GPU busy figure. Its memory is higher because each Space keeps its own 2048×2082 float16 state texture pair (~68 MB).
 - Metal themes render at 1920×1200; Cygnus_A traces and shades at the display's native size.

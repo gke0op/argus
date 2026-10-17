@@ -168,7 +168,7 @@ Measured on an M3 with 8 GB: one Space showing the theme at Argus's 30 FPS.
 | `Orion_Nebula.metal` | 2.0–2.8 ms | ~14% | ~2% | 93 MB |
 | `Night_Tide.metal` | 2.7–2.9 ms | ~25% | ~2% | ~94 MB |
 | `Lizard_Island.metal` | 3.9–4.2 ms | ~32% | ~2% | ~190 MB |
-| `Cygnus_A` (GPU, HDR10, native resolution) | 2.6–2.8 ms | ~12% | ~13% | ~290 MB |
+| `Cygnus_A` (GPU, HDR10, native resolution) | 2.6–2.8 ms | ~12% | ~2% | ~290 MB |
 
 Argus with no theme: 13 MB, 0.2% CPU, no GPU. Hidden Spaces don't draw; each extra Space showing a
 theme adds memory (see BENCHMARK.md), and Spaces showing the same black hole share its traced image.

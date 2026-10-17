@@ -1913,50 +1913,9 @@ pub const State = struct {
             }
         }
 
-        // CPU fallback: a stand-in for the coarse octave as a ~1-bin pixel sees it. Point samples
-        // on a (radial bin, 1/GT_NP turn) grid (nearly uncorrelated: the eddies are smaller),
-        // tent-filtered over the nodes, [1 2 3 2 1] radially x [1 2 1] in azimuth, and scaled to
-        // the rms the field has when box-averaged over such a footprint (GT_RMS, fitted). The
-        // GPU path samples the eddies themselves.
-        // (turbCoarse at every node, with the per-bin work hoisted: same row, Omega and bands.)
-        for (0..R_BINS) |b| {
-            const rbf = @as(f32, @floatFromInt(b)) + 0.5;
-            const row: usize = @min(@as(usize, @intFromFloat(rbf * (@as(f32, NR) / @as(f32, R_BINS)))), NR - 1);
-            const n0: usize = self.band_n0[b];
-            const om = self.om_row[row];
-            const out = &self.gtmp[b];
-            @memset(out, 0.0);
-            inline for (0..2) |kk| {
-                inline for (0..2) |gi| {
-                    const gn = self.gen[0][n0 + kk][gi];
-                    const wgt = self.band_w[b][kk] * gn.w / NOISE_STD;
-                    const shift: u16 = @truncate(@as(u32, @intFromFloat(om * gn.age_q)));
-                    const base: u16 = @as(u16, @truncate(gn.phoff)) +% shift;
-                    const src = &self.noise[0][(row + gn.rowoff) % NR];
-                    for (0..GT_NP) |pc| {
-                        const phi: u16 = @intCast((pc << (16 - GT_LOG2)) + (1 << (15 - GT_LOG2)));
-                        const q: u16 = phi -% base;
-                        out[pc] += wgt * (@as(f32, @floatFromInt(src[q >> 6])) - 128.0);
-                    }
-                }
-            }
-        }
-        const tr_w = [5]f32{ 1, 2, 3, 2, 1 };
-        const gain = GT_RMS / @sqrt((19.0 / 81.0) * (6.0 / 16.0)); // white-noise rms after the tent
-        for (0..R_BINS) |b| {
-            for (0..GT_NP) |pc| {
-                var acc: f32 = 0.0;
-                var wsum: f32 = 0.0;
-                for (0..5) |db| {
-                    const bb = @as(i64, @intCast(b)) + @as(i64, @intCast(db)) - 2;
-                    if (bb < 0 or bb >= R_BINS) continue;
-                    const row = &self.gtmp[@intCast(bb)];
-                    acc += tr_w[db] * (row[(pc + GT_NP - 1) & (GT_NP - 1)] + 2.0 * row[pc] + row[(pc + 1) & (GT_NP - 1)]);
-                    wsum += 4.0 * tr_w[db];
-                }
-                self.gtab[b][pc] = acc / wsum * gain;
-            }
-        }
+        // The CPU draw's coarse turbulence. GPU builds sample the eddies on the GPU and skip it
+        // here (it was ~85% of step()'s time); their CPU draw, if it ever runs, fills it itself.
+        if (!gpu_traced) self.fillCoarseTurbulence();
 
         // Hot spots: born, orbit at their exact Kerr angular velocity, fade.
         @memset(&self.spot_mask, 0);
@@ -2055,9 +2014,59 @@ pub const State = struct {
         return self.emit_tab[ii] + (self.emit_tab[ii + 1] - self.emit_tab[ii]) * (xi - @as(f32, @floatFromInt(ii)));
     }
 
+    /// CPU path: the coarse octave as a ~1-bin pixel sees it, for turbGrid (gtab), from this
+    /// step's turbulence generations.
+    fn fillCoarseTurbulence(self: *State) void {
+        // CPU fallback: a stand-in for the coarse octave as a ~1-bin pixel sees it. Point samples
+        // on a (radial bin, 1/GT_NP turn) grid (nearly uncorrelated: the eddies are smaller),
+        // tent-filtered over the nodes, [1 2 3 2 1] radially x [1 2 1] in azimuth, and scaled to
+        // the rms the field has when box-averaged over such a footprint (GT_RMS, fitted). The
+        // GPU path samples the eddies themselves.
+        // (turbCoarse at every node, with the per-bin work hoisted: same row, Omega and bands.)
+        for (0..R_BINS) |b| {
+            const rbf = @as(f32, @floatFromInt(b)) + 0.5;
+            const row: usize = @min(@as(usize, @intFromFloat(rbf * (@as(f32, NR) / @as(f32, R_BINS)))), NR - 1);
+            const n0: usize = self.band_n0[b];
+            const om = self.om_row[row];
+            const out = &self.gtmp[b];
+            @memset(out, 0.0);
+            inline for (0..2) |kk| {
+                inline for (0..2) |gi| {
+                    const gn = self.gen[0][n0 + kk][gi];
+                    const wgt = self.band_w[b][kk] * gn.w / NOISE_STD;
+                    const shift: u16 = @truncate(@as(u32, @intFromFloat(om * gn.age_q)));
+                    const base: u16 = @as(u16, @truncate(gn.phoff)) +% shift;
+                    const src = &self.noise[0][(row + gn.rowoff) % NR];
+                    for (0..GT_NP) |pc| {
+                        const phi: u16 = @intCast((pc << (16 - GT_LOG2)) + (1 << (15 - GT_LOG2)));
+                        const q: u16 = phi -% base;
+                        out[pc] += wgt * (@as(f32, @floatFromInt(src[q >> 6])) - 128.0);
+                    }
+                }
+            }
+        }
+        const tr_w = [5]f32{ 1, 2, 3, 2, 1 };
+        const gain = GT_RMS / @sqrt((19.0 / 81.0) * (6.0 / 16.0)); // white-noise rms after the tent
+        for (0..R_BINS) |b| {
+            for (0..GT_NP) |pc| {
+                var acc: f32 = 0.0;
+                var wsum: f32 = 0.0;
+                for (0..5) |db| {
+                    const bb = @as(i64, @intCast(b)) + @as(i64, @intCast(db)) - 2;
+                    if (bb < 0 or bb >= R_BINS) continue;
+                    const row = &self.gtmp[@intCast(bb)];
+                    acc += tr_w[db] * (row[(pc + GT_NP - 1) & (GT_NP - 1)] + 2.0 * row[pc] + row[(pc + 1) & (GT_NP - 1)]);
+                    wsum += 4.0 * tr_w[db];
+                }
+                self.gtab[b][pc] = acc / wsum * gain;
+            }
+        }
+    }
+
     pub fn draw(self: *const State, buf: []u32, stride: usize) void {
         // GPU builds trace on the GPU; if the CPU draw is used after all (no Metal), trace now, once.
         if (self.deferred) @constCast(self).traceNow();
+        if (gpu_traced) @constCast(self).fillCoarseTurbulence();
         const w = self.w;
         if (w == 0 or self.h == 0 or stride < w) return;
         const h: usize = @min(self.h, buf.len / stride);

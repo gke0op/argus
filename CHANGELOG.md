@@ -24,6 +24,11 @@ All notable changes to Argus are recorded here. The format follows
 
 - An Argus started paused froze Cygnus A half-traced, the lower half black. A paused Space now
   keeps drawing until its quasar's trace is done.
+- Loading Cygnus A briefly took ~1.2 GB: while its trace filled the GPU, frames queued up, each
+  holding a native-size HDR drawable. A quasar Space now keeps one frame on the GPU at a time
+  and, while tracing, draws only when new rows are done; the peak is the steady ~300 MB.
+- Cygnus A cost ~10% CPU on the GPU path, almost all of it building a turbulence table only the
+  CPU draw uses. GPU builds skip it: ~2% CPU.
 
 ## [0.1.3] - 2026-10-16
 
