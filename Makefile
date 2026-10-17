@@ -12,11 +12,18 @@ all: app kronos
 desktop:
 	$(ZIG) build-exe $(ZFLAGS) src/desktop_wallpaper.zig -femit-bin=argus-desktop
 
+# Code-signing identity for `make app`: ad-hoc (-) unless SIGN is given or .sign_identity (one line,
+# gitignored) names one. macOS ties privacy permissions (Desktop folder access) to the signature;
+# an ad-hoc signature changes with every build, so it asks again after each rebuild. A stable
+# identity, even a self-signed one from Keychain Access, keeps the permission. Releases stay ad-hoc.
+SIGN ?= $(or $(shell cat .sign_identity 2>/dev/null),-)
+
 app: desktop
 	mkdir -p Argus.app/Contents/MacOS
 	cp argus-desktop Argus.app/Contents/MacOS/Argus
 	chmod +x Argus.app/Contents/MacOS/Argus
-	codesign --force --deep --sign - Argus.app 2>/dev/null || true
+	@if [ "$(SIGN)" = "-" ]; then codesign --force --deep --sign - Argus.app 2>/dev/null || true; \
+	else echo "codesign: $(SIGN)"; codesign --force --deep --sign "$(SIGN)" Argus.app; fi
 
 kronos:
 	$(ZIG) build-exe $(ZFLAGS) src/kronos_tui.zig -femit-bin=kronos-tui

@@ -14,3 +14,4 @@ Argus.app/Contents/_CodeSignature/
 .argus_settings.conf
 dist/
 __pycache__/
+.sign_identity
