@@ -255,6 +255,8 @@ const MacBridge = struct {
     screen_rect: CGRect,
     pboard_filenames_type: ?*anyopaque,
     popover_visible: bool = false,
+    /// The first sync that found Spaces has bound windows and loaded .argus_spaces.conf.
+    spaces_set_up: bool = false,
 
     CATransaction: ?*anyopaque,
     NSString: ?*anyopaque,
@@ -387,7 +389,11 @@ const MacBridge = struct {
 
         if (count == 0) return;
 
-        if (initial_setup) {
+        // Setup runs on the first sync that finds any Space. Right after login SkyLight can report
+        // none yet; later syncs then only tracked reordering, so the saved themes never loaded.
+        if (initial_setup or !self.spaces_set_up) {
+            const late = !initial_setup;
+            self.spaces_set_up = true;
             self.obs.n_spaces = count;
             self.obs.active_space_id = active_id;
 
@@ -418,6 +424,11 @@ const MacBridge = struct {
                 }
             }
             self.saveStateToDisk();
+            if (late) {
+                std.debug.print("argus: {d} Spaces appeared after launch; set up now\n", .{count});
+                self.updateStatusGlyph();
+                if (self.popover_visible) self.flushPopoverLayer();
+            }
             return;
         }
 

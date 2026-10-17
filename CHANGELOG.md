@@ -4,6 +4,14 @@ All notable changes to Argus are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- When macOS reported no Desktop Spaces at launch (it can, right after login), Argus never ran
+  its setup: the saved themes didn't load, and the next Space sync saved every Space as macOS
+  Default, losing the layout. Setup now runs on the first sync that finds Spaces.
+
 ## [0.1.5] - 2026-10-17
 
 ### Added
