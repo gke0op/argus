@@ -13,6 +13,13 @@ All notable changes to Argus are recorded here. The format follows
   run it again to update.
 - `AGENTS.md`, the repository map for coding agents, and a two-mode ARGUS-BENCH (zero-shot and
   agentic) whose skeleton passes the harness as it stands.
+- An app icon: Cygnus A, nearly edge-on, in the macOS icon shape (`make icon` rebuilds it from
+  `docs/media/cygnus-a.png`).
+
+### Fixed
+
+- An Argus started paused froze Cygnus A half-traced, the lower half black. A paused Space now
+  keeps drawing until its quasar's trace is done.
 
 ## [0.1.3] - 2026-10-16
 

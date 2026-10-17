@@ -6,6 +6,8 @@
 	<string>en</string>
 	<key>CFBundleExecutable</key>
 	<string>Argus</string>
+	<key>CFBundleIconFile</key>
+	<string>Argus</string>
 	<key>CFBundleIdentifier</key>
 	<string>io.github.gke0op.argus</string>
 	<key>CFBundleInfoDictionaryVersion</key>

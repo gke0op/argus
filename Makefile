@@ -5,7 +5,7 @@ THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: quasars all app desktop kronos harness check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch
+.PHONY: icon quasars all app desktop kronos harness check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch
 
 all: app kronos
 
@@ -37,6 +37,11 @@ LEDGER_THEME ?= themes/Cygnus_A.zig
 LEDGER_OUT ?= docs/cygnus_a_ledger.json
 ledger:
 	ZIG=$(ZIG) tools/ledger.sh $(LEDGER_THEME) $(LEDGER_OUT)
+
+# Argus.app's icon (Contents/Resources/Argus.icns, committed): the Cygnus A still in the macOS
+# icon shape. Needs Pillow.
+icon:
+	python3 -I tools/app_icon.py
 
 # Quasar themes: generated from tools/quasar_template.zig by tools/gen_quasars.py (Cygnus_A, plus
 # any local configurations in tools/local/*.json, which stay untracked).
