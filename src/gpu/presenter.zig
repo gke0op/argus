@@ -69,8 +69,6 @@ fn moveLayer(layer: mtl.Id, host_layer: mtl.Id) void {
     mtl.msg(void, layer, "setFrame:", .{mtl.msg(CGRect, host_layer, "bounds", .{})});
 }
 
-/// Copies a w x h RGBA8 frame out of the GPU into `dst` (packRGBA layout), for menu previews.
-/// `encode` writes the frame into the texture it's given. Blocks until the GPU is done (~1-2 ms).
 /// GPU execution time of a Space's frames, for `--perf-log`: each frame's command buffer is kept
 /// until the next frame, then its GPUStartTime..GPUEndTime is added up. This is the time the GPU
 /// spent on the frame at whatever clock it ran, the number Activity Monitor's %GPU is built from.
@@ -110,6 +108,8 @@ pub const GpuTiming = struct {
     }
 };
 
+/// Copies a w x h RGBA8 frame out of the GPU into `dst` (packRGBA layout), for menu previews.
+/// `encode` writes the frame into the texture it's given. Blocks until the GPU is done (~1-2 ms).
 fn snapshotInto(dev: mtl.Id, queue: mtl.Id, tex: *mtl.Id, w: usize, h: usize, dst: []u32, ctx: anytype, comptime encode: fn (@TypeOf(ctx), mtl.Id, mtl.Id) void) bool {
     if (dst.len < w * h) return false;
     if (tex.* == null) tex.* = mtl.newTexture(dev, mtl.PIXEL_RGBA8, w, h, mtl.STORAGE_SHARED);

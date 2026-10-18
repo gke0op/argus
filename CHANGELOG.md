@@ -4,6 +4,23 @@ All notable changes to Argus are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Off-screen Spaces no longer draw. Argus used to keep the themed Spaces either side of the one
+  you're on warm at 10 FPS ("Smooth swipes"), about a fifth of its GPU time. It now notices a
+  swipe from its first moment (the window server lists the arriving Space's window as on screen
+  0.4–1.5 s before the switch completes) and draws only the Spaces a swipe can bring in, while it
+  lasts. A Space coming back into view continues from its last frame instead of jumping. The
+  Smooth swipes switch is gone; an old `smooth_swipes` line in `.argus_settings.conf` is ignored.
+
+### Added
+
+- GPU measurement tools: `tools/gpu_meter.py` (GPU power, clock states and per-process GPU time,
+  no sudo), `tools/gpu_experiment.py`, `tools/swipe_probe.py`, and each GPU Space's GPU ms per
+  frame in `--perf-log`. The investigation is in `docs/notes/gpu-busy-investigation.md`.
+
 ## [0.1.7] - 2026-10-18
 
 ### Fixed
