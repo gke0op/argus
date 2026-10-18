@@ -6,6 +6,7 @@
 // ============================================================================
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 
 // Native @2x Retina resolution for .dylib shaders & baked wallpapers (1920x1200)
@@ -502,12 +503,21 @@ fn verifierExe() ?[]const u8 {
 
 /// Watchdog isolation: probes the compiled .dylib in a child process (`<exe> --verify-dylib`)
 /// BEFORE it is dlopen-ed into Argus, and kills the child if it runs past `verify_timeout_ms`.
-/// Sets `verify_status`. Only a binary with no verifier (tests) checks in-process.
+/// Sets `verify_status`.
 pub fn verifyInChild(dylib_z: [:0]const u8) bool {
-    verify_status = if (verifierExe()) |exe|
-        runVerifier(exe, dylib_z, verify_timeout_ms)
-    else if (verifyDylibSafety(dylib_z)) .ok else .failed;
+    verify_status = verifyWith(verifierExe(), dylib_z, builtin.is_test);
     return verify_status == .ok;
+}
+
+/// With no verifier executable, only the test binary may check in-process (no isolation, no
+/// time limit there); the app refuses the theme, so a hang can never reach its own process.
+pub fn verifyWith(exe: ?[]const u8, dylib_z: [:0]const u8, in_process_ok: bool) VerifyStatus {
+    if (exe) |e| return runVerifier(e, dylib_z, verify_timeout_ms);
+    if (!in_process_ok) {
+        std.debug.print("argus: {s}: no verifier executable found, theme refused\n", .{dylib_z});
+        return .failed;
+    }
+    return if (verifyDylibSafety(dylib_z)) .ok else .failed;
 }
 
 /// Logs why the last check failed: `<who>: <path><variant>: verify ...`.

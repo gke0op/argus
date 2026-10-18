@@ -3420,6 +3420,9 @@ test "Watchdog time limit: a hanging theme is killed in time and the Space keeps
     try std.testing.expectEqual(sc.VerifyStatus.timed_out, sc.runVerifier(verifier, hang, limit_ms));
     const waited_ms = @divTrunc(std.Io.Clock.awake.now(g_io).nanoseconds - t0, std.time.ns_per_ms);
     try std.testing.expect(waited_ms >= limit_ms and waited_ms < limit_ms + 1000);
+    // With no verifier, the app (unlike this test binary) never checks in-process: the hanging
+    // theme is refused at once instead of running here, where nothing could stop it.
+    try std.testing.expectEqual(sc.VerifyStatus.failed, sc.verifyWith(null, hang, false));
 
     // Live reload: a working theme file is edited into one that hangs. The reload is refused as a
     // timeout and the Space keeps drawing the version it had.
