@@ -19,8 +19,8 @@ off-screen), stopped by its PID.
 3. **Argus is less than half of the "50%".** In a typical moment the GPU is active 55–61% of the
    time: Argus ≈20%, WindowServer ≈13%, Finder ≈8–9%, plus Claude, Spotify and others.
 4. **Real savings come from doing less invisible work** (warm neighbours: ≈20% of Argus's own GPU
-   time on the owner's layout) and from the themes' own per-pixel cost. Engine-wide knobs that
-   change no pixel (threadgroup shape, batching) measured within noise.
+   time on the owner's layout; now removed) and from the themes' own per-pixel cost. Engine-wide
+   knobs that change no pixel (threadgroup shape, batching) measured within noise.
 
 ## Method
 
@@ -110,14 +110,30 @@ Warm neighbours add ≈4 points, ≈20% of Argus's own GPU time; power within no
    themes are frozen while hidden anyway, and a warm neighbour already shows a frame up to 100 ms
    old when a swipe begins, so the frames buy no smoothness that pausing would not give.
 
+### Swipes: when does an arriving Space become visible? (live, read-only, `tools/swipe_probe.py`)
+
+During the owner's swipes (22:44–22:46, about 50 Space changes), every one of Argus's seven
+desktop windows entered the window server's on-screen list (`CGWindowListCreate`,
+`kCGWindowListOptionOnScreenOnly`) 0.4–1.5 s **before** the active Space changed, and left it
+right after. `NSWindow.occlusionState`, which Argus used to decide what is visible, flips for the
+arriving window only at the end. That is why, with warm neighbours off, an arriving theme sat
+still for about half a second (the owner: "themes take like half a sec to come alive"), and why
+warm neighbours seemed necessary.
+
+### Pause test (live, Animate off 22:45:09–22:45:22)
+
+Finder kept using 35–40% CPU with Argus paused, so Finder's CPU load is not Argus's; its GPU share
+fell from about 9% to about 5%. WindowServer was busy with the swipe and menu animations during
+the pause, so this run does not separate its share.
+
 ## Fixes, ranked by measured gain
 
-| # | Fix | Measured | Picture | Status |
+| # | Fix | Measured | Picture | Commit |
 |---|---|---|---|---|
-| 1 | Pause hidden Spaces, resume one frame later (no jump) — makes "Smooth swipes" off seamless; recommend off | −20% of Argus GPU time on the owner's layout (more when neighbours are heavy) | the visible Space is unchanged; a swiped-in Space continues from its last frame instead of jumping 0.1–0.5 s | resume committed (eb96dc5); turning the setting off is the owner's call |
-| 2 | Per-theme kernel work: Night Tide, Lizard Island | 2.5–3 ms of 0.6–3 ms per frame | must stay image-identical | theme sessions; not engine |
-| 3 | Read "W" rather than "GPU %": the meter overstates by 2–3.4× at P1 | — | — | documentation |
+| 1 | **No warm neighbours.** Hidden Spaces draw nothing; a Space a swipe is bringing in draws from the swipe's first moment (on-screen window list); a Space coming back resumes one frame on, as if its clock paused. The Smooth swipes switch is gone. | −20% of Argus's own GPU time on the owner's layout (more when neighbours are heavy) | the owner compared both on screen and preferred it: "it feels much better" | eb96dc5, f3941a8, 850a319 |
+| 2 | Per-theme kernel work (Night Tide, Lizard Island: 2.5–3 ms of full-clock GPU per frame) | the largest remaining Argus cost | must stay image-identical | theme sessions |
+| 3 | Read W, not "GPU %": at P1 the meter overstates work 2–3.4× | — | — | this report |
 
-Pending: whether Argus's animated wallpaper is what keeps Finder redrawing the desktop
-(≈30% CPU, ≈9% GPU; correlation with Argus 0.81) and what WindowServer's 13% contains. That needs
-a 90-second test with Argus paused on screen, requested through Argus I.
+What Argus cannot change: WindowServer composites the screen whenever the wallpaper changes
+(≈13% at P1 here) and Finder redraws the desktop's ≈60 icons on its own (≈35–40% CPU whether or
+not Argus draws). Engine knobs measured and rejected: threadgroup shape, batching submissions.
