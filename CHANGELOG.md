@@ -14,6 +14,9 @@ All notable changes to Argus are recorded here. The format follows
   0.4–1.5 s before the switch completes) and draws only the Spaces a swipe can bring in, while it
   lasts. A Space coming back into view continues from its last frame instead of jumping. The
   Smooth swipes switch is gone; an old `smooth_swipes` line in `.argus_settings.conf` is ignored.
+  Only windows that have just come on screen count as a swipe starting, so another display's
+  current Space (always on screen) never keeps neighbours drawing, a swipe on another display
+  doesn't draw this one's neighbours, and Mission Control draws them for at most 2 s.
 
 ### Added
 
