@@ -28,8 +28,8 @@ Some things that run themes without a click:
 ## What the watchdog checks
 
 Before a newly compiled Zig theme is loaded into Argus, Argus runs it once in a separate
-process (`Argus --verify-dylib`, started from Argus's own executable) at 320x200 and rejects it
-if that process:
+process (`Argus --verify-dylib`, started from Argus's own executable; if Argus can't start it,
+the theme is refused, never checked inside Argus) at 320x200 and rejects it if that process:
 
 - does not finish within 10 seconds (Argus then kills it): a theme whose `init`, `step` or
   `draw` never returns can't freeze the app. The heaviest bundled theme, Cygnus A, takes under
