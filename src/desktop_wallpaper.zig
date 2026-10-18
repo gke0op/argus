@@ -222,6 +222,9 @@ const MacBridge = struct {
     color_space: ?*anyopaque,
     display_id: u32,
     CGDisplayIsAsleep: *const fn (u32) callconv(.c) u32,
+    CGWindowListCreate: *const fn (u32, u32) callconv(.c) ?*anyopaque,
+    /// Spaces drawn as if visible this tick because a Space switch is under way (see swipeMask).
+    swipe_mask: u16 = 0,
     CGSessionCopyCurrentDictionary: *const fn () callconv(.c) ?*anyopaque,
     cf_key_screen_locked: ?*anyopaque,
     cf_true: ?*const anyopaque,
@@ -832,8 +835,40 @@ const MacBridge = struct {
 
     /// Renders a Space if it is on screen, or if it is a warm neighbor whose last frame is
     /// `warm_ticks` old. Returns true when it rendered.
+    /// The Spaces either side of `active_idx` when a Space switch is under way, else 0.
+    /// As a swipe (or Mission Control) starts, the window server puts every Space's desktop
+    /// window into the on-screen window list, 0.4-1.5 s before the active Space changes;
+    /// occlusionState only reports the arriving window visible at the end. Drawing the two
+    /// possible arrivals from the first moment makes them move during the whole swipe without
+    /// keeping neighbours warm the rest of the time. One CGWindowListCreate per tick (~0.3 ms).
+    fn swipeMask(self: *MacBridge, active_idx: usize, left: ?usize, right: ?usize) u16 {
+        if (self.normal_window or (left == null and right == null)) return 0;
+        const list = self.CGWindowListCreate(1, 0) orelse return 0; // kCGWindowListOptionOnScreenOnly
+        defer self.CFRelease(list);
+        const n = self.CFArrayGetCount(list);
+        var switching = false;
+        for (0..self.obs.n_spaces) |idx| {
+            if (idx == active_idx) continue;
+            const win = self.obs.spaces[idx].desktop_win orelse continue;
+            const wid: usize = @intCast(self.msgRetInt(win, self.sel_win_num));
+            var i: isize = 0;
+            while (i < n) : (i += 1) {
+                if (@intFromPtr(self.CFArrayGetValueAtIndex(list, i)) == wid) {
+                    switching = true;
+                    break;
+                }
+            }
+            if (switching) break;
+        }
+        if (!switching) return 0;
+        var mask: u16 = 0;
+        if (left) |l| mask |= @as(u16, 1) << @intCast(l);
+        if (right) |r| mask |= @as(u16, 1) << @intCast(r);
+        return mask;
+    }
+
     fn renderIfDue(self: *MacBridge, idx: usize, warm_ticks: usize) bool {
-        const visible = if (self.bench_space) |n| n == idx else self.spaceWindowVisible(idx);
+        const visible = if (self.bench_space) |n| n == idx else (self.spaceWindowVisible(idx) or (self.swipe_mask >> @intCast(idx)) & 1 != 0);
         if (visible) self.perf_visible |= @as(u16, 1) << @intCast(idx);
         const last = self.last_render_tick[idx];
         const due = visible or (warm_ticks != 0 and (last == 0 or self.frame_idx + 1 >= last + warm_ticks));
@@ -2398,22 +2433,31 @@ fn renderSpacesForFrame(b: *MacBridge, logic: bool) bool {
             }
         }
 
+        // The nearest animated Space on each side: where a swipe can arrive.
+        var left: ?usize = null;
         var scan_l: usize = active_idx;
         while (scan_l > 0) {
             scan_l -= 1;
             if (isAnimatedSpaceMode(b.obs.spaces[scan_l].mode)) {
-                if (b.renderIfDue(scan_l, if (logic) b.neighborWarmTicks() else 0)) rendered_any = true;
+                left = scan_l;
                 break;
             }
         }
-
+        var right: ?usize = null;
         var scan_r: usize = active_idx + 1;
         while (scan_r < b.obs.n_spaces) : (scan_r += 1) {
             if (isAnimatedSpaceMode(b.obs.spaces[scan_r].mode)) {
-                if (b.renderIfDue(scan_r, if (logic) b.neighborWarmTicks() else 0)) rendered_any = true;
+                right = scan_r;
                 break;
             }
         }
+        b.swipe_mask = if (logic) b.swipeMask(active_idx, left, right) else b.swipe_mask;
+        if (left) |l| if (b.renderIfDue(l, if (logic) b.neighborWarmTicks() else 0)) {
+            rendered_any = true;
+        };
+        if (right) |r| if (b.renderIfDue(r, if (logic) b.neighborWarmTicks() else 0)) {
+            rendered_any = true;
+        };
     } else if (!b.obs.paused and !b.screen_locked) {
         // A fullscreen app's Space is active. Our windows are normally all hidden, but Mission Control
         // opened from there shows a desktop Space behind its thumbnails: keep whatever is on screen live.
@@ -2776,6 +2820,7 @@ pub fn main(init: std.process.Init) !void {
     const CGDisplayBounds: *const fn (u32) callconv(.c) CGRect = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGDisplayBounds") orelse return error.SymbolMissing));
     const CGDisplayCopyColorSpace: *const fn (u32) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGDisplayCopyColorSpace") orelse return error.SymbolMissing));
     const CGDisplayIsAsleep: *const fn (u32) callconv(.c) u32 = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGDisplayIsAsleep") orelse return error.SymbolMissing));
+    const CGWindowListCreate: *const fn (u32, u32) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGWindowListCreate") orelse return error.SymbolMissing));
     const CGSessionCopyCurrentDictionary: *const fn () callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGSessionCopyCurrentDictionary") orelse return error.SymbolMissing));
     const CGWindowLevelForKey: *const fn (i32) callconv(.c) i32 = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGWindowLevelForKey") orelse return error.SymbolMissing));
     const CGColorSpaceCreateDeviceRGB: *const fn () callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGColorSpaceCreateDeviceRGB") orelse return error.SymbolMissing));
@@ -3124,6 +3169,7 @@ pub fn main(init: std.process.Init) !void {
         .color_space = color_space,
         .display_id = display_id,
         .CGDisplayIsAsleep = CGDisplayIsAsleep,
+        .CGWindowListCreate = CGWindowListCreate,
         .CGSessionCopyCurrentDictionary = CGSessionCopyCurrentDictionary,
         .cf_key_screen_locked = CFStringCreateWithCString(null, "CGSSessionScreenIsLocked", 0x08000100),
         .cf_true = kCFBooleanTrue_ptr.*,
