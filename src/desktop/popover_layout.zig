@@ -148,7 +148,6 @@ pub const Hit = union(enum) {
     prev_theme,
     next_theme,
     speed: usize,
-    smooth_swipes,
     reload_on_edit,
     launch_at_login,
     /// A click on the frame-rate control at this x; `fpsSegment` says which rate.
@@ -175,8 +174,7 @@ pub fn hitSettings(x: f64, y: f64) ?Hit {
     if (stepper_next.contains(x, y)) return .next_theme;
     // The slider's knob overhangs its track; give it a few points of slack either side.
     if (x >= slider.x - 8 and x < slider.x + slider.w + 8 and y >= slider.y and y < slider.y + slider.h) return .{ .speed = detentAt(x) };
-    if (cell(0, 0).contains(x, y)) return .smooth_swipes;
-    if (cell(1, 0).contains(x, y)) return .reload_on_edit;
+    if (cell(0, 0).contains(x, y)) return .reload_on_edit;
     if (cell(0, 1).contains(x, y)) return .launch_at_login;
     if (fps_ctl.contains(x, y)) return .{ .fps = x };
     return null;
@@ -274,8 +272,8 @@ test "popover layout: every control hits where it is drawn, inside the box" {
     try std.testing.expectEqual(Hit.prev_theme, hitSettings(stepper.x + 10, ROW_A_Y + 10).?);
     try std.testing.expectEqual(Hit.next_theme, hitSettings(stepper.x + stepper.w - 10, ROW_A_Y + 10).?);
     try std.testing.expect(hitSettings(stepper.x + stepper.w * 0.5, ROW_A_Y + 10) == null);
-    try std.testing.expectEqual(Hit.smooth_swipes, hitSettings(GX + 10, ROW_A_Y + 10).?);
-    try std.testing.expectEqual(Hit.reload_on_edit, hitSettings(GX + CELL_W + 10, ROW_A_Y + 10).?);
+    try std.testing.expectEqual(Hit.reload_on_edit, hitSettings(GX + 10, ROW_A_Y + 10).?);
+    try std.testing.expect(hitSettings(GX + CELL_W + 10, ROW_A_Y + 10) == null);
     try std.testing.expectEqual(Hit.launch_at_login, hitSettings(GX + 10, ROW_B_Y + 10).?);
     // Frame rate: 2 or 3 segments across the control, inside the box.
     const fx = fps_ctl.x + fps_ctl.w * 0.9;

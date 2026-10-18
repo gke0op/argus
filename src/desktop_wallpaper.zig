@@ -176,7 +176,7 @@ const MacBridge = struct {
     /// engine (memory, GPU) next to a running Argus without touching the live wallpaper.
     offscreen: bool = false,
     /// `--bench-space N` (with --offscreen): Space N counts as the visible, active Space and
-    /// draws at 30 FPS whatever Space the user is on; no warm neighbours. For per-theme numbers.
+    /// draws at 30 FPS whatever Space the user is on. For per-theme numbers.
     bench_space: ?usize = null,
     native_data_providers: [MAX_SPACES]?*anyopaque = @splat(null),
     popover_win: ?*anyopaque,
@@ -204,7 +204,6 @@ const MacBridge = struct {
     note_error: bool = false,
     note_until: usize = 0, // frame_idx when the note clears
     // Settings (desktop/settings.zig); paused and speed live on the Observatory.
-    warm_neighbors: bool = true,
     hot_reload: bool = true,
     launch_at_login: bool = false,
     glyph_closed: bool = false,
@@ -222,12 +221,15 @@ const MacBridge = struct {
     color_space: ?*anyopaque,
     display_id: u32,
     CGDisplayIsAsleep: *const fn (u32) callconv(.c) u32,
+    CGWindowListCreate: *const fn (u32, u32) callconv(.c) ?*anyopaque,
+    /// Spaces drawn as if visible this tick because a Space switch is under way (see swipeMask).
+    swipe_mask: u16 = 0,
     CGSessionCopyCurrentDictionary: *const fn () callconv(.c) ?*anyopaque,
     cf_key_screen_locked: ?*anyopaque,
     cf_true: ?*const anyopaque,
     screen_locked: bool = false,
     sel_occlusion_state: ?*anyopaque,
-    /// frame_idx + 1 of each Space's last rendered frame (0 = never), for warm-rate neighbors.
+    /// frame_idx + 1 of each Space's last rendered frame (0 = never).
     last_render_tick: [MAX_SPACES]usize = @splat(0),
     perf_log: bool = false,
     // GPU prototype (`--gpu`): Metal presenters for Spaces whose theme has a GPU port.
@@ -740,7 +742,8 @@ const MacBridge = struct {
     }
 
     /// Draws a Metal-only theme into its Space's CAMetalLayer. Time advances by the real gap
-    /// since the Space's last frame, so warm (10 FPS) neighbors animate at the right speed.
+    /// since the Space's last frame; a Space coming back into view resumes one frame on (see
+    /// renderIfDue and Pacer.resumeSpace).
     fn renderSpaceMetal(self: *MacBridge, idx: usize) bool {
         const sp = &self.obs.spaces[idx];
         // The Space's layer outlives theme changes: a new theme draws into the same layer.
@@ -830,14 +833,49 @@ const MacBridge = struct {
         return (state & (1 << 1)) != 0;
     }
 
-    /// Renders a Space if it is on screen, or if it is a warm neighbor whose last frame is
-    /// `warm_ticks` old. Returns true when it rendered.
-    fn renderIfDue(self: *MacBridge, idx: usize, warm_ticks: usize) bool {
-        const visible = if (self.bench_space) |n| n == idx else self.spaceWindowVisible(idx);
+    /// Renders a Space if it is on screen (or about to be: swipe_mask), or, with `every_ticks`
+    /// > 0, if its last frame is that many ticks old. Returns true when it rendered.
+    /// The Spaces either side of `active_idx` when a Space switch is under way, else 0.
+    /// As a swipe (or Mission Control) starts, the window server puts every Space's desktop
+    /// window into the on-screen window list, 0.4-1.5 s before the active Space changes;
+    /// occlusionState only reports the arriving window visible at the end. Drawing the two
+    /// possible arrivals from the first moment makes them move during the whole swipe without
+    /// keeping neighbours warm the rest of the time. One CGWindowListCreate per tick (~0.3 ms).
+    fn swipeMask(self: *MacBridge, active_idx: usize, left: ?usize, right: ?usize) u16 {
+        if (self.normal_window or (left == null and right == null)) return 0;
+        const list = self.CGWindowListCreate(1, 0) orelse return 0; // kCGWindowListOptionOnScreenOnly
+        defer self.CFRelease(list);
+        const n = self.CFArrayGetCount(list);
+        var switching = false;
+        for (0..self.obs.n_spaces) |idx| {
+            if (idx == active_idx) continue;
+            const win = self.obs.spaces[idx].desktop_win orelse continue;
+            const wid: usize = @intCast(self.msgRetInt(win, self.sel_win_num));
+            var i: isize = 0;
+            while (i < n) : (i += 1) {
+                if (@intFromPtr(self.CFArrayGetValueAtIndex(list, i)) == wid) {
+                    switching = true;
+                    break;
+                }
+            }
+            if (switching) break;
+        }
+        if (!switching) return 0;
+        var mask: u16 = 0;
+        if (left) |l| mask |= @as(u16, 1) << @intCast(l);
+        if (right) |r| mask |= @as(u16, 1) << @intCast(r);
+        return mask;
+    }
+
+    fn renderIfDue(self: *MacBridge, idx: usize, every_ticks: usize) bool {
+        const visible = if (self.bench_space) |n| n == idx else (self.spaceWindowVisible(idx) or (self.swipe_mask >> @intCast(idx)) & 1 != 0);
         if (visible) self.perf_visible |= @as(u16, 1) << @intCast(idx);
         const last = self.last_render_tick[idx];
-        const due = visible or (warm_ticks != 0 and (last == 0 or self.frame_idx + 1 >= last + warm_ticks));
+        const due = visible or (every_ticks != 0 and (last == 0 or self.frame_idx + 1 >= last + every_ticks));
         if (!due) return false;
+        // Coming into view after missing at least one tick:
+        // continue from the last frame instead of jumping over the time it spent out of sight.
+        if (visible and last != 0 and self.frame_idx + 1 > last + 1) self.pacer.resumeSpace(idx);
         self.renderSpaceAtIndex(idx);
         self.last_render_tick[idx] = self.frame_idx + 1;
         self.perf_renders[idx] +|= 1;
@@ -1118,12 +1156,11 @@ const MacBridge = struct {
 
         self.fillR(ctx, H, .{ .x = pl.BLOCK_RULE_X, .y = pl.ROW_A_Y + 2.0, .w = 1.0, .h = pl.ROW_B_Y + pl.ROW_H - pl.ROW_A_Y - 4.0 }, 0.0, C_RULE);
 
-        // Right: 2x2 switches
+        // Right: switches and the frame rate
         // No "Show themes in Mission Control" switch in v1: on macOS 26 setting a Space's still also
         // becomes the default picture for new Spaces, so the feature needs a cleaner design before
         // it is offered. The setting (mission_control_stills, off by default) and its code remain.
-        self.switchCell(ctx, H, pl.cell(0, 0), "Smooth swipes", self.warm_neighbors);
-        self.switchCell(ctx, H, pl.cell(1, 0), "Live reload", self.hot_reload);
+        self.switchCell(ctx, H, pl.cell(0, 0), "Live reload", self.hot_reload);
         self.switchCell(ctx, H, pl.cell(0, 1), "Open at login", self.launch_at_login);
         self.drawFpsControl(ctx, H);
     }
@@ -1274,13 +1311,6 @@ const MacBridge = struct {
         if (persist) settings.setFloat("speed", self.obs.spin_mult);
     }
 
-    /// Off-screen theme Spaces next to the active one re-render every few ticks (10 FPS) when
-    /// "Smooth Space swipes" is on, so a swipe never reveals a stale frame; off, they wait until
-    /// their window turns visible.
-    fn neighborWarmTicks(self: *const MacBridge) usize {
-        return if (self.warm_neighbors and self.bench_space == null) NEIGHBOR_WARM_TICKS else 0;
-    }
-
     /// Loads the theme `delta` steps away in themes/ into the selected Space.
     pub fn stepTheme(self: *MacBridge, delta: i32) void {
         const idx = @min(self.sel_space, self.obs.n_spaces -| 1);
@@ -1342,11 +1372,6 @@ const MacBridge = struct {
     fn doubleClickTicks(self: *MacBridge) usize {
         const secs = self.msgRetF64(self.NSEvent, self.sel_registerName("doubleClickInterval"));
         return @intFromFloat(@ceil(std.math.clamp(secs, 0.15, 0.3) * 30.0));
-    }
-
-    pub fn setWarmNeighbors(self: *MacBridge, on: bool) void {
-        self.warm_neighbors = on;
-        settings.setBool("smooth_swipes", on);
     }
 
     pub fn setHotReload(self: *MacBridge, on: bool) void {
@@ -2289,7 +2314,6 @@ fn handlePopoverHit(b: *MacBridge, hit: pl.Hit) void {
             b.setSpeed(d, false);
             b.slider_drag = true; // saved on mouse up
         },
-        .smooth_swipes => b.setWarmNeighbors(!b.warm_neighbors),
         .reload_on_edit => b.setHotReload(!b.hot_reload),
         .launch_at_login => b.setLaunchAtLogin(!b.launch_at_login),
         .fps => |x| b.setFps(frame_rate.RATES[pl.fpsSegment(x, frame_rate.offeredCount(b.display_max_fps))]),
@@ -2346,8 +2370,6 @@ fn onPopoverMouseUp(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c)
 /// Length of the eject flash on a thumbnail (0.4 s at 30 Hz).
 const EJECT_FLASH_TICKS: usize = 12;
 
-/// Off-screen neighbors re-render every 3rd 30 Hz tick (~10 FPS).
-const NEIGHBOR_WARM_TICKS: usize = 3;
 /// A GPU Space not drawn for this long (2 s) parks its layer (frees its spare drawables).
 const GPU_PARK_TICKS: usize = 60;
 
@@ -2372,9 +2394,10 @@ fn isAnimatedSpaceMode(m: SpaceMode) bool {
     return m == .custom_shader;
 }
 
-/// Draws what can be seen this frame. On a logic tick (`logic`) that includes warm neighbours on
-/// their 10 FPS cadence and the first second's unconditional frames; on the display frames in
-/// between (60 / 120 FPS) only Spaces whose window is on screen draw. Returns true if any drew.
+/// Draws what can be seen this frame. On a logic tick (`logic`) that includes the Spaces a swipe
+/// in progress is bringing in (swipe_mask) and the first second's unconditional frames; on the
+/// display frames in between (60 / 120 FPS) only Spaces whose window is on screen draw. Hidden
+/// Spaces draw nothing: they pause and resume one frame on. Returns true if any drew.
 fn renderSpacesForFrame(b: *MacBridge, logic: bool) bool {
     const active_idx = b.bench_space orelse b.obs.active_space_idx;
     const active_is_ours = active_idx < b.obs.n_spaces and
@@ -2393,22 +2416,31 @@ fn renderSpacesForFrame(b: *MacBridge, logic: bool) bool {
             }
         }
 
+        // The nearest animated Space on each side: where a swipe can arrive.
+        var left: ?usize = null;
         var scan_l: usize = active_idx;
         while (scan_l > 0) {
             scan_l -= 1;
             if (isAnimatedSpaceMode(b.obs.spaces[scan_l].mode)) {
-                if (b.renderIfDue(scan_l, if (logic) b.neighborWarmTicks() else 0)) rendered_any = true;
+                left = scan_l;
                 break;
             }
         }
-
+        var right: ?usize = null;
         var scan_r: usize = active_idx + 1;
         while (scan_r < b.obs.n_spaces) : (scan_r += 1) {
             if (isAnimatedSpaceMode(b.obs.spaces[scan_r].mode)) {
-                if (b.renderIfDue(scan_r, if (logic) b.neighborWarmTicks() else 0)) rendered_any = true;
+                right = scan_r;
                 break;
             }
         }
+        b.swipe_mask = if (logic) b.swipeMask(active_idx, left, right) else b.swipe_mask;
+        if (left) |l| if (b.renderIfDue(l, 0)) {
+            rendered_any = true;
+        };
+        if (right) |r| if (b.renderIfDue(r, 0)) {
+            rendered_any = true;
+        };
     } else if (!b.obs.paused and !b.screen_locked) {
         // A fullscreen app's Space is active. Our windows are normally all hidden, but Mission Control
         // opened from there shows a desktop Space behind its thumbnails: keep whatever is on screen live.
@@ -2521,9 +2553,9 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
     }
 
     // Render only what can be seen. The active Space renders at 30 FPS while its window is on screen.
-    // Its nearest animated left/right neighbors (scanning past passthrough / picture Spaces) stay warm
-    // at ~10 FPS so a swipe never reveals a stale frame, and jump to 30 FPS the moment their window
-    // turns visible mid-swipe. Nothing renders while a fullscreen app's Space is active (it is not one
+    // Its nearest animated left/right neighbors (scanning past passthrough / picture Spaces) draw only
+    // while a swipe is bringing them in (swipe_mask), from the swipe's first moment. Hidden Spaces
+    // pause. Nothing renders while a fullscreen app's Space is active (it is not one
     // of ours, so active_space_id no longer matches the active slot), or while the screen is locked.
     b.tickGpu();
     const active_idx = b.bench_space orelse b.obs.active_space_idx;
@@ -2536,7 +2568,12 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
             b.frame_idx / 30, active_idx, active_is_ours, b.screen_locked, b.perf_visible,
         });
         for (0..b.obs.n_spaces) |idx| std.debug.print(" {d}", .{b.perf_renders[idx]});
-        std.debug.print(" active_us={d:.0}\n", .{b.obs.last_compute_us});
+        std.debug.print(" active_us={d:.0} gpu_ms:", .{b.obs.last_compute_us});
+        for (0..b.obs.n_spaces) |idx| {
+            const t = if (b.mt[idx]) |*p| p.timing.take() else if (b.gpu[idx]) |*p| p.timing.take() else continue;
+            if (t.frames > 0) std.debug.print(" s{d}={d:.2}x{d}", .{ idx, t.ms, t.frames });
+        }
+        std.debug.print("\n", .{});
         b.perf_renders = @splat(0);
         b.perf_visible = 0;
     }
@@ -2766,6 +2803,7 @@ pub fn main(init: std.process.Init) !void {
     const CGDisplayBounds: *const fn (u32) callconv(.c) CGRect = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGDisplayBounds") orelse return error.SymbolMissing));
     const CGDisplayCopyColorSpace: *const fn (u32) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGDisplayCopyColorSpace") orelse return error.SymbolMissing));
     const CGDisplayIsAsleep: *const fn (u32) callconv(.c) u32 = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGDisplayIsAsleep") orelse return error.SymbolMissing));
+    const CGWindowListCreate: *const fn (u32, u32) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGWindowListCreate") orelse return error.SymbolMissing));
     const CGSessionCopyCurrentDictionary: *const fn () callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGSessionCopyCurrentDictionary") orelse return error.SymbolMissing));
     const CGWindowLevelForKey: *const fn (i32) callconv(.c) i32 = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGWindowLevelForKey") orelse return error.SymbolMissing));
     const CGColorSpaceCreateDeviceRGB: *const fn () callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(libcg, "CGColorSpaceCreateDeviceRGB") orelse return error.SymbolMissing));
@@ -3114,6 +3152,7 @@ pub fn main(init: std.process.Init) !void {
         .color_space = color_space,
         .display_id = display_id,
         .CGDisplayIsAsleep = CGDisplayIsAsleep,
+        .CGWindowListCreate = CGWindowListCreate,
         .CGSessionCopyCurrentDictionary = CGSessionCopyCurrentDictionary,
         .cf_key_screen_locked = CFStringCreateWithCString(null, "CGSSessionScreenIsLocked", 0x08000100),
         .cf_true = kCFBooleanTrue_ptr.*,
@@ -3142,7 +3181,6 @@ pub fn main(init: std.process.Init) !void {
     bridge.snapshot_dir = snapshot_dir;
     obs.paused = !settings.getBool("animate", true);
     obs.spin_mult = pl.SPEEDS[pl.speedIndex(settings.getFloat("speed", 1.0, 0.25, 2.0))];
-    bridge.warm_neighbors = settings.getBool("smooth_swipes", true);
     bridge.hot_reload = settings.getBool("reload_on_edit", true);
     bridge.launch_at_login = settings.getBool("launch_at_login", false);
     bridge.display_max_fps = bridge.displayMaxFps();

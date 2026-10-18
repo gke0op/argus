@@ -71,6 +71,45 @@ fn moveLayer(layer: mtl.Id, host_layer: mtl.Id) void {
 
 /// Copies a w x h RGBA8 frame out of the GPU into `dst` (packRGBA layout), for menu previews.
 /// `encode` writes the frame into the texture it's given. Blocks until the GPU is done (~1-2 ms).
+/// GPU execution time of a Space's frames, for `--perf-log`: each frame's command buffer is kept
+/// until the next frame, then its GPUStartTime..GPUEndTime is added up. This is the time the GPU
+/// spent on the frame at whatever clock it ran, the number Activity Monitor's %GPU is built from.
+pub const GpuTiming = struct {
+    prev: mtl.Id = null,
+    sum_ms: f64 = 0,
+    frames: u32 = 0,
+
+    pub fn track(self: *GpuTiming, cb: mtl.Id) void {
+        if (!log_events) return;
+        if (self.prev) |p| {
+            if (mtl.msg(usize, p, "status", .{}) == CB_COMPLETED) {
+                const ms = (mtl.msg(f64, p, "GPUEndTime", .{}) - mtl.msg(f64, p, "GPUStartTime", .{})) * 1000.0;
+                if (ms > 0 and ms < 1000) {
+                    self.sum_ms += ms;
+                    self.frames += 1;
+                }
+            }
+            mtl.release(p);
+        }
+        self.prev = mtl.msg(mtl.Id, cb, "retain", .{});
+    }
+
+    /// Mean GPU ms per frame since the last call, and the frame count; resets.
+    pub const Stats = struct { ms: f64, frames: u32 };
+
+    pub fn take(self: *GpuTiming) Stats {
+        const r: Stats = .{ .ms = if (self.frames > 0) self.sum_ms / @as(f64, @floatFromInt(self.frames)) else 0, .frames = self.frames };
+        self.sum_ms = 0;
+        self.frames = 0;
+        return r;
+    }
+
+    pub fn reset(self: *GpuTiming) void {
+        mtl.release(self.prev);
+        self.* = .{};
+    }
+};
+
 fn snapshotInto(dev: mtl.Id, queue: mtl.Id, tex: *mtl.Id, w: usize, h: usize, dst: []u32, ctx: anytype, comptime encode: fn (@TypeOf(ctx), mtl.Id, mtl.Id) void) bool {
     if (dst.len < w * h) return false;
     if (tex.* == null) tex.* = mtl.newTexture(dev, mtl.PIXEL_RGBA8, w, h, mtl.STORAGE_SHARED);
@@ -150,6 +189,8 @@ pub const ThemePresenter = struct {
     gen: u32, // SpaceConfig.dylib_gen of the load this was built for
     color_space: ?*anyopaque,
     parked: bool = false,
+    /// `--perf-log`: GPU time of this Space's frames, read from the previous frame's command buffer.
+    timing: GpuTiming = .{},
 
     /// `reuse`: the layer the Space's previous theme drew into (kept, see makeLayer), or null.
     pub fn create(src: []const u8, data: ?[]const u8, label: []const u8, gen: u32, seed: u32, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize, reuse: mtl.Id) ?ThemePresenter {
@@ -197,6 +238,7 @@ pub const ThemePresenter = struct {
         self.theme.encodeTimes(cb, mtl.msg(mtl.Id, drawable, "texture", .{}), clock_dt, step_dt);
         mtl.msg(void, cb, "presentDrawable:", .{drawable});
         mtl.msg(void, cb, "commit", .{});
+        self.timing.track(cb);
         return true;
     }
 
@@ -230,6 +272,7 @@ pub const ThemePresenter = struct {
     }
 
     pub fn destroy(self: *ThemePresenter, tick: usize) void {
+        self.timing.reset();
         retireLayer(self.release(), tick);
     }
 };
@@ -335,6 +378,8 @@ pub const Presenter = struct {
     parked: bool = false,
     /// The last frame's command buffer (retained) and the trace rows it showed: see render().
     last_cb: mtl.Id = null,
+    /// `--perf-log`: GPU time of this Space's frames (see GpuTiming).
+    timing: GpuTiming = .{},
     shown_rows: u32 = 0,
 
     /// Returns null when the dylib isn't a GPU build or Metal is unavailable.
@@ -442,6 +487,7 @@ pub const Presenter = struct {
         mtl.msg(void, cb, "presentDrawable:", .{drawable});
         mtl.msg(void, cb, "commit", .{});
         self.last_cb = mtl.msg(mtl.Id, cb, "retain", .{});
+        self.timing.track(cb);
         return true;
     }
 

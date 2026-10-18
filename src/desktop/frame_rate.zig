@@ -109,6 +109,16 @@ pub const Pacer = struct {
         return .{ .units = units, .logic = logic };
     }
 
+    /// A hidden Space coming back into view: its next draw moves time by one frame and one
+    /// step, as if its clock had paused while nobody could see it. Without this the first visible
+    /// frame jumps by the whole hidden gap (up to 0.5 s of motion), which warm neighbours only
+    /// hid by drawing invisible frames every 3 ticks.
+    pub fn resumeSpace(self: *Pacer, idx: usize) void {
+        if (!self.drawn_once[idx]) return;
+        self.drawn_at[idx] = self.clock -| unitsPerFrame(self.hz);
+        self.stepped_at[idx] = self.ticks -| 1;
+    }
+
     /// Times for Space `idx` drawing now at speed `spin`. Records the draw (and the step, if due).
     pub fn spaceTimes(self: *Pacer, idx: usize, spin: f64) SpaceTimes {
         const first = !self.drawn_once[idx];
@@ -219,6 +229,23 @@ test "frame rate: at 30 FPS the clocks are bit-identical to the old per-tick cod
         try std.testing.expectEqual(old_dt, st.step_dt.?);
         try std.testing.expectEqual(@as(f64, 0.008) * 1.5, st.zig_dt);
     }
+}
+
+test "frame rate: a Space resuming after being hidden moves one frame, not the hidden gap" {
+    var p: Pacer = .{};
+    for (1..31) |f| _ = p.advance(@as(f64, @floatFromInt(f)) / 30.0).?;
+    _ = p.spaceTimes(2, 1.0); // drawn at t = 1 s
+    for (31..91) |f| _ = p.advance(@as(f64, @floatFromInt(f)) / 30.0).?; // hidden for 2 s
+    const jumped = p.spaceTimes(2, 1.0);
+    try std.testing.expectEqual(@as(f32, 0.5), jumped.clock_dt); // the old behaviour: a 0.5 s jump
+
+    _ = p.spaceTimes(5, 1.0);
+    for (91..151) |f| _ = p.advance(@as(f64, @floatFromInt(f)) / 30.0).?;
+    p.resumeSpace(5);
+    const resumed = p.spaceTimes(5, 1.0);
+    try std.testing.expectEqual(@as(f32, 1.0) / 30.0, resumed.clock_dt);
+    try std.testing.expectEqual(@as(f32, 1.0) / 30.0, resumed.step_dt.?);
+    try std.testing.expectEqual(@as(f64, 0.008), resumed.zig_dt);
 }
 
 test "frame rate: faster vsync than the chosen rate skips callbacks; dropped frames count once" {
