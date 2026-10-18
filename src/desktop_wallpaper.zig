@@ -10,6 +10,7 @@ const settings = @import("desktop/settings.zig");
 const login_item = @import("desktop/login_item.zig");
 const pl = @import("desktop/popover_layout.zig");
 const frame_rate = @import("desktop/frame_rate.zig");
+const swipe_detect = @import("desktop/swipe_detect.zig");
 const popover_dismiss = @import("desktop/popover_dismiss.zig");
 const reopen = @import("desktop/reopen.zig");
 
@@ -224,6 +225,7 @@ const MacBridge = struct {
     CGWindowListCreate: *const fn (u32, u32) callconv(.c) ?*anyopaque,
     /// Spaces drawn as if visible this tick because a Space switch is under way (see swipeMask).
     swipe_mask: u16 = 0,
+    swipe: swipe_detect.SwipeDetector = .{},
     CGSessionCopyCurrentDictionary: *const fn () callconv(.c) ?*anyopaque,
     cf_key_screen_locked: ?*anyopaque,
     cf_true: ?*const anyopaque,
@@ -835,36 +837,35 @@ const MacBridge = struct {
 
     /// Renders a Space if it is on screen (or about to be: swipe_mask), or, with `every_ticks`
     /// > 0, if its last frame is that many ticks old. Returns true when it rendered.
-    /// The Spaces either side of `active_idx` when a Space switch is under way, else 0.
-    /// As a swipe (or Mission Control) starts, the window server puts every Space's desktop
-    /// window into the on-screen window list, 0.4-1.5 s before the active Space changes;
-    /// occlusionState only reports the arriving window visible at the end. Drawing the two
-    /// possible arrivals from the first moment makes them move during the whole swipe without
-    /// keeping neighbours warm the rest of the time. One CGWindowListCreate per tick (~0.3 ms).
+    /// The Spaces either side of `active_idx` while a Space switch is under way, else 0.
+    /// As a swipe (or Mission Control) starts, the window server puts that display's Space windows
+    /// into the on-screen window list, 0.4-1.5 s before the active Space changes; occlusionState
+    /// only reports the arriving window visible at the end. A neighbour whose window has just come
+    /// on screen therefore means a switch is starting (desktop/swipe_detect.zig, which also ignores
+    /// windows that stay on screen, such as another display's current Space). One
+    /// CGWindowListCreate per logic tick (~0.3 ms).
     fn swipeMask(self: *MacBridge, active_idx: usize, left: ?usize, right: ?usize) u16 {
+        _ = active_idx;
         if (self.normal_window or (left == null and right == null)) return 0;
         const list = self.CGWindowListCreate(1, 0) orelse return 0; // kCGWindowListOptionOnScreenOnly
         defer self.CFRelease(list);
         const n = self.CFArrayGetCount(list);
-        var switching = false;
-        for (0..self.obs.n_spaces) |idx| {
-            if (idx == active_idx) continue;
+        var on_screen: u16 = 0;
+        for (0..@min(self.obs.n_spaces, swipe_detect.MAX_SPACES)) |idx| {
             const win = self.obs.spaces[idx].desktop_win orelse continue;
             const wid: usize = @intCast(self.msgRetInt(win, self.sel_win_num));
             var i: isize = 0;
             while (i < n) : (i += 1) {
                 if (@intFromPtr(self.CFArrayGetValueAtIndex(list, i)) == wid) {
-                    switching = true;
+                    on_screen |= @as(u16, 1) << @intCast(idx);
                     break;
                 }
             }
-            if (switching) break;
         }
-        if (!switching) return 0;
-        var mask: u16 = 0;
-        if (left) |l| mask |= @as(u16, 1) << @intCast(l);
-        if (right) |r| mask |= @as(u16, 1) << @intCast(r);
-        return mask;
+        var candidates: u16 = 0;
+        if (left) |l| candidates |= @as(u16, 1) << @intCast(l);
+        if (right) |r| candidates |= @as(u16, 1) << @intCast(r);
+        return self.swipe.update(on_screen, candidates, self.pacer.ticks);
     }
 
     fn renderIfDue(self: *MacBridge, idx: usize, every_ticks: usize) bool {
@@ -3590,6 +3591,7 @@ test {
     _ = @import("desktop/login_item.zig");
     _ = @import("desktop/popover_layout.zig");
     _ = @import("desktop/frame_rate.zig");
+    _ = swipe_detect;
     _ = @import("desktop/popover_dismiss.zig");
     _ = @import("desktop/reopen.zig");
 }
