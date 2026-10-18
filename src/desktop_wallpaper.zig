@@ -838,6 +838,9 @@ const MacBridge = struct {
         const last = self.last_render_tick[idx];
         const due = visible or (warm_ticks != 0 and (last == 0 or self.frame_idx + 1 >= last + warm_ticks));
         if (!due) return false;
+        // Coming into view after missing at least one tick (hidden, or only warm every 3 ticks):
+        // continue from the last frame instead of jumping over the time it spent out of sight.
+        if (visible and last != 0 and self.frame_idx + 1 > last + 1) self.pacer.resumeSpace(idx);
         self.renderSpaceAtIndex(idx);
         self.last_render_tick[idx] = self.frame_idx + 1;
         self.perf_renders[idx] +|= 1;
@@ -1278,7 +1281,9 @@ const MacBridge = struct {
     /// "Smooth Space swipes" is on, so a swipe never reveals a stale frame; off, they wait until
     /// their window turns visible.
     fn neighborWarmTicks(self: *const MacBridge) usize {
-        return if (self.warm_neighbors and self.bench_space == null) NEIGHBOR_WARM_TICKS else 0;
+        // Bench mode prices warm neighbours only when asked (ARGUS_BENCH_WARM=1).
+        const bench_warm = std.c.getenv("ARGUS_BENCH_WARM") != null;
+        return if (self.warm_neighbors and (self.bench_space == null or bench_warm)) NEIGHBOR_WARM_TICKS else 0;
     }
 
     /// Loads the theme `delta` steps away in themes/ into the selected Space.
@@ -2536,7 +2541,12 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
             b.frame_idx / 30, active_idx, active_is_ours, b.screen_locked, b.perf_visible,
         });
         for (0..b.obs.n_spaces) |idx| std.debug.print(" {d}", .{b.perf_renders[idx]});
-        std.debug.print(" active_us={d:.0}\n", .{b.obs.last_compute_us});
+        std.debug.print(" active_us={d:.0} gpu_ms:", .{b.obs.last_compute_us});
+        for (0..b.obs.n_spaces) |idx| {
+            const t = if (b.mt[idx]) |*p| p.timing.take() else if (b.gpu[idx]) |*p| p.timing.take() else continue;
+            if (t.frames > 0) std.debug.print(" s{d}={d:.2}x{d}", .{ idx, t.ms, t.frames });
+        }
+        std.debug.print("\n", .{});
         b.perf_renders = @splat(0);
         b.perf_visible = 0;
     }
