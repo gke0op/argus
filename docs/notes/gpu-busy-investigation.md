@@ -12,7 +12,7 @@ off-screen), stopped by its PID.
    performance state (P1, ≈338 MHz of a ≈1.34 GHz top clock). Every frame takes 2–3.4× its
    full-clock time there, so the same work shows up as 2–3.4× more "busy" time.
 2. **The energy is small and is spent efficiently.** The whole GPU draws about 1.1–2 W with the
-   owner's Argus, WindowServer, Finder and the other apps together. One Argus theme adds 0.3–1.4 W.
+   owner's Argus, WindowServer, Finder and the other apps together. One Argus theme adds 0.2–1.5 W.
    Night Tide costs 43 mJ per frame at P1 against about 50 mJ at full clock (21–23 W for 2.5 ms),
    so running slowly is, if anything, cheaper. Making frames finish faster would lower the meter,
    not the energy.
@@ -56,17 +56,21 @@ otherwise; that was a parser bug, corrected).
 | WindowServer GPU | 13% |
 | Finder GPU | 9.3% (and ≈30% CPU) |
 
-### One theme at a time (off-screen build, Space 0 drawn at 30 FPS, GPU at P1 throughout)
+### One theme at a time (off-screen build, Space 0 drawn at 30 FPS; two rounds, the second in a quiet window)
 
-| Theme | Argus GPU % | GPU ms per frame (÷30) | back-to-back at full clock | ratio | marginal GPU W |
-|---|---:|---:|---:|---:|---:|
-| Tutorial_Tides | 6.4 | 2.1 | 0.63 | 3.4× | +0.26 |
-| Tutorial_Reef | 10.0 | 3.3 | 1.1 | 3.0× | +0.67 |
-| Ebru_Studio | 10.2 | 3.4 | 1.0 | 3.3× | ≈0 (noise) |
-| Orion_Nebula | 12.3 | 4.1 | 1.7 | 2.4× | +0.75 |
-| Cygnus_A (GPU, HDR10, native) | 10.8 | 3.6 | 1.6 | 2.3× | +0.57 |
-| Night_Tide | 23.5 | 7.8 | 2.5 | 3.1× | +1.28 |
-| Lizard_Island | 19.3 | 6.4 | 3.0 | 2.1× | +1.38 |
+| Theme | Argus GPU % (round 1 / 2) | GPU ms per frame (round 1 ÷ 30) | back-to-back at full clock | marginal GPU W (round 1 / 2) |
+|---|---:|---:|---:|---:|
+| Tutorial_Tides | 6.4 / 6.9 | 2.1 | 0.63 | +0.26 / +0.19 |
+| Tutorial_Reef | 10.0 / 6.8 | 3.3 | 1.1 | +0.67 / +0.67 |
+| Ebru_Studio | 10.2 / 4.2 | 3.4 | 1.0 | ≈0 / +0.70 |
+| Cygnus_A (GPU, HDR10, native) | 10.8 / 8.0 | 3.6 | 1.6 | +0.57 / +0.50 |
+| Orion_Nebula | 12.3 / 11.9 | 4.1 | 1.7 | +0.75 / +0.70 |
+| Night_Tide | 23.5 / 14.1 | 7.8 | 2.5 | +1.28 / +0.95 |
+| Lizard_Island | 19.3 / 17.4 | 6.4 | 3.0 | +1.38 / +1.45 |
+
+GPU % moves with the clock state the rest of the Mac puts the GPU in (in round 2, Cygnus and
+Reef ran with the GPU at P1 only about half the time, and their GPU % fell accordingly); power is
+the steadier measure. At P1 a frame takes 2.1–3.4× its full-clock time.
 
 Baselines between cases: 1.1–2.0 W (the owner's Argus, WindowServer, Finder, other apps).
 
