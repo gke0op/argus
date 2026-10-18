@@ -9,7 +9,6 @@
 //   mission_control_stills=0|1   Spaces-bar stills (desktop/desktop_picture.zig). Default 0.
 //   animate=0|1                  Themes animate; 0 pauses every Space. Default 1.
 //   speed=0.25..2                Theme speed multiplier. Default 1.
-//   smooth_swipes=0|1            Keep the nearest off-screen theme Spaces warm at 10 FPS. Default 1.
 //   reload_on_edit=0|1           Hot-reload a theme when its file is saved. Default 1.
 //   launch_at_login=0|1          Start Argus at login (desktop/login_item.zig). Default 0.
 //   gpu=0|1                      GPU hybrid themes (Kerr-disk quasars: Cygnus A); `--cpu` overrides. Default 1.
