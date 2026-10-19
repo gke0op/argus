@@ -65,8 +65,8 @@
 //     horizon at irregular azimuths, widths and strengths; every light an area, widened by the lobe
 //     (never point-sampled); every colour, roughness and exposure;
 //   - materials: Fresnel integrated over the GGX lobe (Karis 2014's analytic environment BRDF), so
-//     edges never go "wet"; only metal is near-mirror. The bezel is one gentle satin bead (+-0.8 rad, GGX
-//     ~0.2): one smooth gradient, its curvature widening the lobe and whose inner flank reflects the dial; the chapter ring is circular-
+//     edges never go "wet"; only metal is near-mirror. The bezel is one continuous polished bead whose
+//     curvature widens its lobe and whose inner flank reflects the dial; the chapter ring is circular-
 //     brushed (lobe stretched across the grooves: a radial bow-tie highlight); deep cobalt enamel (linear
 //     ~0.01, 0.03, 0.22) with the guilloche showing through as brightness and a GGX-0.1 clear coat;
 //     applied gold casts soft shadows; gems cast and contact shadows; the dial sits on dark velvet in
@@ -728,14 +728,13 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
         const float RBC = 0.975f;
         const float half_w = r < RBC ? RBC - R_Z1 : R_OUT - RBC;
         const float t = clamp((r - RBC) / half_w, -1.0f, 1.0f);
-        // a gentle bead (+-0.8 rad): it sweeps through few reflections, so it reads as one form
-        const float ang = t * 0.80f;
+        const float ang = t * 1.25f;
         const float3 n = normalize(float3(rad * sin(ang), cos(ang)));
-        const float rough = 0.20f + 1.0f * 0.80f / (half_w * ppu);                 // satin: one smooth gradient
+        const float rough = 0.035f + 1.0f * 1.25f / (half_w * ppu);
         const float3 R = refl(n, S);
         float3 e = env(R, rough, S);
         const float toward = sat(-dot(R.xy, rad) * 2.0f) * sat(1.0f - R.z * 1.4f);
-        e = mix(e, float3(0.010f, 0.022f, 0.12f), toward * 0.5f);
+        e = mix(e, float3(0.010f, 0.022f, 0.12f), toward);
         float3 c = env_brdf(ROSE, rough, dot(n, S.V)) * e;
         c *= 0.55f + 0.45f * smoothstep(0.0f, 0.010f, r - R_Z1);                // where it meets the enamel
         return mix(c, float3(0.003f), smoothstep(R_OUT - aa, R_OUT + aa, r));
@@ -749,8 +748,8 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
         // pixel grows against it, so it never beats against an edge or the pixel grid
         const float ph = a * 360.0f;
         const float gw = sat((r * D2R * ppu - 3.0f) / 4.0f);
-        const float groove = 0.5f + 0.5f * cos(ph) * gw * 0.45f;                  // 1 in a groove (quiet)
-        const float3 ng = normalize(float3(tang * 0.06f * sin(ph) * gw + rad * 0.02f * sin(r * 160.0f), 1.0f));
+        const float groove = 0.5f + 0.5f * cos(ph) * gw;                          // 1 in a groove
+        const float3 ng = normalize(float3(tang * 0.13f * sin(ph) * gw + rad * 0.03f * sin(r * 160.0f), 1.0f));
         // deep cobalt glass; the engraving shows through as brightness, darker where the glass is deeper
         const float lu = dot(env(refl(ng, S), 0.28f, S), float3(0.3f, 0.5f, 0.2f));
         float3 c = float3(0.010f, 0.030f, 0.22f) * (0.12f + 0.55f * lu) * (1.15f - 0.35f * groove);
