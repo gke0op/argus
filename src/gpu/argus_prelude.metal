@@ -24,7 +24,31 @@ struct ArgusFrame {
     uint  state_width;  // state texture size (0 x 0 when the theme keeps no state)
     uint  state_height;
     uint  seed;         // random per load: vary it to vary the theme
+
+    // The real date and time, for live astronomy, clocks, sunrise and sunset. Read from the
+    // system clock once per frame: the speed setting, pausing and the f.time wrap don't touch
+    // it. The time scale is UTC (Unix time, no leap seconds); for TT (ephemerides) add
+    // TT-UTC yourself (69.184 s in 2026). The harness pins it: 2026-10-20T12:00:00Z, offset 0,
+    // advancing 1/30 s per frame; `--date YYYY-MM-DDTHH:MM:SSZ` picks another start.
+    int   days_j2000;   // whole days since J2000.0 (2000-01-01 12:00 UTC); negative before it
+    float day_frac;     // fraction of that day elapsed, [0, 1), from the epoch's noon: 0.5 is
+                        // 00:00 UTC. ~5 ms resolution. Days since J2000 = days_j2000 + day_frac.
+    int   utc_offset_s; // local time zone's offset from UTC in seconds, daylight saving
+                        // included (+7200 in Berlin in summer); local time = UTC + this
 };
+
+// Days since J2000.0 as one float. LOSSY: a float near 9800 days resolves only ~84 s
+// (2^-10 day). Fine for slow things (planet positions); keep days_j2000 and day_frac apart for
+// anything that moves within minutes (the Moon to arcseconds, a clock's second hand).
+static inline float argus_days_j2000(constant ArgusFrame& f) {
+    return float(f.days_j2000) + f.day_frac;
+}
+
+// Seconds since 00:00 UTC today, 0..86400 (to ~10 ms). Add f.utc_offset_s for local time and
+// wrap with fmod(... + 86400, 86400).
+static inline float argus_utc_seconds(constant ArgusFrame& f) {
+    return fract(f.day_frac + 0.5f) * 86400.0f;
+}
 
 // f.time wraps to 0 after this many seconds. A cycle whose period divides it (a whole number of
 // minutes that divides 240: 1-6, 8, 10, 12, 15, 16, 20, 30, 60 ...) runs on seamlessly.

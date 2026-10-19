@@ -84,8 +84,10 @@ pixel; it never loops over the screen.
 
 | Name | What it is |
 |---|---|
-| `ArgusFrame f` | `time` (s, continuous, wraps every 4 h), `dt` (s), `frame` (30 Hz simulation tick: 0, 1, 2… at 30, 60 and 120 FPS alike), `width`, `height`, `state_width`, `state_height`, `seed` |
+| `ArgusFrame f` | `time` (s, continuous, wraps every 4 h), `dt` (s), `frame` (30 Hz simulation tick: 0, 1, 2… at 30, 60 and 120 FPS alike), `width`, `height`, `state_width`, `state_height`, `seed`; the real date: `days_j2000` (int, whole days since 2000-01-01 12:00 UTC), `day_frac` (float, [0, 1) of that day, ~5 ms), `utc_offset_s` (int, local zone's offset from UTC incl. daylight saving) |
 | `ARGUS_TIME_PERIOD` | 14400.0f: where `f.time` wraps; fit long cycles to it |
+| `float argus_days_j2000(constant ArgusFrame& f)` | days since J2000.0 as one float. Lossy (~84 s near 2026): fine for planets, not for a second hand |
+| `float argus_utc_seconds(constant ArgusFrame& f)` | seconds since 00:00 UTC today, 0..86400; add `f.utc_offset_s` for local time |
 | `float2 argus_uv(uint2 gid, constant ArgusFrame& f)` | pixel → centred coords, y up, short side spans -1..1 |
 | `float2 argus_uv01(uint2 gid, uint w, uint h)` | pixel → 0..1, y down (texture coordinates) |
 | `uint argus_hash(uint x)` | integer hash (lowbias32); chain it for several inputs, `argus_hash(a ^ argus_hash(b))` |
@@ -101,6 +103,14 @@ harness pins `0x5EED` unless you pass `SEED=`. `argus_noise` and `argus_fbm` **i
 seed** (they hash with seed 0), so their pattern is identical on every Space. To vary them,
 offset the input: `p + 100.0f * float2(argus_rand(uint2(1, 2), f.seed), argus_rand(uint2(3, 4), f.seed))`.
 If anything in your composition is seeded, check several seeds (§5).
+
+**Date and time.** `f.time` is an animation clock (speed setting, pauses, the 4 h wrap); it
+isn't the time of day. For live astronomy, clocks or sunrise, use `f.days_j2000` + `f.day_frac`:
+the system clock in UTC (Unix time, no leap seconds), read once per frame. Ephemerides want TT:
+add TT-UTC yourself (69.184 s in 2026). Keep the two fields apart in anything that moves within
+minutes (subtract your epoch in days first, then add `day_frac`). The harness pins the date to
+2026-10-20T12:00:00Z (offset 0), advancing 1/30 s per frame; pass `DATE=YYYY-MM-DDTHH:MM:SSZ`
+to check other moments (a full Moon, a retrograde, midnight), in `make harness` and `theme_sheet.sh`.
 
 ## 3. Themes that remember: GPU state
 
@@ -171,7 +181,7 @@ screen, ~4 days in reality).
 ## 5. The harness, the render loop, claim checks
 
 ```bash
-make harness THEME=themes/<Name>.metal FRAMES=300 OUT=/tmp/<name>.png [SEED=7]
+make harness THEME=themes/<Name>.metal FRAMES=300 OUT=/tmp/<name>.png [SEED=7] [DATE=2027-01-01T00:00:00Z]
 tools/theme_sheet.sh themes/<Name>.metal          # the contact sheet: run it every round
 ```
 
@@ -299,7 +309,7 @@ too.
 | `src/gpu/argus_prelude.metal` | the prelude (helpers, `ArgusFrame`) |
 | `src/gpu/metal_theme.zig` | compiles themes, directives, state ping-pong, encodes frames |
 | `src/gpu/presenter.zig` | CAMetalLayer per Space window; Zig + Metal hybrids (Cygnus A) |
-| `src/theme_harness.zig` | `make harness` (`SEED=` for Metal); `.metal` files take the GPU path |
+| `src/theme_harness.zig` | `make harness` (`SEED=`, `DATE=` for Metal); `.metal` files take the GPU path |
 | `tools/theme_sheet.sh` | the contact sheet: moments, seeds, 1:1 crop, flicker |
 | `themes/argus_theme_sdk.zig` | `sdk.ledger` for claim checks (Zig themes and `<Name>_claims.zig` tests) |
 | `themes/Tutorial_*.metal` | Tides (stateless) and Reef (stateful): skeletons to copy, not a quality bar |

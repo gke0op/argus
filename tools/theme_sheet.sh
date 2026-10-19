@@ -13,6 +13,10 @@
 #
 # Look at every image. The harness verdict says the theme runs; this says how it looks
 # from the first second to the ninetieth, and whether one seed's composition is a fluke.
+#
+# DATE=YYYY-MM-DDTHH:MM:SSZ (Metal) renders every image from that moment instead of the
+# harness's fixed 2026-10-20T12:00:00Z (f.days_j2000, f.day_frac): a sheet per date checks a
+# theme that shows the real sky or time of day.
 set -eu
 
 THEME=${1:?usage: tools/theme_sheet.sh themes/X.metal [out_dir]}
@@ -29,7 +33,7 @@ mkdir -p "$OUT"
 render() { # frames seed png
     # Short runs fail the budget gate (the first frame includes init): only the image counts here.
     rm -f "$3"
-    make -s harness THEME="$THEME" FRAMES="$1" SEED="$2" OUT="$3" > "$3.log" 2>&1 || true
+    make -s harness THEME="$THEME" FRAMES="$1" SEED="$2" OUT="$3" DATE="${DATE:-}" > "$3.log" 2>&1 || true
     if [ ! -f "$3" ]; then
         echo "no image for frames=$1 seed=$2: see $3.log" >&2
         grep -E "FAIL|error" "$3.log" >&2 || true

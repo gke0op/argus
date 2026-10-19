@@ -25,6 +25,11 @@ var enforce_budget = true;
 /// `--seed N` (Metal): the f.seed a theme sees. The app derives one per Space; the harness pins
 /// 0x5EED so renders are repeatable. Render a few seeds to check a seeded composition holds up.
 var metal_seed: u32 = 0x5EED;
+/// `--date YYYY-MM-DDTHH:MM:SSZ` (Metal): the UTC instant f.days_j2000 / f.day_frac start at,
+/// advancing with the frames' clock (1/30 s a frame). Pinned so renders don't depend on today;
+/// f.utc_offset_s is 0.
+var metal_date: i64 = 1_792_497_600;
+var metal_date_str: []const u8 = "2026-10-20T12:00:00Z";
 
 const MetalRun = struct { ok: bool, gpu_us_avg: f64 = 0, gpu_us_worst: f64 = 0, err: [*:0]const u8 = "" };
 
@@ -151,12 +156,14 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
         std.process.exit(1);
     };
     defer theme.deinit();
+    theme.wall = .{ .fixed = .{ .unix_s = metal_date } };
 
     // Watchdog: a small 320x200 instance must run too (no size assumptions in the kernels).
     var wd_ok = false;
     if (metal_theme.Theme.compile(src, label, data, 320, 200, 1, &err_buf)) |wd_theme| {
         var wd = wd_theme;
         defer wd.deinit();
+        wd.wall = .{ .fixed = .{ .unix_s = metal_date } };
         const wd_out = mtl.newTexture(wd.dev, mtl.PIXEL_RGBA32F, 320, 200, mtl.STORAGE_SHARED);
         defer mtl.release(wd_out);
         wd_ok = runMetal(&wd, wd_out, 3, null, null).ok;
@@ -203,6 +210,9 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
 
     const motion_ok = animated_pixels >= 2_000;
     const pass = wd_ok and !nan_detected and distinct_pixels > 100 and motion_ok and (!enforce_budget or run.gpu_us_avg < METAL_BUDGET_US);
+    const start = metal_theme.j2000(metal_date, 0);
+    var date_buf: [96]u8 = undefined;
+    const date_line = try std.fmt.bufPrint(&date_buf, "{s} at frame 0 (J2000 day {d} + {d:.6}), offset 0 (--date)", .{ metal_date_str, start.days, start.frac });
     const st_desc = if (theme.stateful()) "state texture" else "stateless";
     var out_buf: [2048]u8 = undefined;
     const report = try std.fmt.bufPrint(&out_buf,
@@ -213,6 +223,7 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
         \\ State             : {d}x{d} {s}, {d} step(s) per frame
         \\ Resolution        : {d}x{d} (and 320x200 watchdog)
         \\ Frames Rendered   : {d} (dt = 1/30 s)
+        \\ Date (UTC)        : {s}
         \\ Avg GPU Frame     : {d:.1} us | Budget: {d:.1} us{s}
         \\ Worst GPU Frame   : {d:.1} us
         \\ Profile (BGRA8)   : {d:.1} us median frame = {d:.1} us init/step + {d:.1} us draw
@@ -233,7 +244,8 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
         if (theme.dir.state_f32) "float32" else "float16",
         if (theme.step != null) theme.dir.steps else 0,
         width,                             height,
-        frames,                            run.gpu_us_avg,
+        frames,                            date_line,
+        run.gpu_us_avg,
         METAL_BUDGET_US,                   if (enforce_budget) "" else " (not enforced)",
         run.gpu_us_worst,
         prof.frame_us,                     @max(0.0, prof.frame_us - prof.draw_us),
@@ -344,6 +356,10 @@ pub fn main(init: std.process.Init) !void {
             const f = try std.fmt.parseInt(u32, args[i], 10);
             if (f != 30 and f != 60 and f != 120) return error.FpsMustBe30Or60Or120;
             paced_fps = f;
+        } else if (std.mem.eql(u8, a, "--date") and i + 1 < args.len) {
+            i += 1;
+            metal_date = metal_theme.parseIsoUtc(args[i]) catch return error.DateMustBeYYYYMMDDTHHMMSSZ;
+            metal_date_str = args[i];
         } else if (std.mem.eql(u8, a, "--no-budget")) {
             enforce_budget = false;
         } else if (std.mem.eql(u8, a, "--probe-metal")) {
@@ -358,7 +374,7 @@ pub fn main(init: std.process.Init) !void {
 
     const path = theme_path orelse {
         var ebuf: [256]u8 = undefined;
-        const emsg = std.fmt.bufPrint(&ebuf, "Usage: ./.toolchain/zig run -O ReleaseFast -lc src/theme_harness.zig -- <theme.zig> [--frames N] [--out /tmp/out.png]\n", .{}) catch "";
+        const emsg = std.fmt.bufPrint(&ebuf, "Usage: ./.toolchain/zig run -O ReleaseFast -lc src/theme_harness.zig -- <theme.zig> [--frames N] [--out /tmp/out.png] [--seed N] [--fps N] [--date YYYY-MM-DDTHH:MM:SSZ]\n", .{}) catch "";
         try std.Io.File.stderr().writeStreamingAll(io, emsg);
         std.process.exit(1);
     };
