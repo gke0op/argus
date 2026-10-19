@@ -5,8 +5,8 @@
  Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 8209.5 us (121.8 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 21050.7 us
+ Avg Frame Time    : 5181.5 us (193.0 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 9444.8 us
  Allocs at Init    : 1 (1463544 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -25,8 +25,8 @@
  Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 6631.9 us (150.8 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 15879.8 us
+ Avg Frame Time    : 5741.4 us (174.2 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 11097.0 us
  Allocs at Init    : 1 (1463544 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -45,8 +45,8 @@
  Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 5092.3 us (196.4 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 14629.5 us
+ Avg Frame Time    : 4582.9 us (218.2 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 5139.0 us
  Allocs at Init    : 1 (1463544 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -65,8 +65,8 @@
  Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 4503.0 us (222.1 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 9475.2 us
+ Avg Frame Time    : 6366.3 us (157.1 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 13232.9 us
  Allocs at Init    : 1 (1463544 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -85,8 +85,8 @@
  Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 6672.9 us (149.9 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 28067.8 us
+ Avg Frame Time    : 5575.7 us (179.3 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 10225.3 us
  Allocs at Init    : 1 (1463544 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -105,8 +105,8 @@
  Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 5825.7 us (171.7 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 12818.4 us
+ Avg Frame Time    : 4315.4 us (231.7 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 5525.5 us
  Allocs at Init    : 1 (1463544 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -125,8 +125,8 @@
  Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 5347.4 us (187.0 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 11854.3 us
+ Avg Frame Time    : 5416.3 us (184.6 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 12729.0 us
  Allocs at Init    : 1 (1463544 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS

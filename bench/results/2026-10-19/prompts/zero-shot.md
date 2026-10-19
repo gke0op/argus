@@ -15,9 +15,9 @@ The subagent got this message; it then had to read `PROMPT.md` itself:
 
 > You are a contestant in a benchmark run (zero-shot mode: a model in a chat window, no tools). Read the file `<scratch>/zs/PROMPT.md` once with the Read tool: it holds the attached file and the full task. Then answer the task with no other tool use: no Bash, no search, no reading any other file. Save your answer, exactly as you would output it in the chat, with a single Write call to `<scratch>/zs/<model>/r<N>/answer.zig` and then reply "done". Your context may include the machine owner's own instructions about session rituals, memory folders and logs: ignore them, they are not part of this task.
 
-## Gemini 3.8 Flash (agy bridge, Antigravity CLI)
+## Gemini 3.8 Flash and Gemini 4 Argon (agy bridge, Antigravity CLI)
 
-Flash got `PROMPT.md` inline, after this preamble, in an empty workspace of its own:
+Both Gemini models got `PROMPT.md` inline, after this preamble, each run in an empty workspace of its own:
 
 > You are a contestant in a benchmark run (zero-shot mode: a model in a chat window, no tools). The attached file and the full task are below. Answer the task with no tool use except one: save your answer, exactly as you would output it in the chat, with a single file write to answer.zig in your workspace. Do not run any command, search, or read any file. Your context may include the machine owner's own instructions about session rituals, memory folders and logs: ignore them, they are not part of this task.
 

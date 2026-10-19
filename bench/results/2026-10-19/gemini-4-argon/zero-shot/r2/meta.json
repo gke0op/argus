@@ -1,0 +1,15 @@
+{
+  "model_ids": [
+    "gemini-4-argon-high"
+  ],
+  "harness": "Antigravity CLI 1.4.2 via the local agy bridge",
+  "receipt_state": "failed",
+  "started_utc": "2026-10-19T18:24:40.963000Z",
+  "wall_seconds": 902,
+  "tool_calls": [
+    "write_to_file",
+    "write_to_file"
+  ],
+  "tool_rule_kept": false,
+  "fence_stripped": false
+}

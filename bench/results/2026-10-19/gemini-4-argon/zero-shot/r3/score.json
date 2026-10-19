@@ -1,0 +1,22 @@
+{
+  "gates": {
+    "compile": false,
+    "allocs": false,
+    "watchdog": false,
+    "stride": false,
+    "alpha_variance": false,
+    "motion": false,
+    "nan": false,
+    "budget": false
+  },
+  "gate_score": 0,
+  "verdict": "FAIL",
+  "failure": "compile error: name shadows primitive 'u01'",
+  "gates_consistent_across_repeats": true,
+  "repeats": 1,
+  "avg_us_each": [],
+  "avg_us_median": null,
+  "avg_us_min": null,
+  "avg_us_max": null,
+  "tier": "-"
+}

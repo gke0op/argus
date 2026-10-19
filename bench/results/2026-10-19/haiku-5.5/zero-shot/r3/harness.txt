@@ -5,8 +5,8 @@
  Theme             : bench/.score/haiku_55_zero_shot_r3/haiku_55_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 865.8 us (1155.0 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 2249.9 us
+ Avg Frame Time    : 790.5 us (1265.0 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 1297.0 us
  Allocs at Init    : 1 (2305064 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -25,8 +25,8 @@
  Theme             : bench/.score/haiku_55_zero_shot_r3/haiku_55_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 998.8 us (1001.2 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 1961.9 us
+ Avg Frame Time    : 971.6 us (1029.2 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 2065.5 us
  Allocs at Init    : 1 (2305064 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -45,8 +45,8 @@
  Theme             : bench/.score/haiku_55_zero_shot_r3/haiku_55_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 1133.6 us (882.1 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 3688.4 us
+ Avg Frame Time    : 1108.1 us (902.5 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 2309.6 us
  Allocs at Init    : 1 (2305064 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -65,8 +65,8 @@
  Theme             : bench/.score/haiku_55_zero_shot_r3/haiku_55_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 1030.4 us (970.5 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 2090.0 us
+ Avg Frame Time    : 827.7 us (1208.2 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 1396.4 us
  Allocs at Init    : 1 (2305064 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -85,8 +85,8 @@
  Theme             : bench/.score/haiku_55_zero_shot_r3/haiku_55_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 1339.9 us (746.3 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 7627.5 us
+ Avg Frame Time    : 967.5 us (1033.6 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 4704.4 us
  Allocs at Init    : 1 (2305064 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -105,8 +105,8 @@
  Theme             : bench/.score/haiku_55_zero_shot_r3/haiku_55_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 1033.0 us (968.0 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 2098.9 us
+ Avg Frame Time    : 777.2 us (1286.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 1573.8 us
  Allocs at Init    : 1 (2305064 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -125,8 +125,8 @@
  Theme             : bench/.score/haiku_55_zero_shot_r3/haiku_55_zero_shot_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 995.4 us (1004.6 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 1580.8 us
+ Avg Frame Time    : 705.3 us (1417.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 1569.0 us
  Allocs at Init    : 1 (2305064 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS

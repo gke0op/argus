@@ -5,8 +5,8 @@
  Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 1820.1 us (549.4 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 4942.0 us
+ Avg Frame Time    : 1860.5 us (537.5 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 4197.4 us
  Allocs at Init    : 1 (9220832 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -25,8 +25,8 @@
  Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 1930.1 us (518.1 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 3855.9 us
+ Avg Frame Time    : 1804.3 us (554.2 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 7487.0 us
  Allocs at Init    : 1 (9220832 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -45,8 +45,8 @@
  Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 1784.4 us (560.4 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 3042.0 us
+ Avg Frame Time    : 2119.2 us (471.9 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 5514.7 us
  Allocs at Init    : 1 (9220832 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -65,8 +65,8 @@
  Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 7341.3 us (136.2 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 55712.2 us
+ Avg Frame Time    : 2111.2 us (473.7 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 5696.6 us
  Allocs at Init    : 1 (9220832 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -85,8 +85,8 @@
  Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 2721.7 us (367.4 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 10096.1 us
+ Avg Frame Time    : 2252.6 us (443.9 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 4662.9 us
  Allocs at Init    : 1 (9220832 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -105,8 +105,8 @@
  Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 2339.6 us (427.4 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 4905.2 us
+ Avg Frame Time    : 1946.3 us (513.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 5864.7 us
  Allocs at Init    : 1 (9220832 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -125,8 +125,8 @@
  Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 1846.2 us (541.6 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 3316.4 us
+ Avg Frame Time    : 1804.6 us (554.1 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 5600.1 us
  Allocs at Init    : 1 (9220832 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS

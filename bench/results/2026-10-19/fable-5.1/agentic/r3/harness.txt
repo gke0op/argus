@@ -5,8 +5,8 @@
  Theme             : bench/.score/fable_51_agentic_r3/fable_51_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 2288.7 us (436.9 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 7223.0 us
+ Avg Frame Time    : 1851.6 us (540.1 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 2591.1 us
  Allocs at Init    : 1 (3714592 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -25,8 +25,8 @@
  Theme             : bench/.score/fable_51_agentic_r3/fable_51_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 2767.3 us (361.4 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 9509.5 us
+ Avg Frame Time    : 2159.9 us (463.0 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 4466.9 us
  Allocs at Init    : 1 (3714592 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -45,8 +45,8 @@
  Theme             : bench/.score/fable_51_agentic_r3/fable_51_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 1816.1 us (550.6 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 5779.4 us
+ Avg Frame Time    : 1739.5 us (574.9 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 2713.4 us
  Allocs at Init    : 1 (3714592 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -65,8 +65,8 @@
  Theme             : bench/.score/fable_51_agentic_r3/fable_51_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 2741.2 us (364.8 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 6724.0 us
+ Avg Frame Time    : 2133.8 us (468.7 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 4943.9 us
  Allocs at Init    : 1 (3714592 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -85,8 +85,8 @@
  Theme             : bench/.score/fable_51_agentic_r3/fable_51_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 2069.8 us (483.1 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 3997.7 us
+ Avg Frame Time    : 1584.0 us (631.3 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 1951.8 us
  Allocs at Init    : 1 (3714592 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -105,8 +105,8 @@
  Theme             : bench/.score/fable_51_agentic_r3/fable_51_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 2075.1 us (481.9 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 4875.8 us
+ Avg Frame Time    : 1952.5 us (512.2 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 4887.0 us
  Allocs at Init    : 1 (3714592 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -125,8 +125,8 @@
  Theme             : bench/.score/fable_51_agentic_r3/fable_51_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 1823.0 us (548.5 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 3345.2 us
+ Avg Frame Time    : 1666.1 us (600.2 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 2435.8 us
  Allocs at Init    : 1 (3714592 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS

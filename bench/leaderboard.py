@@ -21,6 +21,7 @@ NAMES = {
     "haiku-5.5": "Claude Haiku 5.5",
     "fable-5.1": "Claude Fable 5.1",
     "gemini-3.8-flash": "Gemini 3.8 Flash",
+    "gemini-4-argon": "Gemini 4 Argon (Argon)",
 }
 ORDER = list(NAMES)
 MODES = ["zero-shot", "agentic"]
