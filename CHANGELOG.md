@@ -20,6 +20,8 @@ All notable changes to Argus are recorded here. The format follows
 
 ### Added
 
+- Roulette Chrome: a single-zero casino wheel seen from above, spun every half minute; the ball's
+  path, its bounces and the winning pocket come out of the physics, nothing is scripted.
 - Aventurine Horoscope, a living horoscope: the planets in the zodiac for today's real date,
   with retrogrades, aspects, the Moon's phase and countdowns to the next sign changes and
   stations. Every 5 minutes it previews the next 30 days. The first theme on the real date.

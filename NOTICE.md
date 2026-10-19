@@ -41,6 +41,8 @@ The git history records who did what; this is the summary.
 - `themes/Lizard_Island.metal`: written by Claude Opus, species by Claude Haiku agents. A
   lagoon at Lizard Island (Great Barrier Reef); the header lists its field sources and marks
   each claim as cited, snippet or habitat-dataset.
+- `themes/Roulette_Chrome.metal`: written by Claude Opus. A single-zero casino wheel from
+  above; every spin comes out of the ball's dynamics (Small & Tse 2012), nothing is scripted.
 - `themes/Phosphor_Terminal.metal` and its glyph atlas `themes/Phosphor_Terminal.bin`:
   written by Claude Opus. This Mac's live stats (`@argus stats`) on a green-phosphor
   terminal; the header separates its sources, what is computed and what is chosen.
