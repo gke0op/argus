@@ -29,7 +29,8 @@ that wrote it, e.g. `Night_Tide.metal`, `Fable_Chimera.zig` (an earlier theme, i
 - `kernel void argus_draw(...)` is required; `argus_init` and `argus_step` are optional (state
   texture, set with `// @argus state WxH` and `// @argus steps N`).
 - Bounds-check `gid` first in every kernel. Don't assume a screen size.
-- Time comes only from `f.time` / `f.dt`; randomness only from `argus_rand` / `argus_hash` and
+- Time comes only from `f.time` / `f.dt` (animation) and `f.days_j2000` / `f.day_frac` /
+  `f.utc_offset_s` (the real date, UTC); randomness only from `argus_rand` / `argus_hash` and
   `f.seed`. No I/O.
 - Never produce NaN or Inf: guard division, `sqrt`, `log`, `pow`, `normalize`.
 - Data files: `// @argus data Name.bin WxH rgba8|rgba16f` loads a raw texel file from the same

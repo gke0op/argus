@@ -70,7 +70,105 @@ pub const Frame = extern struct {
     state_width: u32 = 0,
     state_height: u32 = 0,
     seed: u32 = 0,
+    // The date and time (see WallClock). Appended, so the fields above keep their offsets.
+    days_j2000: i32 = 0,
+    day_frac: f32 = 0,
+    utc_offset_s: i32 = 0,
 };
+
+/// 2000-01-01T12:00:00Z, the J2000.0 epoch, in Unix seconds.
+pub const J2000_UNIX: i64 = 946_728_000;
+
+pub const J2000 = struct { days: i32, frac: f32 };
+
+/// Unix time (UTC, no leap seconds) -> whole days since J2000.0 and the fraction of that day.
+/// The split is exact in integers and the fraction is formed in f64 before it is narrowed, so a
+/// theme sees ~5 ms resolution (one f32 step near 1.0) rather than the ~1 minute of f32 days.
+pub fn j2000(unix_s: i64, nsec: u32) J2000 {
+    const s = unix_s - J2000_UNIX;
+    const days = @divFloor(s, 86400);
+    const rem: f64 = @floatFromInt(s - days * 86400);
+    const frac: f32 = @floatCast((rem + @as(f64, @floatFromInt(nsec)) * 1e-9) / 86400.0);
+    // A fraction a hair under 1 can round up to 1.0 in f32: keep it in [0, 1).
+    return .{ .days = @intCast(days), .frac = @min(frac, 1.0 - std.math.floatEps(f32) / 2.0) };
+}
+
+/// Where f.days_j2000, f.day_frac and f.utc_offset_s come from. The app reads the system clock
+/// once per encode, so the date is real whatever the speed setting, pauses and f.time's wrap do.
+/// The harness pins a start instant and advances it with the frames' own clock, so its renders
+/// don't depend on today's date.
+pub const WallClock = union(enum) {
+    system,
+    fixed: struct { unix_s: i64, utc_offset_s: i32 = 0 },
+};
+
+/// macOS `struct tm` (time.h), for the local UTC offset.
+const Tm = extern struct {
+    sec: c_int,
+    min: c_int,
+    hour: c_int,
+    mday: c_int,
+    mon: c_int,
+    year: c_int,
+    wday: c_int,
+    yday: c_int,
+    isdst: c_int,
+    gmtoff: c_long,
+    zone: ?[*:0]const u8,
+};
+extern "c" fn localtime_r(t: *const i64, out: *Tm) ?*Tm;
+
+/// The local time zone's offset from UTC at `unix_s`, in seconds, daylight saving included.
+fn localUtcOffset(unix_s: i64) i32 {
+    var tm: Tm = undefined;
+    if (localtime_r(&unix_s, &tm) == null) return 0;
+    return @intCast(tm.gmtoff);
+}
+
+/// Fills the date fields of `fr` from `wall`; `elapsed` is the theme's unwrapped clock (seconds
+/// since load), which only a fixed clock uses.
+pub fn fillWall(fr: *Frame, wall: WallClock, elapsed: f64) void {
+    switch (wall) {
+        .system => {
+            var ts: std.c.timespec = undefined;
+            _ = std.c.clock_gettime(std.c.CLOCK.REALTIME, &ts);
+            const sec: i64 = @intCast(ts.sec);
+            const d = j2000(sec, @intCast(ts.nsec));
+            fr.days_j2000 = d.days;
+            fr.day_frac = d.frac;
+            fr.utc_offset_s = localUtcOffset(sec);
+        },
+        .fixed => |w| {
+            const whole = @floor(elapsed);
+            const d = j2000(w.unix_s + @as(i64, @intFromFloat(whole)), @intFromFloat((elapsed - whole) * 1e9));
+            fr.days_j2000 = d.days;
+            fr.day_frac = d.frac;
+            fr.utc_offset_s = w.utc_offset_s;
+        },
+    }
+}
+
+/// Parses `YYYY-MM-DDTHH:MM:SSZ` (UTC) to Unix seconds.
+pub fn parseIsoUtc(s: []const u8) !i64 {
+    if (s.len != 20 or s[4] != '-' or s[7] != '-' or s[10] != 'T' or s[13] != ':' or s[16] != ':' or s[19] != 'Z')
+        return error.DateFormat;
+    const y = try std.fmt.parseInt(i64, s[0..4], 10);
+    const mo = try std.fmt.parseInt(i64, s[5..7], 10);
+    const d = try std.fmt.parseInt(i64, s[8..10], 10);
+    const h = try std.fmt.parseInt(i64, s[11..13], 10);
+    const mi = try std.fmt.parseInt(i64, s[14..16], 10);
+    const se = try std.fmt.parseInt(i64, s[17..19], 10);
+    if (mo < 1 or mo > 12 or d < 1 or d > 31 or h > 23 or mi > 59 or se > 59) return error.DateRange;
+    // Days from civil (Howard Hinnant's algorithm), proleptic Gregorian.
+    const yy = if (mo <= 2) y - 1 else y;
+    const era = @divFloor(yy, 400);
+    const yoe = yy - era * 400;
+    const mp = @mod(mo + 9, 12);
+    const doy = @divFloor(153 * mp + 2, 5) + d - 1;
+    const doe = yoe * 365 + @divFloor(yoe, 4) - @divFloor(yoe, 100) + doy;
+    const days = era * 146097 + doe - 719468;
+    return days * 86400 + h * 3600 + mi * 60 + se;
+}
 
 pub const Directives = struct {
     state_w: u32 = 0,
@@ -204,6 +302,8 @@ pub const Theme = struct {
     /// the app sets it true and copies live samples in before each frame.
     stats: argus_stats.Stats = .{},
     stats_live: bool = false,
+    /// The source of the frame's date fields (fillWall); the harness sets `.fixed`.
+    wall: WallClock = .system,
 
     /// Compiles prelude + `src` for an `out_w` x `out_h` output. On failure `err_buf`
     /// holds the Metal compiler's message (with the theme's own line numbers). `data` is the
@@ -284,6 +384,7 @@ pub const Theme = struct {
     pub fn encodeTimes(self: *Theme, cb: mtl.Id, out: mtl.Id, clock_dt: f32, step_dt: ?f32) void {
         self.frame.frame = self.ticks.forEncode(step_dt != null);
         self.frame.dt = step_dt orelse clock_dt;
+        fillWall(&self.frame, self.wall, self.clock);
         const enc = mtl.msg(mtl.Id, cb, "computeCommandEncoder", .{});
         const fb: *const anyopaque = &self.frame;
         mtl.msg(void, enc, "setBytes:length:atIndex:", .{ fb, @as(usize, @sizeOf(Frame)), @as(usize, 0) });
@@ -468,4 +569,76 @@ test "@argus stats: the directive, the synthetic feed, and the layout the GPU se
     t.stats_live = true;
     const want = [16]f32{ 7, 1.25, 2, 0.5, 0.25, 0.125, 8, 1, 0.75, 95, 4096, 494.5, 5, 'Z', 1.5, @sizeOf(argus_stats.Stats) };
     try std.testing.expectEqualSlices(f32, &want, &(try readBack(&t, out)));
+}
+
+test "J2000: days and day fraction from UTC dates" {
+    const t = std.testing;
+    try t.expectEqual(J2000_UNIX, try parseIsoUtc("2000-01-01T12:00:00Z"));
+    try t.expectEqual(@as(i64, 0), try parseIsoUtc("1970-01-01T00:00:00Z"));
+    try t.expectEqual(@as(i64, 1_792_497_600), try parseIsoUtc("2026-10-20T12:00:00Z"));
+    try t.expectEqual(@as(i64, 951_782_400), try parseIsoUtc("2000-02-29T00:00:00Z")); // leap day
+
+    // The epoch itself.
+    const e = j2000(J2000_UNIX, 0);
+    try t.expectEqual(@as(i32, 0), e.days);
+    try t.expectEqual(@as(f32, 0), e.frac);
+
+    // Midnight UTC is half a J2000 day (days start at noon).
+    const m = j2000(try parseIsoUtc("2026-10-20T00:00:00Z"), 0);
+    try t.expectEqual(@as(i32, 9788), m.days);
+    try t.expectEqual(@as(f32, 0.5), m.frac);
+    const noon = j2000(try parseIsoUtc("2026-10-20T12:00:00Z"), 0);
+    try t.expectEqual(@as(i32, 9789), noon.days);
+    try t.expectEqual(@as(f32, 0), noon.frac);
+
+    // Before the epoch: negative days, the fraction still in [0, 1).
+    const b = j2000(try parseIsoUtc("1999-12-31T00:00:00Z"), 0);
+    try t.expectEqual(@as(i32, -2), b.days);
+    try t.expectEqual(@as(f32, 0.5), b.frac);
+    const u = j2000(0, 0); // 1970-01-01T00:00Z = J2000 - 10957.5 days
+    try t.expectEqual(@as(i32, -10958), u.days);
+    try t.expectEqual(@as(f32, 0.5), u.frac);
+    const late = j2000(J2000_UNIX - 1, 0);
+    try t.expectEqual(@as(i32, -1), late.days);
+    try t.expect(late.frac > 0.9999 and late.frac < 1.0);
+
+    // The last nanosecond of a day stays below 1; one second moves the fraction by 1/86400.
+    const edge = j2000(J2000_UNIX + 86399, 999_999_999);
+    try t.expectEqual(@as(i32, 0), edge.days);
+    try t.expect(edge.frac < 1.0);
+    const a0 = j2000(try parseIsoUtc("2026-10-20T23:59:58Z"), 0);
+    const a1 = j2000(try parseIsoUtc("2026-10-20T23:59:59Z"), 0);
+    try t.expectApproxEqAbs(@as(f64, 1.0 / 86400.0), @as(f64, a1.frac) - @as(f64, a0.frac), 1.0e-7);
+
+    try t.expectError(error.DateFormat, parseIsoUtc("2026-10-20 12:00:00Z"));
+    try t.expectError(error.DateFormat, parseIsoUtc("2026-10-20T12:00:00"));
+    try t.expectError(error.DateRange, parseIsoUtc("2026-13-20T12:00:00Z"));
+}
+
+test "wall clock: fixed for the harness, real for the app; ArgusFrame keeps its layout" {
+    const t = std.testing;
+    // The fields are appended: the original eight keep their offsets.
+    try t.expectEqual(@as(usize, 28), @offsetOf(Frame, "seed"));
+    try t.expectEqual(@as(usize, 32), @offsetOf(Frame, "days_j2000"));
+    try t.expectEqual(@as(usize, 36), @offsetOf(Frame, "day_frac"));
+    try t.expectEqual(@as(usize, 40), @offsetOf(Frame, "utc_offset_s"));
+    try t.expectEqual(@as(usize, 44), @sizeOf(Frame));
+
+    // Fixed: starts at the pinned instant and advances with the theme's own clock.
+    var f: Frame = .{};
+    const start = try parseIsoUtc("2026-10-20T12:00:00Z");
+    fillWall(&f, .{ .fixed = .{ .unix_s = start } }, 0);
+    try t.expectEqual(@as(i32, 9789), f.days_j2000);
+    try t.expectEqual(@as(f32, 0), f.day_frac);
+    try t.expectEqual(@as(i32, 0), f.utc_offset_s);
+    fillWall(&f, .{ .fixed = .{ .unix_s = start } }, 43200.5); // 12 h and half a second on
+    try t.expectEqual(@as(i32, 9789), f.days_j2000);
+    try t.expectApproxEqAbs(@as(f64, 0.5 + 0.5 / 86400.0), @as(f64, f.day_frac), 1.0e-7);
+
+    // System: no earlier than when this was written (2026-10-19, J2000 day 9787), and a real
+    // time zone offset.
+    fillWall(&f, .system, 0);
+    try t.expect(f.days_j2000 >= 9787);
+    try t.expect(f.day_frac >= 0 and f.day_frac < 1);
+    try t.expect(@abs(f.utc_offset_s) <= 14 * 3600);
 }

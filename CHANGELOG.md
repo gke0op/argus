@@ -30,6 +30,14 @@ All notable changes to Argus are recorded here. The format follows
   directive cost nothing. The harness feeds fixed synthetic stats so renders stay the same on
   every Mac; `make harness STATS=live` reads the real ones. `--perf-log` shows the sampler's
   CPU time per sample.
+- Metal themes get the real date and time: `ArgusFrame` gains `days_j2000` (whole days since
+  J2000.0, 2000-01-01 12:00 UTC), `day_frac` (the fraction of that day, [0, 1), computed in f64
+  and good to ~5 ms) and `utc_offset_s` (the local time zone's offset, daylight saving
+  included), appended so existing themes are unchanged. They come from the system clock once
+  per frame, whatever the speed setting, pauses or the `f.time` wrap do, so a theme can show
+  the sky, a clock or sunrise as they are now. Prelude helpers `argus_days_j2000` (one float,
+  lossy) and `argus_utc_seconds`. The harness pins the date to 2026-10-20T12:00:00Z and takes
+  `--date YYYY-MM-DDTHH:MM:SSZ` (`make harness DATE=...`, `DATE=` for `tools/theme_sheet.sh`).
 - GPU measurement tools: `tools/gpu_meter.py` (GPU power, clock states and per-process GPU time,
   no sudo), `tools/gpu_experiment.py`, `tools/swipe_probe.py`, and each GPU Space's GPU ms per
   frame in `--perf-log`. The investigation is in `docs/notes/gpu-busy-investigation.md`.
