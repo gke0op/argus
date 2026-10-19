@@ -112,7 +112,7 @@ Argus.app, one `key=value` per line.
   <img src="docs/media/popover.png" alt="The Argus menu-bar popover: a strip of seven Space thumbnails, one per shipped theme, with Space V (Cygnus A) selected, plus pause and settings buttons" width="680">
 </p>
 <p align="center">
-  <img src="docs/media/settings.png" alt="The Argus Settings view: Space V's preview and theme stepper set to Cygnus A, a speed slider at 1x, switches for smooth swipes, live reload and open at login, and a 30 / 60 / 120 FPS selector" width="680">
+  <img src="docs/media/settings.png" alt="The Argus Settings view: Space IV's preview and theme stepper set to Cygnus A, a speed slider at 1x, switches for live reload and open at login, and a 30 / 60 / 120 FPS selector" width="680">
 </p>
 
 ## Write your own theme
