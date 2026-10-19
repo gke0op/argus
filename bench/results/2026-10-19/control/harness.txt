@@ -1,0 +1,139 @@
+### pass 1 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 1820.1 us (549.4 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 4942.0 us
+ Allocs at Init    : 1 (9220832 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2300160 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2259840 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/control___skeleton/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 2 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 1930.1 us (518.1 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 3855.9 us
+ Allocs at Init    : 1 (9220832 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2300160 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2259840 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/control___skeleton/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 3 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 1784.4 us (560.4 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 3042.0 us
+ Allocs at Init    : 1 (9220832 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2300160 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2259840 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/control___skeleton/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 4 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 7341.3 us (136.2 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 55712.2 us
+ Allocs at Init    : 1 (9220832 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2300160 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2259840 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/control___skeleton/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 5 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2721.7 us (367.4 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 10096.1 us
+ Allocs at Init    : 1 (9220832 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2300160 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2259840 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/control___skeleton/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 6 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2339.6 us (427.4 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 4905.2 us
+ Allocs at Init    : 1 (9220832 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2300160 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2259840 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/control___skeleton/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 7 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/control___skeleton/control___skeleton.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 1846.2 us (541.6 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 3316.4 us
+ Allocs at Init    : 1 (9220832 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2300160 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2259840 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/control___skeleton/frame.png
+ Verdict           : PASS
+========================================================================

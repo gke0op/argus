@@ -1,0 +1,30 @@
+{
+  "gates": {
+    "compile": true,
+    "allocs": true,
+    "watchdog": true,
+    "stride": true,
+    "alpha_variance": true,
+    "motion": true,
+    "nan": true,
+    "budget": true
+  },
+  "gate_score": 8,
+  "verdict": "PASS",
+  "failure": null,
+  "gates_consistent_across_repeats": true,
+  "repeats": 7,
+  "avg_us_each": [
+    4424.5,
+    4564.1,
+    3999.7,
+    5284.0,
+    5758.0,
+    3687.2,
+    3274.0
+  ],
+  "avg_us_median": 4424.5,
+  "avg_us_min": 3274.0,
+  "avg_us_max": 5758.0,
+  "tier": "Bronze"
+}
