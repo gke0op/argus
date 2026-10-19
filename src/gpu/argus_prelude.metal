@@ -100,3 +100,60 @@ kernel void argus_clear_state(texture2d<float, access::write> state [[texture(0)
     if (gid.x >= state.get_width() || gid.y >= state.get_height()) return;
     state.write(float4(0.0f), gid);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Live system stats, for themes that ask with `// @argus stats` (and only them: without the
+// directive nothing is sampled and buffer 1 is unbound). Every kernel may then take
+//     constant ArgusStats& s [[buffer(1)]]
+// Argus samples about once a second while the theme's Space is on screen; between samples the
+// struct stays the same. `seq` goes up by one per sample, so a theme can push values into a
+// history in its state texture exactly once each (keep the last seq it saw in a texel). The
+// harness feeds fixed synthetic stats (a new seq every 30 frames), so renders never depend on
+// the machine; `--stats live` there uses the real ones. Every field is 4 bytes.
+constant uint ARGUS_STATS_MAX_CORES = 32;
+constant uint ARGUS_STATS_TOP = 5;
+
+struct ArgusProc {
+    uchar name[32];       // process name: ASCII, NUL-padded, truncated to 31 characters
+    float cpu;            // its share of the whole machine's CPU, 0..1 (x cpu_count = cores' worth)
+    float mem_gb;         // memory footprint in GiB (Activity Monitor's Memory column)
+};
+
+struct ArgusStats {
+    uint  seq;            // 0 until the first sample (about 1 s after the Space appears), then +1 each
+    float sample_dt;      // seconds the loads and rates were measured over (about 1)
+    uint  uptime_s;       // seconds since the Mac booted (sleep included)
+    uint  thermal;        // 0 nominal, 1 fair, 2 serious, 3 critical (NSProcessInfo.thermalState)
+
+    float cpu_total;      // busy fraction of all cores, 0..1
+    uint  cpu_count;      // entries used in cpu_core (logical cores, at most 32)
+    uint  cpu_p_cores;    // performance cores, efficiency cores (0 and 0 if the Mac doesn't say)
+    uint  cpu_e_cores;
+    float cpu_core[ARGUS_STATS_MAX_CORES]; // busy fraction per core, 0..1, in the kernel's order
+                          // (Apple Silicon numbers the efficiency cores first)
+
+    float mem_total_gb;   // installed memory, GiB (an "8 GB" Mac reads 8.0)
+    float mem_used_gb;    // Activity Monitor's "Memory Used": app memory + wired + compressed
+    float mem_compressed_gb; // held by the memory compressor
+    float mem_wired_gb;   // wired (can't be paged out)
+    float swap_used_gb;   // swap in use
+    uint  mem_pressure;   // 0 normal, 1 warn, 2 critical (Activity Monitor's pressure colours)
+
+    float gpu_busy;       // GPU utilisation 0..1 (IOAccelerator "Device Utilization %")
+
+    uint  battery_present; // 1 on a MacBook, 0 on a desktop Mac (the battery fields are then 0)
+    float battery_charge; // 0..1
+    uint  battery_charging; // 1 while charging
+    uint  on_ac;          // 1 on mains power (always 1 without a battery)
+    float battery_minutes; // to full while charging, to empty on battery; 0 on mains when not
+                          // charging (full, or held by Optimized Charging); -1 while macOS estimates
+
+    float net_rx_bps;     // bytes per second received / sent, all active interfaces except
+    float net_tx_bps;     // loopback and point-to-point tunnels (a VPN would count twice)
+
+    float disk_free_gb;   // the startup volume, decimal GB as Finder shows them (free excludes
+    float disk_total_gb;  // purgeable space, so it can read lower than Finder's "available")
+
+    uint  proc_count;     // entries used in procs (at most 5)
+    ArgusProc procs[ARGUS_STATS_TOP]; // the user's own processes using the most CPU, highest first
+};

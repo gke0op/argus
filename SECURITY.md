@@ -25,6 +25,25 @@ Some things that run themes without a click:
 - **Open at login.** When it is on, Argus starts at login (through a per-user LaunchAgent) and
   loads the themes saved in its settings.
 
+## Live system stats
+
+A Metal theme that declares `// @argus stats` gets numbers about your Mac, about once a second,
+while its Space is on screen: CPU load (total and per core), memory and swap use, memory
+pressure, GPU utilisation, battery charge and time remaining, network bytes per second, free
+space on the startup volume, the thermal state, uptime, and the names, CPU share and memory of
+your five busiest processes. Themes without the directive get none of it, and nothing is
+sampled.
+
+- Argus reads these with public macOS calls that need no permission (host statistics, sysctl,
+  IOKit's power sources and GPU statistics, network interface counters, statfs, libproc,
+  NSProcessInfo). It reads nothing else: no file contents, no window titles, nothing of
+  what goes over the network but the byte counts, no other users' processes.
+- The numbers go only to the theme's GPU kernels, which can't make system calls or open
+  network connections. Argus sends nothing anywhere and writes nothing to disk.
+- **Process names show on your desktop**, if the theme draws them, as anything else on your
+  wallpaper does: in screenshots, screen shares and recordings. If that matters, use a theme
+  that doesn't draw them.
+
 ## What the watchdog checks
 
 Before a newly compiled Zig theme is loaded into Argus, Argus runs it once in a separate

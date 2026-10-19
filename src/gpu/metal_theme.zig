@@ -18,11 +18,15 @@
 //                          // @argus data Name.bin 512x512 rgba8|rgba16f
 // `@argus data` ships a raw texel file next to the theme (W*H texels, row-major, no header;
 // see loadData). argus_init then receives it read-only as [[texture(1)]], to bake from.
+// `@argus stats` asks for the Mac's live vital signs: every kernel then receives
+// `constant ArgusStats& s [[buffer(1)]]` (argus_stats.zig; sampled ~1/s by the app, synthetic
+// in the harness). Without the directive nothing is sampled and buffer 1 is unbound.
 // The prelude (argus_prelude.metal) is prepended; see .claude/skills/argus-metal-theme.
 // ============================================================================
 
 const std = @import("std");
 const mtl = @import("metal.zig");
+const argus_stats = @import("argus_stats.zig");
 
 pub const PRELUDE = @embedFile("argus_prelude.metal");
 
@@ -79,6 +83,8 @@ pub const Directives = struct {
     data_w: u32 = 0,
     data_h: u32 = 0,
     data_f16: bool = false,
+    /// `@argus stats`: bind ArgusStats as [[buffer(1)]].
+    stats: bool = false,
 
     pub fn dataName(self: *const Directives) ?[]const u8 {
         return if (self.data_name_len == 0) null else self.data_name[0..self.data_name_len];
@@ -125,6 +131,8 @@ pub fn parseDirectives(src: []const u8) Directives {
             d.data_w = w;
             d.data_h = h;
             d.data_f16 = std.mem.eql(u8, fmt, "rgba16f");
+        } else if (std.mem.eql(u8, key, "stats")) {
+            d.stats = true;
         }
     }
     return d;
@@ -191,6 +199,11 @@ pub const Theme = struct {
     ticks: FrameCounter = .{},
     /// Seconds since load, in f64 (see TIME_PERIOD); frame.time is this, wrapped.
     clock: f64 = 0,
+    /// `@argus stats` themes: what [[buffer(1)]] holds. With `stats_live` false (the harness,
+    /// tests) every encode fills it with argus_stats.synthetic, one new sample per 30 ticks;
+    /// the app sets it true and copies live samples in before each frame.
+    stats: argus_stats.Stats = .{},
+    stats_live: bool = false,
 
     /// Compiles prelude + `src` for an `out_w` x `out_h` output. On failure `err_buf`
     /// holds the Metal compiler's message (with the theme's own line numbers). `data` is the
@@ -274,6 +287,10 @@ pub const Theme = struct {
         const enc = mtl.msg(mtl.Id, cb, "computeCommandEncoder", .{});
         const fb: *const anyopaque = &self.frame;
         mtl.msg(void, enc, "setBytes:length:atIndex:", .{ fb, @as(usize, @sizeOf(Frame)), @as(usize, 0) });
+        if (self.dir.stats) {
+            if (!self.stats_live) self.stats = argus_stats.synthetic(self.frame.frame / 30 + 1);
+            self.bindStats(enc);
+        }
         const sw: usize = self.dir.state_w;
         const sh: usize = self.dir.state_h;
         if (self.stateful()) {
@@ -305,12 +322,19 @@ pub const Theme = struct {
         self.frame.time = advanceClock(&self.clock, clock_dt);
     }
 
+    /// ArgusStats as [[buffer(1)]] for every dispatch in `enc` (428 bytes, copied now).
+    fn bindStats(self: *const Theme, enc: mtl.Id) void {
+        const sb: *const anyopaque = &self.stats;
+        mtl.msg(void, enc, "setBytes:length:atIndex:", .{ sb, @as(usize, @sizeOf(argus_stats.Stats)), argus_stats.BUFFER_INDEX });
+    }
+
     /// Encodes only argus_draw for the current state, without advancing time or the state
     /// (used for menu previews).
     pub fn encodeDrawOnly(self: *Theme, cb: mtl.Id, out: mtl.Id) void {
         const enc = mtl.msg(mtl.Id, cb, "computeCommandEncoder", .{});
         const fb: *const anyopaque = &self.frame;
         mtl.msg(void, enc, "setBytes:length:atIndex:", .{ fb, @as(usize, @sizeOf(Frame)), @as(usize, 0) });
+        if (self.dir.stats) self.bindStats(enc);
         if (self.stateful()) mtl.msg(void, enc, "setTexture:atIndex:", .{ self.tex[self.cur], @as(usize, 1) });
         mtl.msg(void, enc, "setTexture:atIndex:", .{ out, @as(usize, 0) });
         self.draw.dispatch(enc, self.frame.width, self.frame.height);
@@ -385,4 +409,63 @@ test "loadData: the file must be exactly the declared size" {
     try cwd.writeFile(io, .{ .sub_path = "/tmp/argus_test_data.bin", .data = "1234567" });
     try std.testing.expectError(error.MetalDataSize, loadData(io, alloc, theme, src));
     try std.testing.expect((try loadData(io, alloc, theme, "kernel void argus_draw() {}")) == null);
+}
+
+test "@argus stats: the directive, the synthetic feed, and the layout the GPU sees" {
+    try std.testing.expect(parseDirectives("// @argus stats\nkernel void argus_draw() {}").stats);
+    try std.testing.expect(!parseDirectives("// @argus state 4x4\nkernel void argus_draw() {}").stats);
+
+    // Each texel of a 16x1 output is one field read back from the ArgusStats the kernel sees.
+    const src =
+        \\// @argus stats
+        \\kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]], constant ArgusStats& s [[buffer(1)]],
+        \\                       texture2d<float, access::write> out [[texture(0)]], uint2 gid [[thread_position_in_grid]]) {
+        \\    if (gid.x >= out.get_width() || gid.y >= out.get_height()) return;
+        \\    const float v[16] = { float(s.seq), s.sample_dt, float(s.thermal), s.cpu_total, s.cpu_core[0],
+        \\        s.cpu_core[31], s.mem_total_gb, float(s.mem_pressure), s.gpu_busy, s.battery_minutes,
+        \\        s.net_tx_bps, s.disk_total_gb, float(s.proc_count), float(s.procs[4].name[0]),
+        \\        s.procs[4].mem_gb, float(sizeof(ArgusStats)) };
+        \\    out.write(float4(v[gid.x]), gid);
+        \\}
+    ;
+    var err_buf: [2048]u8 = undefined;
+    var t = Theme.compile(src, "stats_layout.metal", null, 16, 1, 1, &err_buf) catch |e| {
+        std.debug.print("{s}\n", .{std.mem.sliceTo(&err_buf, 0)});
+        return e;
+    };
+    defer t.deinit();
+    try std.testing.expect(t.dir.stats);
+    const out = mtl.newTexture(t.dev, mtl.PIXEL_RGBA32F, 16, 1, mtl.STORAGE_SHARED);
+    defer mtl.release(out);
+    const readBack = struct {
+        fn f(th: *Theme, o: mtl.Id) ![16]f32 {
+            const cb = mtl.msg(mtl.Id, th.queue, "commandBuffer", .{});
+            th.encode(cb, o, 1.0 / 30.0);
+            mtl.msg(void, cb, "commit", .{});
+            mtl.msg(void, cb, "waitUntilCompleted", .{});
+            var px: [16 * 4]f32 = undefined;
+            mtl.msg(void, o, "getBytes:bytesPerRow:fromRegion:mipmapLevel:", .{
+                @as(*anyopaque, @ptrCast(&px)), @as(usize, 16 * 16), mtl.MTLRegion{ .x = 0, .y = 0, .z = 0, .w = 16, .h = 1, .d = 1 }, @as(usize, 0),
+            });
+            var r: [16]f32 = undefined;
+            for (&r, 0..) |*x, i| x.* = px[i * 4];
+            return r;
+        }
+    }.f;
+
+    // Synthetic (the harness): seq 1 on tick 0, 2 from tick 30.
+    try std.testing.expectEqual(@as(f32, 1), (try readBack(&t, out))[0]);
+    for (0..30) |_| _ = try readBack(&t, out);
+    try std.testing.expectEqual(@as(f32, 2), (try readBack(&t, out))[0]);
+
+    // Live (the app): exactly what was copied in.
+    var s: argus_stats.Stats = .{ .seq = 7, .sample_dt = 1.25, .thermal = 2, .cpu_total = 0.5, .mem_total_gb = 8, .mem_pressure = 1, .gpu_busy = 0.75, .battery_minutes = 95, .net_tx_bps = 4096, .disk_total_gb = 494.5, .proc_count = 5 };
+    s.cpu_core[0] = 0.25;
+    s.cpu_core[31] = 0.125;
+    s.procs[4].setName("Zed");
+    s.procs[4].mem_gb = 1.5;
+    t.stats = s;
+    t.stats_live = true;
+    const want = [16]f32{ 7, 1.25, 2, 0.5, 0.25, 0.125, 8, 1, 0.75, 95, 4096, 494.5, 5, 'Z', 1.5, @sizeOf(argus_stats.Stats) };
+    try std.testing.expectEqualSlices(f32, &want, &(try readBack(&t, out)));
 }
