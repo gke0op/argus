@@ -59,9 +59,20 @@
 //     chloromelanite, red jasper, blue agate, sugilite; aquamarine, lapis, smoky quartz for the
 //     outer three), a gold Sun, a mother-of-pearl Moon;
 //   - the studio: a camera 4 dial radii above the centre (so each pixel sees the lights from its own
-//     angle), a softbox upper left drifting +-6 deg (periods 96, 240 and 150 s, so the 4 h clock wrap
-//     is seamless), a strip light right, a light tent with a dark lens port; every colour, roughness
-//     and exposure; one night-blue enamel for all twelve signs; copper crystals in cobalt glass;
+//     angle); a key softbox upper left (a bright core in a softer diffuser) drifting +-6 deg (periods
+//     96, 240 and 150 s, so the 4 h clock wrap is seamless); a wide cool fill softbox right; a light
+//     tent with seams, darker toward the horizon, and a dark lens port; four room lamps low on the
+//     horizon at irregular azimuths, widths and strengths; every light an area, widened by the lobe
+//     (never point-sampled); every colour, roughness and exposure;
+//   - materials: Fresnel integrated over the GGX lobe (Karis 2014's analytic environment BRDF), so
+//     edges never go "wet"; only metal is near-mirror. The bezel is one continuous polished bead whose
+//     curvature widens its lobe and whose inner flank reflects the dial; the chapter ring is circular-
+//     brushed (lobe stretched across the grooves: a radial bow-tie highlight); deep cobalt enamel (linear
+//     ~0.01, 0.03, 0.22) with the guilloche showing through as brightness and a GGX-0.1 clear coat;
+//     applied gold casts soft shadows; gems cast and contact shadows; the dial sits on dark velvet in
+//     the key's pool of light, with pile, a nap faded below ~3 px, and the dial's cast shadow (approach
+//     after Roulette_Chrome's: environment first, satin over gloss, contact shadows over texture);
+//     copper crystals in cobalt glass;
 //   - the look-ahead: at 30 s after load, then every 300 s, +30 days, 14 + 3 + 5 s, eased; the
 //     previewed instant is computed exactly like now (the same kernels, the clock offset); the date
 //     shown is local (f.utc_offset_s); events and their latches pause and resume on return;
@@ -105,10 +116,10 @@
 // rate, display angle (row 832), event (833), the 45 aspect pairs (834), the Moon's phase (835) and
 // the latched event times (846). The calendar date: H. Hinnant's days-to-civil algorithm.
 // argus_draw is analytic: no march.
-// Cost (harness, 1920x1200, a busy machine: load 2.5-4, so as ratios to Night Tide measured
-// alongside): 1.1-1.8 ms back-to-back (0.44-0.52x Night Tide; the step ~0.04-0.14 ms of it); paced
-// 2.0-3.6 ms at 30 FPS, 2.4 ms at 60, 2.7 ms at 120 (PASS at all three). No bake was needed: the draw
-// is analytic and branches by ring.
+// Cost (harness, 1920x1200, on a busy machine, so as ratios to Night Tide measured alongside):
+// 1.1-1.4 ms back-to-back (0.44-0.53x Night Tide; the step ~0.04-0.14 ms of it); paced 0.4-0.9x
+// Night Tide (2.0-6.6 ms at load 2.5-5); PASS at 30, 60 and 120 FPS. No bake was needed: the draw is
+// analytic and branches by ring.
 // @argus state 512x847 float32
 // @argus data Aventurine_Horoscope.bin 512x832 rgba8
 
@@ -420,9 +431,9 @@ kernel void argus_step(constant ArgusFrame& f [[buffer(0)]], texture2d<float, ac
 // Dial units: radius 1 = the bezel's outer edge. Chart convention: 0 Aries at 9 o'clock, longitude
 // counter-clockwise. The camera looks straight down from CAM_D dial radii; z points at it.
 constant float PI_F = 3.14159265f;
-constant float DIAL_R = 0.86f, DIAL_Y = 0.025f;     // of the screen's half-height; centre raised a little
+constant float DIAL_R = 0.805f, DIAL_Y = 0.025f;     // of the screen's half-height; centre raised a little
 constant float CAM_D = 4.0f;
-constant float R_BEZ = 0.925f, R_FL = 0.905f, R_Z1 = 0.898f, R_Z0 = 0.776f, R_D0 = 0.726f;
+constant float R_OUT = 1.075f, R_Z1 = 0.898f, R_Z0 = 0.776f, R_D0 = 0.726f;
 constant float R_GEM = 0.668f, R_LG = 0.600f, R_ASP = 0.325f;
 constant float R_MED = 0.150f, R_MEDB = 0.172f;
 constant int G_RX = 22, G_DIG = 23, G_DEG = 33, G_d = 34, G_h = 35, G_D = 36, G_ARROW = 37, G_S = 38, G_R = 39;
@@ -480,16 +491,19 @@ static float text_px(texture2d<float> st, thread const int* ids, int n, float2 p
     return d;
 }
 
-// --- the studio: a light tent with a dark lens port overhead, one softbox upper left (drifting), a
-// strip light right; V is this pixel's direction to the camera
-struct Studio { float3 sb; float3 sbx; float3 sby; float3 st; float3 V; };
+// --- the studio: a light tent with a dark lens port overhead, a key softbox upper left (drifting), a
+// wide fill softbox right, the tent's seams and a few lamps of the room low on the horizon (irregular,
+// so reflections never repeat). Lights are areas, widened by the lobe (rough) and never point-sampled.
+// V is this pixel's direction to the camera.
+struct Studio { float3 sb; float3 sbx; float3 sby; float3 st; float3 stx; float3 sty; float3 V; };
 static inline Studio studio(float t) {
     Studio S;
     const float az = (135.0f + 6.0f * sin(TAU * t / 96.0f) + 3.0f * sin(TAU * t / 240.0f + 1.0f)) * D2R;
     const float el = (52.0f + 3.0f * sin(TAU * t / 150.0f)) * D2R;
     S.sb = float3(cos(el) * cos(az), cos(el) * sin(az), sin(el));
     S.sbx = normalize(cross(float3(0, 0, 1), S.sb)); S.sby = cross(S.sb, S.sbx);
-    S.st = normalize(float3(0.93f, -0.12f, 0.36f));
+    S.st = normalize(float3(0.80f, -0.30f, 0.52f));
+    S.stx = normalize(cross(float3(0, 0, 1), S.st)); S.sty = cross(S.st, S.stx);
     S.V = float3(0, 0, 1);
     return S;
 }
@@ -499,27 +513,47 @@ static inline float rect_light(float3 d, float3 c, float3 ax, float3 ay, float h
     const float u = dot(d, ax) / k, v = dot(d, ay) / k;
     return (1.0f - smoothstep(hx - soft, hx + soft, abs(u))) * (1.0f - smoothstep(hy - soft, hy + soft, abs(v)));
 }
+constant float LAMP_AZ[4] = {0.40f, 1.25f, 2.90f, 5.00f}, LAMP_W[4] = {0.45f, 0.25f, 0.60f, 0.40f}, LAMP_S[4] = {1.0f, 0.55f, 0.8f, 0.7f};
 static float3 env(float3 d, float rough, Studio S) {
-    const float soft = 0.02f + rough * 0.9f;
-    float3 c = float3(0.003f, 0.003f, 0.005f);
-    if (d.z > 0.0f) {
+    const float soft = 0.04f + rough * 0.9f;
+    float3 c = float3(0.004f, 0.0035f, 0.005f) * (1.0f + 2.0f * sat(d.z + 0.3f));   // the dark velvet below
+    if (d.z > -0.05f) {
+        const float az = atan2(d.y, d.x), elv = asin(clamp(d.z, -1.0f, 1.0f));
+        // the tent: brighter toward the key, its seams and folds a low-frequency unevenness
         const float port = smoothstep(0.90f - rough * 0.3f, 0.975f, d.z);
-        c = mix(float3(0.20f, 0.195f, 0.19f) * (0.5f + 0.7f * sat(dot(d, S.sb))), float3(0.010f), port);
-        c += float3(1.0f, 0.95f, 0.88f) * 5.0f * rect_light(d, S.sb, S.sbx, S.sby, 0.30f, 0.21f, soft) * (1.0f - rough * 0.6f);
-        c += float3(0.95f, 0.97f, 1.0f) * 1.3f * rect_light(d, S.st, normalize(cross(float3(0, 0, 1), S.st)), float3(0, 0, 1) - S.st * S.st.z, 0.05f, 0.40f, soft) * (1.0f - rough * 0.6f);
-        c += float3(1.0f, 0.95f, 0.88f) * rough * 0.9f * pow(sat(dot(d, S.sb)), 4.0f);   // a satin lobe sees the box's glow
+        const float fold = 0.78f + 0.22f * argus_noise(float2(az * 1.6f, elv * 2.2f));
+        c = mix(float3(0.16f, 0.155f, 0.15f) * (0.45f + 0.75f * sat(dot(d, S.sb))) * fold, float3(0.010f), port) * (0.15f + 0.85f * smoothstep(0.15f, 0.75f, d.z));
+        // key softbox (a bright core inside a softer diffuser) and a wide cool fill
+        c += float3(1.0f, 0.95f, 0.88f) * (3.6f * rect_light(d, S.sb, S.sbx, S.sby, 0.22f, 0.15f, soft)
+                                         + 1.6f * rect_light(d, S.sb, S.sbx, S.sby, 0.32f, 0.24f, soft + 0.06f)) * (1.0f - rough * 0.6f);
+        c += float3(0.92f, 0.96f, 1.0f) * 0.75f * rect_light(d, S.st, S.stx, S.sty, 0.26f, 0.34f, soft + 0.05f) * (1.0f - rough * 0.5f);
+        // lamps of the room, low on the horizon at irregular azimuths, widths and strengths
+        for (int i = 0; i < 4; i++) {
+            const float da = abs(fract((az - LAMP_AZ[i]) / TAU + 0.5f) - 0.5f) * TAU;
+            const float w = LAMP_W[i] * 0.35f + rough * 0.8f;
+            c += float3(1.0f, 0.78f, 0.52f) * LAMP_S[i] * 0.35f * exp(-(da * da) / (w * w)) * exp(-pow((elv - 0.16f) / (0.06f + rough * 0.6f), 2.0f));
+        }
+        c += float3(1.0f, 0.95f, 0.88f) * rough * 0.8f * pow(sat(dot(d, S.sb)), 4.0f);   // a satin lobe sees the box's glow
     }
     return c;
 }
 static inline float3 irr(float3 n, Studio S) {      // diffuse light on a matte surface
-    return float3(0.16f) * (0.55f + 0.45f * n.z) + float3(1.0f, 0.95f, 0.88f) * 0.42f * sat(dot(n, S.sb)) + 0.03f * sat(dot(n, S.st));
+    return float3(0.16f) * (0.55f + 0.45f * n.z) + float3(1.0f, 0.95f, 0.88f) * 0.42f * sat(dot(n, S.sb)) + 0.06f * sat(dot(n, S.st));
 }
 static inline float3 schlick(float3 F0, float c) { return F0 + (1.0f - F0) * pow(1.0f - sat(c), 5.0f); }
+// Fresnel integrated over a GGX lobe (Karis 2014's analytic environment BRDF): an edge seen edge-on
+// reaches ~0.4 for a satin surface, not Schlick's 1, so nothing goes "wet"
+static inline float3 env_brdf(float3 F0, float rough, float ndv) {
+    const float4 rr = rough * float4(-1.0f, -0.0275f, -0.572f, 0.022f) + float4(1.0f, 0.0425f, 1.04f, -0.04f);
+    const float a = min(rr.x * rr.x, exp2(-9.28f * sat(ndv))) * rr.x + rr.y;
+    const float2 AB = float2(-1.04f, 1.04f) * a + rr.zw;
+    return F0 * AB.x + AB.y;
+}
 static inline float3 refl(float3 n, Studio S) { return reflect(-S.V, n); }
 
 constant float3 ROSE = float3(0.92f, 0.58f, 0.45f);
 static inline float3 gold(float3 n, float rough, Studio S) {
-    return schlick(ROSE, dot(n, S.V)) * env(refl(n, S), rough, S);
+    return env_brdf(ROSE, max(rough, 0.04f), dot(n, S.V)) * env(refl(n, S), rough, S);
 }
 
 // --- the Moon medallion: NASA's LROC colour map on a sphere lit at the real phase angle
@@ -586,29 +620,77 @@ static inline int digits(thread int* ids, int n, int v) {
     return n;
 }
 
+// the label block of body b (glyph; degree, sign and Rx; the coming event): signed distances in px of
+// (gold text, the Rx, the event line), so it can be drawn and also cast its shadow
+static float3 label_d(texture2d<float> st, float2 p, int b, float lam_b, float disp, float4 ev, float pvw, float ppu) {
+    const float2 lg = CP(disp, R_LG);
+    const float cx = abs(cos((180.0f + disp) * D2R));            // 1 where the stack runs sideways
+    const float sp = 0.056f + 0.058f * cx;
+    float d = glyph_px(st, 12 + b, (p - lg) / 0.074f, 0.074f * ppu);
+    int ids[8];
+    int n = digits(ids, 0, int(fmod(lam_b, 30.0f)));
+    ids[n++] = G_DEG; ids[n++] = int(lam_b / 30.0f) % 12;
+    const bool rx = ev.w > 0.5f;
+    const float s2 = 0.046f;
+    float w = 0.0f;
+    for (int i = 0; i < n; i++) w += adv(ids[i]);
+    const float rxs = b == 2 ? 1.25f : 1.0f;                                // Mercury's Rx a little larger
+    const float wt = w + (rx ? 0.15f + 0.78f * rxs : 0.0f);
+    const float2 lc = CP(disp, R_LG - sp);
+    d = min(d, text_px(st, ids, n, p, lc + float2((w - wt) * 0.5f * s2, 0.0f), s2, ppu));
+    float dr = 99.0f;
+    if (rx) dr = glyph_px(st, G_RX, (p - lc - float2((0.5f * wt - 0.39f * rxs) * s2, 0.0f)) / (s2 * rxs), s2 * rxs * ppu);
+    float de = 99.0f;
+    if (ev.x > 0.5f && pvw < 0.5f) {
+        const float hrs = ev.y;
+        int m = 0;
+        if (ev.x == 1.0f) { ids[m++] = G_ARROW; ids[m++] = int(ev.z); }
+        else { ids[m++] = G_S; ids[m++] = ev.x == 2.0f ? G_R : G_D; }
+        ids[m++] = -1;
+        const bool days = hrs >= 23.0f;
+        m = digits(ids, m, days ? int(hrs / 24.0f + 0.5f) : max(1, int(ceil(hrs))));
+        ids[m++] = days ? G_d : G_h;
+        // toward the centre at the top and bottom, straight below the degree line at the sides
+        const float2 ep = lc + mix(-CP(disp, 1.0f) * 0.052f, float2(0.0f, -0.046f), cx * cx);
+        de = text_px(st, ids, m, p, ep, 0.036f, ppu);
+    }
+    return float3(d, dr, de);
+}
+
 static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float ppu, Studio S) {
     const float r = length(p);
     const float aa = 1.0f / ppu;
     const float2 rad = r > 1e-5f ? p / r : float2(1, 0);
     const float lam = wrap360(atan2(p.y, p.x) * R2D - 180.0f);
-    // ---- outside the dial: dark velvet, the dial's soft shadow toward the lower right
-    if (r > 1.0f + aa) {
-        const float sh = smoothstep(0.98f, 1.16f, length(p - float2(0.035f, -0.05f)));
-        const float n = 0.80f + 0.20f * argus_noise(p * 700.0f) * (0.6f + 0.4f * argus_noise(p * 31.0f + 3.0f));
-        return float3(0.0045f, 0.0045f, 0.0075f) * n * (0.35f + 0.65f * sh) * (1.15f - 0.25f * length(p) / 1.8f);
+    const float2 kd = normalize(S.sb.xy);                                         // toward the key light
+    // ---- outside the dial: dark velvet in the key's pool of light, its pile and nap (faded to the mean
+    // below ~3 px), the dial's soft cast shadow and contact darkening
+    if (r > R_OUT + aa) {
+        const float pool = 0.35f + 0.85f * exp(-dot(p - kd * 0.75f, p - kd * 0.75f) / 1.6f);
+        const float pile = 0.82f + 0.18f * argus_noise(p * float2(2.6f, 3.4f) + 7.0f);   // brushed patches
+        const float nap_fade = sat((ppu / 170.0f - 1.5f) / 2.0f);
+        const float nap = (argus_noise(p * float2(170.0f, 120.0f)) * 0.6f + argus_noise(p * 60.0f + 3.0f) * 0.4f) * nap_fade;
+        const float2 off = -kd * (0.075f / max(tan(asin(S.sb.z)), 0.3f));
+        const float shd = smoothstep(R_OUT - 0.04f, R_OUT + 0.13f, length(p - off));
+        const float ao = 0.50f + 0.50f * smoothstep(R_OUT, R_OUT + 0.06f, r);
+        return float3(0.0085f, 0.0078f, 0.0140f) * irr(float3(0, 0, 1), S) * 2.0f * pool * pile * (1.0f + 0.10f * nap) * (0.40f + 0.60f * shd) * ao;
     }
-    // ---- bezel: polished rose gold, a rounded profile
-    if (r > R_BEZ) {
-        const float t = clamp((r - 0.5f * (R_BEZ + 1.0f)) / (0.5f * (1.0f - R_BEZ)), -1.0f, 1.0f);
-        const float3 n = normalize(float3(rad * t * 0.96f, sqrt(max(1.0f - 0.92f * t * t, 0.02f))));
-        float3 c = gold(n, 0.03f, S);
-        c *= smoothstep(0.0f, 2.5f * aa, r - R_BEZ) * 0.7f + 0.3f;                 // the seam
-        return mix(c, float3(0.004f), smoothstep(1.0f - aa, 1.0f + aa, r));
-    }
-    // ---- inner flange: a bevel sloping down to the enamel
-    if (r > R_FL) {
-        const float3 n = normalize(float3(-rad * 0.55f, 0.83f));
-        return gold(n, 0.10f, S) * (0.8f + 0.2f * smoothstep(R_FL, R_BEZ, r));
+    // ---- bezel: one continuous bead of polished rose gold, from the enamel up to its crest and down to
+    // the cloth; its curvature widens the reflected lobe, and the inner flank reflects the dial itself
+    if (r > R_Z1) {
+        const float RBC = 0.975f;
+        const float half_w = r < RBC ? RBC - R_Z1 : R_OUT - RBC;
+        const float t = clamp((r - RBC) / half_w, -1.0f, 1.0f);
+        const float ang = t * 1.25f;
+        const float3 n = normalize(float3(rad * sin(ang), cos(ang)));
+        const float rough = 0.035f + 1.0f * 1.25f / (half_w * ppu);
+        const float3 R = refl(n, S);
+        float3 e = env(R, rough, S);
+        const float toward = sat(-dot(R.xy, rad) * 2.0f) * sat(1.0f - R.z * 1.4f);
+        e = mix(e, float3(0.010f, 0.022f, 0.12f), toward);
+        float3 c = env_brdf(ROSE, rough, dot(n, S.V)) * e;
+        c *= 0.55f + 0.45f * smoothstep(0.0f, 0.010f, r - R_Z1);                // where it meets the enamel
+        return mix(c, float3(0.003f), smoothstep(R_OUT - aa, R_OUT + aa, r));
     }
     // ---- zodiac ring: translucent night-blue enamel over a flinqué sunburst, gold signs, cloisonné
     if (r > R_Z0) {
@@ -618,19 +700,21 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
         const float ph = a * 880.0f;
         const float groove = 0.5f + 0.5f * cos(ph);                               // 1 in a groove
         const float3 ng = normalize(float3(tang * 0.13f * sin(ph) + rad * 0.05f * sin(r * 520.0f), 1.0f));
-        const float3 under = float3(0.95f, 0.93f, 0.88f) * env(refl(ng, S), 0.28f, S);
-        const float3 T = float3(0.05f, 0.12f, 0.60f);
-        const float thick = 2.0f + 1.2f * groove;                                 // deeper glass in the grooves
-        float3 c = under * pow(T, float3(thick));
-        // the fired glass is gently domed across the ring: one clean band of the lights moves on it
+        // deep cobalt glass; the engraving shows through as brightness, darker where the glass is deeper
+        const float lu = dot(env(refl(ng, S), 0.28f, S), float3(0.3f, 0.5f, 0.2f));
+        float3 c = float3(0.010f, 0.030f, 0.22f) * (0.12f + 0.55f * lu) * (1.15f - 0.35f * groove);
+        // the fired glass is gently domed across the ring: a clear coat (GGX ~0.1) catches the lights
         const float u = (r - 0.5f * (R_Z0 + R_Z1)) / (0.5f * (R_Z1 - R_Z0));
         const float3 ns = normalize(float3(rad * u * 0.22f, 1.0f));
-        c += schlick(float3(0.045f), dot(ns, S.V)) * env(refl(ns, S), 0.03f, S);
+        c += env_brdf(float3(0.04f), 0.10f, dot(ns, S.V)) * env(refl(ns, S), 0.10f, S);
+        c *= 0.55f + 0.45f * smoothstep(0.0f, 0.016f, R_Z1 - r);                // the bezel's shadow on the glass
         // gold sign glyph, upright, applied in relief
         const float lm = float(sg) * 30.0f + 15.0f;
         const float2 gc = CP(lm, 0.5f * (R_Z0 + R_Z1));
         const float gs = 0.090f;
         const float d = glyph_px(st, sg, (p - gc) / gs, gs * ppu);
+        const float dsh = glyph_px(st, sg, (p + kd * 0.0035f - gc) / gs, gs * ppu);   // applied: it casts a shadow
+        c *= 1.0f - 0.55f * sat(1.0f - (dsh + 1.0f) / 4.0f);
         if (d < 1.5f) {
             const float dx = glyph_px(st, sg, (p + float2(aa, 0) - gc) / gs, gs * ppu) - d;
             const float dy = glyph_px(st, sg, (p + float2(0, aa) - gc) / gs, gs * ppu) - d;
@@ -654,7 +738,11 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
     }
     // ---- chapter ring: polished rose gold with fine circular graining, engraved degrees filled black
     if (r > R_D0) {
-        float3 c = gold(normalize(float3(rad * 0.03f * sin(r * 2400.0f), 1.0f)), 0.30f, S);
+        // circular brushing: grooves run round the ring, so the lobe is stretched across them (radially),
+        // and the lights show as a soft radial "bow tie"
+        float3 c = float3(0.0f);
+        for (int k = -2; k <= 2; k++) c += gold(normalize(float3(rad * 0.16f * float(k), 1.0f)), 0.14f, S);
+        c *= 0.2f;
         const float dd = abs(fract(lam + 0.5f) - 0.5f) * D2R * r;
         const float di = floor(lam + 0.5f);
         const float len = fmod(di, 30.0f) == 0.0f ? 1.0f : fmod(di, 10.0f) == 0.0f ? 0.62f : fmod(di, 5.0f) == 0.0f ? 0.44f : 0.24f;
@@ -771,7 +859,8 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
         // soft contact shadow, the collet, the cabochon
         const float dg = length(p - gc);
         if (dg < gr * 1.6f + 0.02f) {
-            c *= 1.0f - 0.45f * (1.0f - smoothstep(gr * 0.85f, gr * 1.4f, length(p - gc - float2(0.006f, -0.008f))));
+            c *= 1.0f - 0.60f * (1.0f - smoothstep(gr * 0.80f, gr * 1.55f, length(p - gc + kd * 0.010f)));   // cast
+            c *= 1.0f - 0.35f * (1.0f - smoothstep(gr * 1.0f, gr * 1.25f, dg));                                // contact
             if (dg < gr * 1.10f) {
                 if (dg > gr) {
                     const float t = (dg - gr * 1.05f) / (gr * 0.05f);
@@ -789,42 +878,17 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
         const float2 lg = CP(disp, R_LG);
         if (length(p - lg) < 0.26f) {
             const float4 ev = st.read(uint2(b, ROW_EVENT));
-            const float cx = abs(cos((180.0f + disp) * D2R));            // 1 where the stack runs sideways
-            const float sp = 0.056f + 0.058f * cx;
-            float d = glyph_px(st, 12 + b, (p - lg) / 0.074f, 0.074f * ppu);
-            int ids[8];
-            int n = digits(ids, 0, int(fmod(lam_b, 30.0f)));
-            ids[n++] = G_DEG; ids[n++] = int(lam_b / 30.0f) % 12;
-            const bool rx = ev.w > 0.5f;
-            const float s2 = 0.046f;
-            float w = 0.0f;
-            for (int i = 0; i < n; i++) w += adv(ids[i]);
-            const float rxs = b == 2 ? 1.25f : 1.0f;                                // Mercury's Rx a little larger
-            const float wt = w + (rx ? 0.15f + 0.78f * rxs : 0.0f);
-            const float2 lc = CP(disp, R_LG - sp);
-            d = min(d, text_px(st, ids, n, p, lc + float2((w - wt) * 0.5f * s2, 0.0f), s2, ppu));
-            float dr = 99.0f;
-            if (rx) dr = glyph_px(st, G_RX, (p - lc - float2((0.5f * wt - 0.39f * rxs) * s2, 0.0f)) / (s2 * rxs), s2 * rxs * ppu);
-            float de = 99.0f;
-            if (ev.x > 0.5f && pv.y < 0.5f) {
-                const float hrs = ev.y;
-                int m = 0;
-                if (ev.x == 1.0f) { ids[m++] = G_ARROW; ids[m++] = int(ev.z); }
-                else { ids[m++] = G_S; ids[m++] = ev.x == 2.0f ? G_R : G_D; }
-                ids[m++] = -1;
-                const bool days = hrs >= 23.0f;
-                m = digits(ids, m, days ? int(hrs / 24.0f + 0.5f) : max(1, int(ceil(hrs))));
-                ids[m++] = days ? G_d : G_h;
-                // toward the centre at the top and bottom, straight below the degree line at the sides
-                const float2 ep = lc + mix(-CP(disp, 1.0f) * 0.052f, float2(0.0f, -0.046f), cx * cx);
-                de = text_px(st, ids, m, p, ep, 0.036f, ppu);
-            }
+            const float3 L = label_d(st, p, b, lam_b, disp, ev, pv.y, ppu);
+            const float d = L.x, dr = L.y, de = L.z;
+            // applied gold casts a soft shadow away from the key
+            const float3 Ls = label_d(st, p + kd * 0.0032f, b, lam_b, disp, ev, pv.y, ppu);
+            c *= 1.0f - 0.5f * sat(1.0f - (min(min(Ls.x, Ls.y), Ls.z) + 1.0f) / 4.0f);
             // gold in relief: a soft bevel from the distance field
             const float dm = min(d, de);
             const float bv = sat(1.0f + dm / 1.5f);
             if (dm < 1.5f) c = mix(c, gold(normalize(float3(-0.08f * bv, 0.08f * bv, 1.0f)), 0.42f, S) * (de < d ? 0.80f : 1.0f), sat(0.5f - dm));
             // garnet enamel Rx
-            if (dr < 1.5f) c = mix(c, float3(0.30f, 0.012f, 0.016f) * (irr(float3(0, 0, 1), S) + 0.30f) + 0.045f * env(refl(float3(0, 0, 1), S), 0.02f, S), sat(0.5f - dr));
+            if (dr < 1.5f) c = mix(c, float3(0.35f, 0.03f, 0.03f) * (irr(float3(0, 0, 1), S) * 0.8f + 0.12f) + env_brdf(float3(0.04f), 0.15f, S.V.z) * env(refl(float3(0, 0, 1), S), 0.15f, S), sat(0.5f - dr));
         }
     }
     return c;
