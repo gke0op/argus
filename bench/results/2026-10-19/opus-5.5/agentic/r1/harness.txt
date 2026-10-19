@@ -1,0 +1,139 @@
+### pass 1 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/opus_55_agentic_r1/opus_55_agentic_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2578.6 us (387.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 7301.4 us
+ Allocs at Init    : 1 (16242592 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303996 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1344154 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/opus_55_agentic_r1/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 2 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/opus_55_agentic_r1/opus_55_agentic_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 3611.3 us (276.9 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 14305.7 us
+ Allocs at Init    : 1 (16242592 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303996 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1344154 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/opus_55_agentic_r1/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 3 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/opus_55_agentic_r1/opus_55_agentic_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 3478.4 us (287.5 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 10319.7 us
+ Allocs at Init    : 1 (16242592 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303996 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1344154 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/opus_55_agentic_r1/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 4 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/opus_55_agentic_r1/opus_55_agentic_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2724.4 us (367.1 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 17933.2 us
+ Allocs at Init    : 1 (16242592 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303996 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1344154 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/opus_55_agentic_r1/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 5 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/opus_55_agentic_r1/opus_55_agentic_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2572.1 us (388.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 4211.8 us
+ Allocs at Init    : 1 (16242592 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303996 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1344154 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/opus_55_agentic_r1/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 6 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/opus_55_agentic_r1/opus_55_agentic_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2941.5 us (340.0 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 5230.8 us
+ Allocs at Init    : 1 (16242592 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303996 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1344154 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/opus_55_agentic_r1/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 7 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/opus_55_agentic_r1/opus_55_agentic_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2635.0 us (379.5 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 3645.7 us
+ Allocs at Init    : 1 (16242592 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303996 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1344154 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/opus_55_agentic_r1/frame.png
+ Verdict           : PASS
+========================================================================

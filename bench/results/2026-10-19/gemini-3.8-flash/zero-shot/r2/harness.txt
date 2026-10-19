@@ -1,0 +1,139 @@
+### pass 1 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/gemini_38_flash_zero_shot_r2/gemini_38_flash_zero_shot_r2.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 1000.1 us (999.9 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 1954.7 us
+ Allocs at Init    : 1 (10629984 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2293329 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 165689 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/gemini_38_flash_zero_shot_r2/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 2 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/gemini_38_flash_zero_shot_r2/gemini_38_flash_zero_shot_r2.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 1468.4 us (681.0 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 10106.4 us
+ Allocs at Init    : 1 (10629984 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2293329 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 165689 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/gemini_38_flash_zero_shot_r2/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 3 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/gemini_38_flash_zero_shot_r2/gemini_38_flash_zero_shot_r2.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 932.2 us (1072.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 1527.0 us
+ Allocs at Init    : 1 (10629984 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2293329 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 165689 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/gemini_38_flash_zero_shot_r2/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 4 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/gemini_38_flash_zero_shot_r2/gemini_38_flash_zero_shot_r2.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 921.4 us (1085.3 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 1449.3 us
+ Allocs at Init    : 1 (10629984 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2293329 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 165689 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/gemini_38_flash_zero_shot_r2/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 5 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/gemini_38_flash_zero_shot_r2/gemini_38_flash_zero_shot_r2.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 1718.3 us (582.0 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 5796.5 us
+ Allocs at Init    : 1 (10629984 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2293329 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 165689 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/gemini_38_flash_zero_shot_r2/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 6 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/gemini_38_flash_zero_shot_r2/gemini_38_flash_zero_shot_r2.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 1891.2 us (528.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 9584.1 us
+ Allocs at Init    : 1 (10629984 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2293329 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 165689 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/gemini_38_flash_zero_shot_r2/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 7 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/gemini_38_flash_zero_shot_r2/gemini_38_flash_zero_shot_r2.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 1648.0 us (606.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 3688.3 us
+ Allocs at Init    : 1 (10629984 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2293329 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 165689 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/gemini_38_flash_zero_shot_r2/frame.png
+ Verdict           : PASS
+========================================================================

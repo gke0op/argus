@@ -1,0 +1,14 @@
+{
+  "model_ids": [
+    "gemini-3.8-flash-high"
+  ],
+  "harness": "Antigravity CLI 1.4.0 via the local agy bridge",
+  "receipt_state": "completed",
+  "started_utc": "2026-10-19T17:12:04.823278Z",
+  "wall_seconds": 271,
+  "tool_calls": [
+    "write_to_file"
+  ],
+  "tool_rule_kept": true,
+  "fence_stripped": false
+}

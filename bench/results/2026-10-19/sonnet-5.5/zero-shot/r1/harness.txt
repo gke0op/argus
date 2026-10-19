@@ -1,0 +1,139 @@
+### pass 1 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/sonnet_55_zero_shot_r1/sonnet_55_zero_shot_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2682.1 us (372.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 6184.3 us
+ Allocs at Init    : 1 (1754112 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2276428 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2276409 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/sonnet_55_zero_shot_r1/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 2 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/sonnet_55_zero_shot_r1/sonnet_55_zero_shot_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2674.0 us (374.0 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 5968.9 us
+ Allocs at Init    : 1 (1754112 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2276428 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2276409 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/sonnet_55_zero_shot_r1/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 3 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/sonnet_55_zero_shot_r1/sonnet_55_zero_shot_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2925.7 us (341.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 10002.2 us
+ Allocs at Init    : 1 (1754112 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2276428 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2276409 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/sonnet_55_zero_shot_r1/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 4 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/sonnet_55_zero_shot_r1/sonnet_55_zero_shot_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 4019.8 us (248.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 8251.9 us
+ Allocs at Init    : 1 (1754112 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2276428 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2276409 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/sonnet_55_zero_shot_r1/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 5 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/sonnet_55_zero_shot_r1/sonnet_55_zero_shot_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2626.2 us (380.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 5553.2 us
+ Allocs at Init    : 1 (1754112 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2276428 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2276409 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/sonnet_55_zero_shot_r1/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 6 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/sonnet_55_zero_shot_r1/sonnet_55_zero_shot_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2831.0 us (353.2 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 6124.1 us
+ Allocs at Init    : 1 (1754112 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2276428 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2276409 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/sonnet_55_zero_shot_r1/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 7 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/sonnet_55_zero_shot_r1/sonnet_55_zero_shot_r1.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 2409.3 us (415.1 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 8741.6 us
+ Allocs at Init    : 1 (1754112 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2276428 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2276409 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/sonnet_55_zero_shot_r1/frame.png
+ Verdict           : PASS
+========================================================================

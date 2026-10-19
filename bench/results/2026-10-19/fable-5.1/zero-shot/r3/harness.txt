@@ -1,0 +1,139 @@
+### pass 1 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 8209.5 us (121.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 21050.7 us
+ Allocs at Init    : 1 (1463544 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303970 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2086708 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/fable_51_zero_shot_r3/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 2 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 6631.9 us (150.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 15879.8 us
+ Allocs at Init    : 1 (1463544 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303970 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2086708 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/fable_51_zero_shot_r3/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 3 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 5092.3 us (196.4 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 14629.5 us
+ Allocs at Init    : 1 (1463544 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303970 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2086708 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/fable_51_zero_shot_r3/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 4 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 4503.0 us (222.1 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 9475.2 us
+ Allocs at Init    : 1 (1463544 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303970 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2086708 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/fable_51_zero_shot_r3/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 5 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 6672.9 us (149.9 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 28067.8 us
+ Allocs at Init    : 1 (1463544 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303970 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2086708 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/fable_51_zero_shot_r3/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 6 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 5825.7 us (171.7 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 12818.4 us
+ Allocs at Init    : 1 (1463544 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303970 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2086708 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/fable_51_zero_shot_r3/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 7 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/fable_51_zero_shot_r3/fable_51_zero_shot_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 5347.4 us (187.0 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 11854.3 us
+ Allocs at Init    : 1 (1463544 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2303970 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 2086708 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/fable_51_zero_shot_r3/frame.png
+ Verdict           : PASS
+========================================================================

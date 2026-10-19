@@ -13,6 +13,7 @@ Every theme frame is rendered offline by the themes' own code on the GPU path th
 | `social-card.png` | 0.3 MB | 1280×640 GitHub social preview. Cygnus A rendered at 3840×1920, cropped and scaled |
 | `popover.png` | 0.16 MB | The menu-bar popover (Spaces strip) with the seven shipped themes, 1360×196 (2×) |
 | `settings.png` | 0.04 MB | The popover's Settings view, 1360×196 (2×) |
+| `bench-leaderboard.png` | 0.9 MB | ARGUS-BENCH 2026-10-19: frame 120 of the best run per model and mode by the scorecard, 320×200 tiles of the harness frames (CPU path). Made by `bench/contact_sheet.py`; see `docs/notes/bench-leaderboard.md` |
 
 ## Cygnus_A (clip, GIF, stills, card)
 

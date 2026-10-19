@@ -1,0 +1,139 @@
+### pass 1 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/haiku_55_agentic_r3/haiku_55_agentic_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 5011.0 us (199.6 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 9708.6 us
+ Allocs at Init    : 1 (1548008 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2299636 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1516248 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/haiku_55_agentic_r3/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 2 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/haiku_55_agentic_r3/haiku_55_agentic_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 4855.1 us (206.0 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 9721.5 us
+ Allocs at Init    : 1 (1548008 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2299636 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1516248 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/haiku_55_agentic_r3/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 3 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/haiku_55_agentic_r3/haiku_55_agentic_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 6130.3 us (163.1 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 16162.3 us
+ Allocs at Init    : 1 (1548008 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2299636 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1516248 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/haiku_55_agentic_r3/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 4 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/haiku_55_agentic_r3/haiku_55_agentic_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 6019.0 us (166.1 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 26046.7 us
+ Allocs at Init    : 1 (1548008 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2299636 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1516248 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/haiku_55_agentic_r3/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 5 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/haiku_55_agentic_r3/haiku_55_agentic_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 5807.6 us (172.2 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 20138.5 us
+ Allocs at Init    : 1 (1548008 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2299636 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1516248 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/haiku_55_agentic_r3/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 6 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/haiku_55_agentic_r3/haiku_55_agentic_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 4262.6 us (234.6 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 12455.1 us
+ Allocs at Init    : 1 (1548008 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2299636 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1516248 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/haiku_55_agentic_r3/frame.png
+ Verdict           : PASS
+========================================================================
+
+### pass 7 (exit 0)
+========================================================================
+ ARGUS HEADLESS THEME HARNESS (Zig 0.17.0) // VERIFICATION REPORT
+------------------------------------------------------------------------
+ Theme             : bench/.score/haiku_55_agentic_r3/haiku_55_agentic_r3.zig (Stateful SDK Contract)
+ Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
+ Frames Rendered   : 120 (fixed dt = 0.008000)
+ Avg Frame Time    : 5381.2 us (185.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 19070.5 us
+ Allocs at Init    : 1 (1548008 bytes)
+ Allocs after Init : 0
+ Watchdog 320x200  : PASS
+ Stride Guard      : CLEAN (0 out-of-bounds canary writes)
+ NaN / Inf Check   : CLEAN
+ Pixel Variance    : 2299636 / 2304000 non-bg pixels (alpha=0 count: 0)
+ Temporal Motion   : 1516248 / 2304000 visibly animated pixels (min required: 2000)
+ Output PNG        : bench/.score/haiku_55_agentic_r3/frame.png
+ Verdict           : PASS
+========================================================================

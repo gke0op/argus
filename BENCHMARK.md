@@ -89,6 +89,57 @@ they stay in the git history (`git log --all -- themes/<name>`) as reference sub
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`themes/Cygnus_A.zig`** | Claude Opus | The quasar engine (generated from `tools/quasar_template.zig`) modelled on Cygnus A, the hidden quasar in the archetypal radio galaxy: $2.5\times10^9\,M_\odot$, $0.012\,L_{\rm Edd}$, an honestly thin disk; spin unmeasured, $a/M=0.9$ chosen (CPU path shown; the app draws it on the GPU by default) | `61,368,016 B` (`58.52 MiB`) | **`5,278–5,316 µs`** | **`188–189 FPS`** | Bronze |
 
+### Cross-model leaderboard (2026-10-19)
+
+Five models, both modes, 3 runs each (30 runs), with the benchmark exactly as written above.
+Every theme was rescored by the harness, not taken from the contestant's own report. The harness
+ran serially under `nice -n 10`, 7 interleaved passes per theme. The table shows medians over
+the runs, with the range in brackets. Methods, prompts, every run and what went wrong:
+[`docs/notes/bench-leaderboard.md`](docs/notes/bench-leaderboard.md). Themes, frames and harness
+reports: [`bench/results/2026-10-19/`](bench/results/2026-10-19/).
+
+| Model | Mode | Pass | Gates passed /8 | CPU ms/frame (passing runs) | Tier of the median | Gate failures | Harness runs to first own PASS |
+| :--- | :--- | :---: | :---: | ---: | :--- | :--- | :---: |
+| Claude Opus 5.5 | zero-shot | 3/3 | 8 | 2.32 (1.89–6.83) | Silver | none | - |
+| Claude Opus 5.5 | agentic | 3/3 | 8 | 2.72 (2.40–4.52) | Silver | none | 1 |
+| Claude Sonnet 5.5 | zero-shot | 3/3 | 8 | 4.10 (2.68–4.55) | Silver | none | - |
+| Claude Sonnet 5.5 | agentic | 3/3 | 8 | 2.92 (2.60–6.07) | Silver | none | 2 (1–2) |
+| Claude Haiku 5.5 | zero-shot | 2/3 | 8 (0–8) | 1.61 (1.03–2.19)\* | Gold\* | r1: compile error (`expected type 'u32', found 'usize'`) | - |
+| Claude Haiku 5.5 | agentic | 3/3 | 8 | 5.38 (2.98–6.69) | Bronze | none | 2 (1–2) |
+| Claude Fable 5.1 | zero-shot | 3/3 | 8 | 3.96 (3.58–5.83) | Silver | none | - |
+| Claude Fable 5.1 | agentic | 3/3 | 8 | 4.42 (2.08–5.45) | Bronze | none | 1 |
+| Gemini 3.8 Flash | zero-shot | 3/3 | 8 | 2.26 (1.47–11.56) | Silver | none | - |
+| Gemini 3.8 Flash | agentic | 3/3 | 8 | 6.76 (1.70–11.04) | Bronze | none | 1 (1–2) |
+
+![The best run per model and mode by the scorecard (a PASS first, then frame time): frame 120 of each](docs/media/bench-leaderboard.png)
+
+What the table says, and what it doesn't:
+
+- **The gates no longer separate these models.** 29 of 30 runs pass all eight. The one failure is
+  Haiku 5.5's first zero-shot answer, which does not compile. A theme compiles or fails as a
+  whole, so a compile error scores 0 of 8.
+- **Frame time does not crown Opus.** In zero-shot, Haiku (1.61 ms) and Flash (2.26 ms) have lower
+  medians than Opus (2.32 ms). The fastest single runs are Haiku zero-shot r3 (1.03 ms) and Flash
+  zero-shot r2 (1.47 ms). Opus's zero-shot r1 is one of the slowest runs (6.83 ms). In agentic
+  mode Opus has the lowest median (2.72 ms), ahead of Sonnet (2.92 ms).
+- \***Haiku's fast zero-shot themes are mostly the §3 skeleton.** Its two passing files share
+  59–61% of their lines with the skeleton; no other run shares more than 33%. One draws concentric
+  rings, the other cycles a colour palette over a precomputed spiral. Neither simulates a system.
+  The gates check that a theme runs, not what it simulates.
+- **Variance is large.** Within one model and mode, frame times span up to 8× (Flash zero-shot,
+  1.47–11.56 ms). With 3 runs, differences between the medians are smaller than that spread, so
+  this table cannot rank the five models on speed.
+- **Agentic mode did not make themes faster.** The agents spent their iterations on the look and
+  the physics: Belousov-Zhabotinsky spirals, rotating Bose-Einstein condensates, Gray-Scott,
+  stable fluids, a GW150914 inspiral. In zero-shot, every Claude run except Haiku's two chose a
+  damped wave equation (rain on a pool, a ripple tank; Track B); all three Flash runs drew a Kerr
+  black hole (Track A).
+- **Tiers here are pessimistic.** Other work kept the shared M3 at load 5.6–6.9 throughout. The §3
+  skeleton, scored in every pass as a control, read 1.93 ms (median), against about 1.5 ms on an
+  idle machine. Treat every figure as roughly 25–30% slow.
+- **There is no GPU column**, because these are CPU themes (`.zig`): the harness times `step()` and
+  `draw()` on one CPU core. "CPU ms/frame" is the harness's "Avg Frame Time".
+
 ### The seven shipped themes: measured cost
 
 Apple GPUs stay at low clocks when Argus paces frames at 30 FPS, so a theme's live cost is higher than its back-to-back cost. Judge GPU themes on the **paced** column (`make harness THEME=themes/X.metal` prints it as "Paced 30 FPS"). Measured on an M3 with 8 GB, 3 runs per theme; GPU busy, CPU and memory come from `Argus --offscreen --bench-space 0 --perf-log` with the theme on one Space (and on four, for the last column). An empty Argus costs 13 MB, 0.2% CPU and no GPU.
