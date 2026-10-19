@@ -114,8 +114,8 @@ the theme SDK, so its rows are scored on its own benchmark.
 | Claude Fable 5.1 | agentic | 3/3 | 8 | 3.84 (1.85–4.24) | Silver | none | 1 |
 | Gemini 3.8 Flash | zero-shot | 3/3 | 8 | 2.18 (1.26–11.57) | Silver | none | - |
 | Gemini 3.8 Flash | agentic | 3/3 | 8 | 6.58 (1.23–11.57) | Bronze | none | 1 (1–2) |
-| Gemini 4 Argon (Argon) | zero-shot | 1/3 | 0 (0–8) | 3.78 | Silver | r1: compile error (`expected type 'u32', found 'usize'`); r3: compile error (`name shadows primitive 'u01'`) | - |
-| Gemini 4 Argon (Argon) | agentic | 1/1† | 8 | 2.31 | Silver | none | 2 |
+| Gemini 4 Argon | zero-shot | 1/3 | 0 (0–8) | 3.78 | Silver | r1: compile error (`expected type 'u32', found 'usize'`); r3: compile error (`name shadows primitive 'u01'`) | - |
+| Gemini 4 Argon | agentic | 1/1† | 8 | 2.31 | Silver | none | 2 |
 
 † The owner's Gemini quota ran short, so Argon's agentic mode has 1 run, not 3. The cap was set
 before any of its results were known, not chosen because of them. That run hit the 50-minute
