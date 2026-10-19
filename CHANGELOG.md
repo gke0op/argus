@@ -20,6 +20,9 @@ All notable changes to Argus are recorded here. The format follows
 
 ### Added
 
+- Aventurine Horoscope, a living horoscope: the planets in the zodiac for today's real date,
+  with retrogrades, aspects, the Moon's phase and countdowns to the next sign changes and
+  stations. Every 5 minutes it previews the next 30 days. The first theme on the real date.
 - Phosphor Terminal, a dashboard theme: this Mac's CPU (per core), GPU, memory, network,
   busiest processes, battery, disk and thermal state on a green-phosphor terminal, in the DEC
   VT320's dot font (VT323, SIL OFL 1.1). It is the first theme on the live stats feed.

@@ -44,6 +44,9 @@ The git history records who did what; this is the summary.
 - `themes/Phosphor_Terminal.metal` and its glyph atlas `themes/Phosphor_Terminal.bin`:
   written by Claude Opus. This Mac's live stats (`@argus stats`) on a green-phosphor
   terminal; the header separates its sources, what is computed and what is chosen.
+- `themes/Aventurine_Horoscope.metal` and its data file `themes/Aventurine_Horoscope.bin`:
+  written by Claude Opus. The sky right now, read as Western astrology reads it (signs,
+  aspects, retrogrades, the Moon's phase), on an aventurine dial.
 - Earlier themes by Google Gemini, Claude Sonnet, Claude Fable, Claude Opus and
   Claude Haiku (species) did not ship in this release. They remain in the git
   history, with their credits in this file's history.
@@ -53,6 +56,10 @@ The git history records who did what; this is the summary.
 - **VT323** (Peter Hull, Copyright 2011 The VT323 Project Authors), from the google/fonts
   repository, under the SIL Open Font License 1.1: rendered into the glyph atlas
   `themes/Phosphor_Terminal.bin`. The licence is in `themes/Phosphor_Terminal_OFL.txt`.
+
+- **Noto Sans Symbols, Noto Sans Symbols 2, Noto Sans and Noto Serif** (Google), under the
+  SIL Open Font License 1.1: rendered into the glyph atlas in `themes/Aventurine_Horoscope.bin`.
+  The licence and copyright lines are in `themes/Aventurine_Horoscope_OFL.txt`.
 
 ## Third-party data
 
