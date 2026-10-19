@@ -57,13 +57,17 @@ The git history records who did what; this is the summary.
   repository, under the SIL Open Font License 1.1: rendered into the glyph atlas
   `themes/Phosphor_Terminal.bin`. The licence is in `themes/Phosphor_Terminal_OFL.txt`.
 
-- **Noto Sans Symbols, Noto Sans Symbols 2, Noto Sans and Noto Serif** (Google), under the
+- **Noto Sans Symbols, Noto Sans Symbols 2, Noto Sans and Noto Serif** (Copyright 2022 The Noto Project Authors), from the
+  google/fonts repository, under the
   SIL Open Font License 1.1: rendered into the glyph atlas in `themes/Aventurine_Horoscope.bin`.
   The licence and copyright lines are in `themes/Aventurine_Horoscope_OFL.txt`.
 
 ## Third-party data
 
-The repository contains no third-party source code. `themes/Orion_Nebula.bin`
+The repository contains no third-party source code. The Moon map in
+`themes/Aventurine_Horoscope.bin` (rows 576–831) is from NASA's Scientific Visualization Studio,
+CGI Moon Kit (svs.gsfc.nasa.gov/4720, the LRO LROC WAC colour mosaic; visualizer Ernie Wright),
+downsampled. `themes/Orion_Nebula.bin`
 and the baked constants in `themes/Orion_Nebula.metal` are derived from:
 
 - **VLT/MUSE maps of the Orion Nebula**: Weilbacher, P. M. et al. 2015, A&A 582, A114,
