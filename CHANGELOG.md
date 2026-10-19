@@ -20,6 +20,9 @@ All notable changes to Argus are recorded here. The format follows
 
 ### Added
 
+- Phosphor Terminal, a dashboard theme: this Mac's CPU (per core), GPU, memory, network,
+  busiest processes, battery, disk and thermal state on a green-phosphor terminal, in the DEC
+  VT320's dot font (VT323, SIL OFL 1.1). It is the first theme on the live stats feed.
 - Live system stats for Metal themes. A theme that declares `// @argus stats` receives
   `constant ArgusStats& s [[buffer(1)]]` (documented in the prelude and the Metal theme skill):
   CPU load total and per core with P/E core counts, memory used, compressed and wired, swap,

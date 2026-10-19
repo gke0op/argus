@@ -41,9 +41,18 @@ The git history records who did what; this is the summary.
 - `themes/Lizard_Island.metal`: written by Claude Opus, species by Claude Haiku agents. A
   lagoon at Lizard Island (Great Barrier Reef); the header lists its field sources and marks
   each claim as cited, snippet or habitat-dataset.
+- `themes/Phosphor_Terminal.metal` and its glyph atlas `themes/Phosphor_Terminal.bin`:
+  written by Claude Opus. This Mac's live stats (`@argus stats`) on a green-phosphor
+  terminal; the header separates its sources, what is computed and what is chosen.
 - Earlier themes by Google Gemini, Claude Sonnet, Claude Fable, Claude Opus and
   Claude Haiku (species) did not ship in this release. They remain in the git
   history, with their credits in this file's history.
+
+## Third-party fonts
+
+- **VT323** (Peter Hull, Copyright 2011 The VT323 Project Authors), from the google/fonts
+  repository, under the SIL Open Font License 1.1: rendered into the glyph atlas
+  `themes/Phosphor_Terminal.bin`. The licence is in `themes/Phosphor_Terminal_OFL.txt`.
 
 ## Third-party data
 
