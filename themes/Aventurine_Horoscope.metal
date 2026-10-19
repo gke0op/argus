@@ -5,10 +5,10 @@
 // jewellery. An astrology chart wheel (0 deg Aries at 9 o'clock, the signs counter-clockwise) in
 // blue aventurine glass, with a ring of translucent enamel over guilloche, rose gold and a gem for
 // each body, photographed straight on under a softbox. Each gem stands at its body's real place in
-// the zodiac (a gold leader runs to the exact degree), with its glyph, its degree and sign (floored,
+// the zodiac (a gold stud in the aspect groove marks the exact degree), with its glyph, its degree and sign (floored,
 // as ephemerides print them), a garnet R-x while it is retrograde, and the next event within 7 days:
 // "-> (sign) 5h" enters a sign, "SR 4d" / "SD 5d" stations retrograde / direct (hours under a day,
-// else days). Enamel threads in the centre join bodies in a major aspect (garnet: square, opposition;
+// else days). Grooves etched in the glass join bodies in a major aspect (garnet: square, opposition;
 // sapphire: sextile, trine, which share a colour). The Moon in the middle is the real Moon at its real
 // phase, its phase name and sign engraved beneath. It moves at the sky's pace: the Moon's gem
 // ~0.5 deg an hour, the labels count down; the studio light drifts so the crystals in the glass glint.
@@ -53,8 +53,8 @@
 //     around full and new Moon, so it never flips), the map's near side facing us.
 // CHOSEN (taste, not measured):
 //   - the chart's layout: Aries at 9 o'clock with no Ascendant (the viewer's place is unknown);
-//     gems spread to >= 14 deg apart when they crowd (a leader shows the true degree), eased 0.5 s;
-//     orbs 6 deg with the Sun or Moon, else 4; no conjunction threads; events shown within 7 days
+//     gems spread to >= 14 deg apart when they crowd (the stud shows the true degree), eased 0.5 s;
+//     orbs 6 deg with the Sun or Moon, else 4; no conjunction grooves; events shown within 7 days
 //     (hours below 23.5 h, rounded up; else whole days); the gem for each body (VCA's set where it has one: serpentine,
 //     chloromelanite, red jasper, blue agate, sugilite; aquamarine, lapis, smoky quartz for the
 //     outer three), a gold Sun, a mother-of-pearl Moon;
@@ -72,7 +72,11 @@
 //     applied gold casts soft shadows; gems cast and contact shadows; the dial sits on dark velvet in
 //     the key's pool of light, with pile, a nap faded below ~3 px, and the dial's cast shadow (approach
 //     after Roulette_Chrome's: environment first, satin over gloss, contact shadows over texture);
-//     copper crystals in cobalt glass;
+//     no wires between the signs (the degree ring's full-width 30 deg ticks mark them); a flinque
+//     sunburst of one ray per degree, faded as the pixel grows against it; no crystals within ~2-5 px
+//     of a gold edge; copper crystals in cobalt glass; every fine line at least a pixel wide and box-filtered over the
+//     pixel (energy kept, never dotted); aspects as V-grooves 4-6 px wide with frosted walls and an
+//     enamel floor;
 //   - the look-ahead: at 30 s after load, then every 300 s, +30 days, 14 + 3 + 5 s, eased; the
 //     previewed instant is computed exactly like now (the same kernels, the clock offset); the date
 //     shown is local (f.utc_offset_s); events and their latches pause and resume on return;
@@ -657,6 +661,28 @@ static float3 label_d(texture2d<float> st, float2 p, int b, float lam_b, float d
     return float3(d, dr, de);
 }
 
+// coverage of a line of half-width hw at distance d, box-filtered over the pixel (aa = one pixel in
+// dial units); a line thinner than a pixel keeps its energy, spread over a pixel, instead of breaking
+// into dots
+static inline float line_cov(float d, float hw, float aa) {
+    const float h = max(hw, 0.5f * aa);
+    return sat((h - d) / aa + 0.5f) * (hw / h);
+}
+// a V-groove etched into the dial glass: ds the signed distance across it, hw its half-width, perp
+// the direction across. The walls lean in (each catches the lights from its own side, frosted by the
+// etching); the floor holds a little coloured enamel. Box-filtered at the rims; walls meet at the floor.
+static float3 groove(float3 base, float ds, float hw, float2 perp, float3 floor_col, float aa, Studio S) {
+    const float cov = sat((hw - abs(ds)) / aa + 0.5f);
+    if (cov <= 0.0f) return base;
+    const float x = clamp(ds / hw, -1.0f, 1.0f);
+    const float3 nw = normalize(float3(-perp * (x < 0.0f ? -1.0f : 1.0f) * 0.75f, 1.0f));
+    const float3 wall = float3(0.050f, 0.054f, 0.070f) * irr(nw, S) * 1.6f
+                      + env_brdf(float3(0.04f), 0.35f, dot(nw, S.V)) * env(refl(nw, S), 0.35f, S);
+    const float3 flo = floor_col * (irr(float3(0, 0, 1), S) * 0.7f + 0.10f);
+    const float f = smoothstep(0.55f, 0.20f, abs(x));                    // the floor's share
+    return mix(base, mix(wall, flo, f) * (0.80f + 0.20f * (1.0f - abs(x))), cov);
+}
+
 static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float ppu, Studio S) {
     const float r = length(p);
     const float aa = 1.0f / ppu;
@@ -692,14 +718,17 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
         c *= 0.55f + 0.45f * smoothstep(0.0f, 0.010f, r - R_Z1);                // where it meets the enamel
         return mix(c, float3(0.003f), smoothstep(R_OUT - aa, R_OUT + aa, r));
     }
-    // ---- zodiac ring: translucent night-blue enamel over a flinqué sunburst, gold signs, cloisonné
+    // ---- zodiac ring: translucent cobalt enamel over a flinqué sunburst, gold signs
     if (r > R_Z0) {
         const int sg = int(lam / 30.0f) % 12;
         const float a = atan2(p.y, p.x);
         const float2 tang = float2(-rad.y, rad.x);
-        const float ph = a * 880.0f;
-        const float groove = 0.5f + 0.5f * cos(ph);                               // 1 in a groove
-        const float3 ng = normalize(float3(tang * 0.13f * sin(ph) + rad * 0.05f * sin(r * 520.0f), 1.0f));
+        // a flinqué sunburst, one ray per degree (~7 px apart at 1200 px), faded toward its mean as the
+        // pixel grows against it, so it never beats against an edge or the pixel grid
+        const float ph = a * 360.0f;
+        const float gw = sat((r * D2R * ppu - 3.0f) / 4.0f);
+        const float groove = 0.5f + 0.5f * cos(ph) * gw;                          // 1 in a groove
+        const float3 ng = normalize(float3(tang * 0.13f * sin(ph) * gw + rad * 0.03f * sin(r * 160.0f), 1.0f));
         // deep cobalt glass; the engraving shows through as brightness, darker where the glass is deeper
         const float lu = dot(env(refl(ng, S), 0.28f, S), float3(0.3f, 0.5f, 0.2f));
         float3 c = float3(0.010f, 0.030f, 0.22f) * (0.12f + 0.55f * lu) * (1.15f - 0.35f * groove);
@@ -711,7 +740,7 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
         // gold sign glyph, upright, applied in relief
         const float lm = float(sg) * 30.0f + 15.0f;
         const float2 gc = CP(lm, 0.5f * (R_Z0 + R_Z1));
-        const float gs = 0.090f;
+        const float gs = 0.108f;
         const float d = glyph_px(st, sg, (p - gc) / gs, gs * ppu);
         const float dsh = glyph_px(st, sg, (p + kd * 0.0035f - gc) / gs, gs * ppu);   // applied: it casts a shadow
         c *= 1.0f - 0.55f * sat(1.0f - (dsh + 1.0f) / 4.0f);
@@ -721,18 +750,6 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
             const float bev = sat(1.0f + d / 2.2f);
             const float3 n = normalize(float3(float2(dx, dy) * 0.9f * bev, 1.0f));
             c = mix(c, gold(n, 0.18f, S), sat(0.5f - d));
-        }
-        // cloisonné wires: sign boundaries and the ring's rims
-        const float db = abs(fract(lam / 30.0f + 0.5f) - 0.5f) * 30.0f * D2R * r;
-        const float w1 = 0.0035f;
-        float wire = 1.0f - smoothstep(w1 - aa, w1 + aa, db);
-        const float dr = min(abs(r - R_Z0), abs(r - R_Z1));
-        wire = max(wire, 1.0f - smoothstep(w1 - aa, w1 + aa, dr));
-        if (wire > 0.0f) {
-            const float x = db < dr ? db / w1 * (fract(lam / 30.0f + 0.5f) > 0.5f ? 1.0f : -1.0f) : (r - (abs(r - R_Z0) < abs(r - R_Z1) ? R_Z0 : R_Z1)) / w1;
-            const float2 dir = db < dr ? tang : rad;
-            const float3 n = normalize(float3(dir * clamp(x, -0.9f, 0.9f), sqrt(1.0f - min(x * x, 0.81f))));
-            c = mix(c, gold(n, 0.08f, S), wire);
         }
         return c;
     }
@@ -746,9 +763,9 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
         const float dd = abs(fract(lam + 0.5f) - 0.5f) * D2R * r;
         const float di = floor(lam + 0.5f);
         const float len = fmod(di, 30.0f) == 0.0f ? 1.0f : fmod(di, 10.0f) == 0.0f ? 0.62f : fmod(di, 5.0f) == 0.0f ? 0.44f : 0.24f;
-        const float w = fmod(di, 30.0f) == 0.0f ? 0.0018f : 0.0009f;
-        const float tick = (1.0f - smoothstep(w - 0.6f * aa, w + 0.6f * aa, dd)) * step(R_Z0 - len * (R_Z0 - R_D0), r);
-        const float eng = max(tick, 1.0f - smoothstep(0.0012f - aa, 0.0012f + aa, abs(r - R_D0 - 0.0045f)));
+        const float w = fmod(di, 30.0f) == 0.0f ? 0.0026f : (fmod(di, 5.0f) == 0.0f ? 0.0013f : 0.0011f);
+        const float tick = line_cov(dd, w, aa) * sat((r - (R_Z0 - len * (R_Z0 - R_D0))) / aa + 0.5f);
+        const float eng = max(tick, line_cov(abs(r - R_D0 - 0.0045f), 0.0014f, aa));
         c = mix(c, float3(0.006f, 0.005f, 0.005f), eng * 0.95f);
         c *= 0.75f + 0.25f * smoothstep(R_D0, R_D0 + 0.006f, r);                   // the step down to the glass
         return c;
@@ -773,7 +790,14 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
             const float size = 0.10f + 0.22f * hash2(cell, 17.0f);
             const float cov = exp(-dot(fp, fp) / (size * size) * 2.0f) * size * size * 6.0f;
             const float k = pow(hash2(cell, 18.0f), 3.0f) * 1.6f + 0.05f;          // most crystals small, a few large
-            c += tint * env(refl(nf, S), 0.0f, S) * cov * k;
+            // none right against a gold edge (a rim must stay a clean line, not a string of sparks)
+            float keep = smoothstep(0.004f, 0.014f, R_D0 - r) * smoothstep(0.004f, 0.014f, r - R_MEDB)
+                       * smoothstep(0.005f, 0.012f, abs(r - R_ASP));
+            for (int b = 0; b < 10; b++) {
+                const float gr = gem_r(b);
+                keep *= smoothstep(gr * 1.15f, gr * 1.7f, length(p - CP(st.read(uint2(b, ROW_BODY)).w, R_GEM)));
+            }
+            c += tint * env(refl(nf, S), 0.0f, S) * cov * k * keep;
         }
     }
     // ---- aspect threads and the aspect ring
@@ -783,30 +807,31 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
             if (a.z < 0.0f) continue;
             const float2 p0 = CP(a.x, R_ASP), p1 = CP(a.y, R_ASP);
             const float2 ba = p1 - p0; const float hh = sat(dot(p - p0, ba) / dot(ba, ba));
-            const float2 dv = p - p0 - ba * hh;
-            const float d = length(dv);
-            const float w = 0.0010f + 0.0010f * a.w;
-            if (d < w + 0.003f) {
+            const float2 perp = normalize(float2(-ba.y, ba.x));
+            const float ds = dot(p - p0 - ba * hh, perp);
+            const float hw = 0.0038f + 0.0016f * a.w;                         // a tighter aspect, a wider cut
+            if (abs(ds) < hw + 2.0f * aa && hh > 0.0f && hh < 1.0f) {
                 const float3 en = (a.z == 1.0f || a.z == 3.0f) ? float3(0.24f, 0.012f, 0.016f) : float3(0.012f, 0.045f, 0.26f);
-                const float fill = (1.0f - smoothstep(w - aa, w + aa, d)) * (0.55f + 0.45f * a.w);
-                c = mix(c, en * (irr(float3(0, 0, 1), S) * 0.6f + 0.10f), fill);
-                const float edge = (1.0f - smoothstep(0.0005f - aa, 0.0005f + aa, abs(d - w - 0.0006f))) * (0.5f + 0.5f * a.w);
-                c = mix(c, gold(normalize(float3(-dv / max(d, 1e-5f) * 0.2f, 1.0f)), 0.25f, S), edge * 0.7f);
+                c = groove(c, ds, hw, perp, en, aa, S);
             }
         }
-        const float x = (r - R_ASP) / 0.0028f;
-        if (abs(x) < 1.0f) c = mix(c, gold(normalize(float3(rad * x * 0.9f, sqrt(1.0f - 0.81f * x * x))), 0.06f, S), 1.0f - smoothstep(0.8f, 1.0f, abs(x)));
+        if (abs(r - R_ASP) < 0.006f + 2.0f * aa) c = groove(c, r - R_ASP, 0.0040f, rad, float3(0.05f, 0.045f, 0.04f), aa, S);
     }
     // ---- the Moon medallion, its phase and sign engraved beneath
     if (r < R_MEDB + 0.012f) {
-        if (r < R_MED) {
-            const float3 m = moon_face(st, p / R_MED, mo.x, mo.y, normalize(CP(mo.z, 1.0f)));
-            const float3 n = normalize(float3(p / R_MED * 0.55f, 1.0f));
-            return m + 0.06f * pow(1.0f - dot(n, S.V), 4.0f) * float3(0.8f, 0.82f, 0.85f);
-        }
-        if (r < R_MEDB) {
-            const float t = (r - 0.5f * (R_MED + R_MEDB)) / (0.5f * (R_MEDB - R_MED));
-            return gold(normalize(float3(rad * t * 0.95f, sqrt(max(1.0f - 0.9f * t * t, 0.02f)))), 0.05f, S);
+        if (r < R_MEDB + aa) {
+            // the medallion's bezel: one rounded bead (curvature widens its lobe); the Moon inside it,
+            // its limb filtered over the pixel
+            const float t = clamp((r - 0.5f * (R_MED + R_MEDB)) / (0.5f * (R_MEDB - R_MED)), -1.0f, 1.0f);
+            const float rough = 0.06f + 1.2f / (0.5f * (R_MEDB - R_MED) * ppu);
+            float3 g = gold(normalize(float3(rad * sin(t * 1.15f), cos(t * 1.15f))), rough, S);
+            if (r < R_MED + aa) {
+                const float3 n = normalize(float3(p / R_MED * 0.55f, 1.0f));
+                const float3 m = moon_face(st, p / R_MED * min(1.0f, (R_MED - 0.5f * aa) / max(r, 1e-5f)), mo.x, mo.y, normalize(CP(mo.z, 1.0f)))
+                               + 0.06f * pow(1.0f - dot(n, S.V), 4.0f) * float3(0.8f, 0.82f, 0.85f);
+                g = mix(g, m, sat((R_MED - r) / aa + 0.5f));
+            }
+            return mix(c, g, sat((R_MEDB - r) / aa + 0.5f));
         }
         c *= 0.45f + 0.55f * smoothstep(R_MEDB, R_MEDB + 0.012f, length(p - float2(0.006f, -0.009f)));
     }
@@ -847,31 +872,21 @@ static float3 dial(constant ArgusFrame& f, texture2d<float> st, float2 p, float 
         const float lam_b = bd.x, disp = bd.w;
         const float gr = gem_r(b);
         const float2 gc = CP(disp, R_GEM);
-        // the true longitude: a gold dot on the aspect ring, a leader from the degree scale to the gem
+        // the true longitude: a gold stud set in the aspect groove
         const float2 ad = CP(lam_b, R_ASP);
         if (length(p - ad) < 0.012f) c = mix(c, gold(normalize(float3((p - ad) / 0.0075f * 0.7f, 1.0f)), 0.08f, S), 1.0f - smoothstep(0.0062f - aa, 0.0062f + aa, length(p - ad)));
-        {
-            const float2 t0 = CP(lam_b, R_D0), t1 = gc + normalize(CP(lam_b, R_D0) - gc) * gr * 1.12f;
-            const float2 ba = t1 - t0; const float hh = sat(dot(p - t0, ba) / dot(ba, ba));
-            const float dl = length(p - t0 - ba * hh);
-            if (dl < 0.004f) c = mix(c, gold(float3(0, 0, 1), 0.14f, S), 1.0f - smoothstep(0.0010f - aa, 0.0010f + aa, dl));
-        }
         // soft contact shadow, the collet, the cabochon
         const float dg = length(p - gc);
         if (dg < gr * 1.6f + 0.02f) {
             c *= 1.0f - 0.60f * (1.0f - smoothstep(gr * 0.80f, gr * 1.55f, length(p - gc + kd * 0.010f)));   // cast
             c *= 1.0f - 0.35f * (1.0f - smoothstep(gr * 1.0f, gr * 1.25f, dg));                                // contact
-            if (dg < gr * 1.10f) {
-                if (dg > gr) {
-                    const float t = (dg - gr * 1.05f) / (gr * 0.05f);
-                    c = gold(normalize(float3((p - gc) / dg * t * 0.9f, sqrt(max(1.0f - 0.8f * t * t, 0.05f)))), 0.06f, S);
-                } else c = shade_gem(b, (p - gc) / gr, S);
-            }
-            if (b == 6) {   // Saturn's ring: a fine gold wire, tilted, passing behind the stone at the top
-                const float2 q = (p - gc) / gr;
-                const float2 qq = float2(q.x * 0.94f + q.y * 0.34f, (-q.x * 0.34f + q.y * 0.94f) * 3.2f);
-                const float wire = 1.0f - smoothstep(0.035f * 3.2f, (0.035f + aa / gr) * 3.2f, abs(length(qq) - 1.6f * 3.2f * 0.0f - 1.6f));
-                if (wire > 0.0f && !(qq.y > 0.0f && dot(q, q) < 1.0f)) c = mix(c, gold(normalize(float3(0.0f, -0.3f * sign(qq.y), 1.0f)), 0.35f, S) * 0.8f, wire);
+            // the collet: a rounded gold bezel, filtered at its outer edge; the stone inside it
+            const float RC = gr * 1.20f;
+            if (dg < RC + aa) {
+                const float t = clamp((dg - gr * 1.10f) / (gr * 0.10f), -1.0f, 1.0f);
+                float3 g = gold(normalize(float3((p - gc) / max(dg, 1e-5f) * sin(t * 1.1f), cos(t * 1.1f))), 0.26f, S);
+                if (dg < gr) g = shade_gem(b, (p - gc) / gr, S);
+                c = mix(c, g, sat((RC - dg) / aa + 0.5f));
             }
         }
         // labels on the gem's line, toward the centre: glyph; degree, sign, Rx; the coming event
