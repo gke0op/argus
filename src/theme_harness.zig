@@ -12,6 +12,7 @@
 const std = @import("std");
 const mtl = @import("gpu/metal.zig");
 const metal_theme = @import("gpu/metal_theme.zig");
+const system_stats = @import("desktop/system_stats.zig");
 
 /// GPU frame budget for Metal themes: 120 FPS worth, leaving the GPU nearly idle at 30 FPS.
 const METAL_BUDGET_US: f64 = 8333.0;
@@ -25,6 +26,36 @@ var enforce_budget = true;
 /// `--seed N` (Metal): the f.seed a theme sees. The app derives one per Space; the harness pins
 /// 0x5EED so renders are repeatable. Render a few seeds to check a seeded composition holds up.
 var metal_seed: u32 = 0x5EED;
+/// `--stats live` (`@argus stats` themes): read this Mac, a new sample every 30 frames, instead
+/// of the fixed synthetic stats that keep renders the same on every machine.
+var stats_live = false;
+var live_sampler: system_stats.Sampler = .{};
+var live_block: ?u32 = null;
+var live_cost_ns: u64 = 0;
+var live_samples: u32 = 0;
+
+/// Before each encode of an `@argus stats` theme under `--stats live`: a fresh reading of the
+/// Mac whenever the theme reaches a new 30-tick block (the synthetic feed's pace).
+fn feedLiveStats(theme: *metal_theme.Theme) void {
+    if (!stats_live or !theme.dir.stats) return;
+    theme.stats_live = true;
+    const block = theme.frame.frame / 30;
+    if (live_block == block) return;
+    live_block = block;
+    const t0 = threadCpuNs();
+    var st = theme.stats;
+    if (!live_sampler.sample(&st)) _ = live_sampler.sample(&st); // the first one is a baseline
+    live_cost_ns += threadCpuNs() - t0;
+    live_samples += 1;
+    st.seq = theme.stats.seq + 1;
+    theme.stats = st;
+}
+
+fn threadCpuNs() u64 {
+    var ts: std.c.timespec = undefined;
+    _ = std.c.clock_gettime(.THREAD_CPUTIME_ID, &ts);
+    return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
+}
 
 const MetalRun = struct { ok: bool, gpu_us_avg: f64 = 0, gpu_us_worst: f64 = 0, err: [*:0]const u8 = "" };
 
@@ -38,6 +69,7 @@ fn runMetal(theme: *metal_theme.Theme, out: mtl.Id, frames: usize, first: ?[]f32
         const pool = mtl.poolPush();
         defer mtl.poolPop(pool);
         const cb = mtl.msg(mtl.Id, theme.queue, "commandBuffer", .{});
+        feedLiveStats(theme);
         theme.encode(cb, out, METAL_DT);
         mtl.msg(void, cb, "commit", .{});
         mtl.msg(void, cb, "waitUntilCompleted", .{});
@@ -77,6 +109,7 @@ fn profileMetal(theme: *metal_theme.Theme, frames: usize) Profile {
         const pool = mtl.poolPush();
         defer mtl.poolPop(pool);
         const cb = mtl.msg(mtl.Id, theme.queue, "commandBuffer", .{});
+        feedLiveStats(theme);
         theme.encode(cb, out, METAL_DT);
         mtl.msg(void, cb, "commit", .{});
         mtl.msg(void, cb, "waitUntilCompleted", .{});
@@ -105,6 +138,7 @@ fn profileMetal(theme: *metal_theme.Theme, frames: usize) Profile {
         const pool = mtl.poolPush();
         defer mtl.poolPop(pool);
         const cb = mtl.msg(mtl.Id, theme.queue, "commandBuffer", .{});
+        feedLiveStats(theme);
         theme.encodeTimes(cb, out, 1.0 / @as(f32, @floatFromInt(paced_fps)), if (f % ratio == 0) METAL_DT else null);
         mtl.msg(void, cb, "commit", .{});
         mtl.msg(void, cb, "waitUntilCompleted", .{});
@@ -204,6 +238,11 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
     const motion_ok = animated_pixels >= 2_000;
     const pass = wd_ok and !nan_detected and distinct_pixels > 100 and motion_ok and (!enforce_budget or run.gpu_us_avg < METAL_BUDGET_US);
     const st_desc = if (theme.stateful()) "state texture" else "stateless";
+    var stats_buf: [160]u8 = undefined;
+    const stats_line = if (!theme.dir.stats) "" else if (stats_live)
+        try std.fmt.bufPrint(&stats_buf, " Stats (buffer 1)  : live, {d} samples of this Mac, {d:.0} us CPU each\n", .{ live_samples, @as(f64, @floatFromInt(live_cost_ns)) / 1000.0 / @as(f64, @floatFromInt(@max(1, live_samples))) })
+    else
+        " Stats (buffer 1)  : synthetic (fixed values, a new seq every 30 frames; --stats live reads this Mac)\n";
     var out_buf: [2048]u8 = undefined;
     const report = try std.fmt.bufPrint(&out_buf,
         \\========================================================================
@@ -222,7 +261,7 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
         \\ NaN / Inf Check   : {s}
         \\ Pixel Variance    : {d} / {d} non-bg pixels
         \\ Temporal Motion   : {d} / {d} visibly animated pixels (min required: 2000)
-        \\ Output PNG        : {s}
+        \\{s} Output PNG        : {s}
         \\ Verdict           : {s}
         \\========================================================================
         \\
@@ -246,7 +285,7 @@ fn metalHarness(io: std.Io, alloc: std.mem.Allocator, path: []const u8, n_frames
         if (nan_detected) "FAIL (NaN/Inf in the output!)" else "CLEAN",
         distinct_pixels,                   width * height,
         animated_pixels,                   width * height,
-        out_png,                           if (pass) "PASS" else "FAIL",
+        stats_line,                        out_png,                           if (pass) "PASS" else "FAIL",
     });
     try std.Io.File.stdout().writeStreamingAll(io, report);
     if (!pass) std.process.exit(1);
@@ -344,6 +383,9 @@ pub fn main(init: std.process.Init) !void {
             const f = try std.fmt.parseInt(u32, args[i], 10);
             if (f != 30 and f != 60 and f != 120) return error.FpsMustBe30Or60Or120;
             paced_fps = f;
+        } else if (std.mem.eql(u8, a, "--stats") and i + 1 < args.len) {
+            i += 1;
+            if (std.mem.eql(u8, args[i], "live")) stats_live = true else if (!std.mem.eql(u8, args[i], "synthetic")) return error.StatsMustBeLiveOrSynthetic;
         } else if (std.mem.eql(u8, a, "--no-budget")) {
             enforce_budget = false;
         } else if (std.mem.eql(u8, a, "--probe-metal")) {

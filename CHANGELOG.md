@@ -20,6 +20,16 @@ All notable changes to Argus are recorded here. The format follows
 
 ### Added
 
+- Live system stats for Metal themes. A theme that declares `// @argus stats` receives
+  `constant ArgusStats& s [[buffer(1)]]` (documented in the prelude and the Metal theme skill):
+  CPU load total and per core with P/E core counts, memory used, compressed and wired, swap,
+  memory pressure, GPU utilisation, battery, network rates, startup-volume space, thermal state,
+  uptime, the five busiest processes, and a sample number for keeping histories. Argus samples
+  about once a second on a low-priority thread, only while a stats theme's Space is on screen
+  (about 0.15% of one core), with public calls that need no permission; themes without the
+  directive cost nothing. The harness feeds fixed synthetic stats so renders stay the same on
+  every Mac; `make harness STATS=live` reads the real ones. `--perf-log` shows the sampler's
+  CPU time per sample.
 - GPU measurement tools: `tools/gpu_meter.py` (GPU power, clock states and per-process GPU time,
   no sudo), `tools/gpu_experiment.py`, `tools/swipe_probe.py`, and each GPU Space's GPU ms per
   frame in `--perf-log`. The investigation is in `docs/notes/gpu-busy-investigation.md`.

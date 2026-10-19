@@ -11,6 +11,7 @@ const login_item = @import("desktop/login_item.zig");
 const pl = @import("desktop/popover_layout.zig");
 const frame_rate = @import("desktop/frame_rate.zig");
 const swipe_detect = @import("desktop/swipe_detect.zig");
+const system_stats = @import("desktop/system_stats.zig");
 const popover_dismiss = @import("desktop/popover_dismiss.zig");
 const reopen = @import("desktop/reopen.zig");
 
@@ -772,6 +773,13 @@ const MacBridge = struct {
         // The clock moves by the frame interval; argus_step runs only once per 30 Hz logic tick.
         const times = self.pacer.spaceTimes(idx, self.obs.spin_mult);
         const p = &self.mt[idx].?;
+        if (p.theme.dir.stats) {
+            // `@argus stats`: this Space is being drawn (on screen, or a swipe is bringing it
+            // in), so keep the sampler going and hand the theme the latest sample.
+            system_stats.feed.want();
+            system_stats.feed.latestInto(&p.theme.stats);
+            p.theme.stats_live = true;
+        }
         if (!p.renderTimes(times.clock_dt, times.step_dt)) return false;
         self.gpu_drawn_tick[idx] = self.frame_idx;
         if (self.snapshotDue(idx)) {
@@ -2574,6 +2582,8 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
             const t = if (b.mt[idx]) |*p| p.timing.take() else if (b.gpu[idx]) |*p| p.timing.take() else continue;
             if (t.frames > 0) std.debug.print(" s{d}={d:.2}x{d}", .{ idx, t.ms, t.frames });
         }
+        const sc_cost = system_stats.feed.takeCost();
+        if (sc_cost.samples > 0) std.debug.print(" stats_us={d:.0}x{d}", .{ sc_cost.us, sc_cost.samples });
         std.debug.print("\n", .{});
         b.perf_renders = @splat(0);
         b.perf_visible = 0;
@@ -3594,6 +3604,8 @@ test {
     _ = swipe_detect;
     _ = @import("desktop/popover_dismiss.zig");
     _ = @import("desktop/reopen.zig");
+    _ = @import("desktop/system_stats.zig");
+    _ = @import("gpu/argus_stats.zig");
 }
 
 test "Metal-only themes load into a Space and render on the GPU" {

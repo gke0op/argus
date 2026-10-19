@@ -157,6 +157,44 @@ kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
   A missing or wrong-sized file fails the load. Example: `themes/Orion_Nebula.metal` (built by
   `tools/orion_bake/bake.py`, checked by `verify_earth_view.py`).
 
+### Live system stats: `// @argus stats`
+
+A theme can be a dashboard of the Mac it runs on. Add the directive and every kernel may take
+the stats as buffer 1:
+
+```metal
+// @argus stats
+kernel void argus_draw(constant ArgusFrame& f [[buffer(0)]],
+                       constant ArgusStats& s [[buffer(1)]],
+                       texture2d<float, access::write> out [[texture(0)]], ...)
+```
+
+`argus_init` and `argus_step` take `constant ArgusStats& s [[buffer(1)]]` the same way.
+`struct ArgusStats` is in the prelude, each field documented there: `seq`, `sample_dt`,
+`uptime_s`, `thermal` (0-3); `cpu_total`, `cpu_count`, `cpu_p_cores`, `cpu_e_cores`,
+`cpu_core[32]` (0-1 each, efficiency cores first on Apple Silicon); `mem_total_gb`,
+`mem_used_gb`, `mem_compressed_gb`, `mem_wired_gb`, `swap_used_gb` (GiB), `mem_pressure` (0-2);
+`gpu_busy` (0-1); `battery_present`, `battery_charge` (0-1), `battery_charging`, `on_ac`,
+`battery_minutes` (-1 while macOS estimates); `net_rx_bps`, `net_tx_bps` (bytes/s);
+`disk_free_gb`, `disk_total_gb` (decimal GB); `proc_count` and `procs[5]` (`name` as 32 ASCII
+bytes, `cpu` as a share of the whole machine, `mem_gb`). Booleans are `uint` 0/1.
+
+- **One sample a second.** Argus reads the Mac about once a second, only while a stats theme's
+  Space is on screen (or a swipe is bringing it in), on its own low-priority thread: ~1-1.5 ms
+  of CPU per sample, about 0.15% of one core. Between samples the struct doesn't change.
+- **History.** `seq` is 0 until the first sample, then goes up by one per sample. To keep a
+  graph, store the last `seq` you saw in a state texel and push the new values in `argus_step`
+  only when `s.seq` differs: exactly once per sample, at any frame rate. Smooth needles in the
+  state too (ease toward the new value over ~0.5 s); raw values step once a second.
+- **Text.** Process names are bytes: `s.procs[i].name[k]`, NUL-padded. Drawing them takes a
+  font of your own (a bitmap font in a `@argus data` texture, or glyphs built from segments).
+- **The harness is deterministic.** `make harness` feeds fixed synthetic stats that change
+  slowly, with a new `seq` every 30 frames, so renders are the same on every Mac and the gates
+  see motion. `make harness ... STATS=live` (`--stats live`) reads this Mac instead.
+- Without the directive nothing is sampled and buffer 1 is unbound: don't read it.
+- Only the user's own processes appear in `procs` (macOS doesn't show other users' or root's
+  CPU time without privileges), so WindowServer and kernel_task never do.
+
 ## 4. Design rates in human time
 
 A wallpaper is watched for minutes and runs for days. Decide every rate in seconds first
@@ -296,7 +334,8 @@ too.
 | File | Role |
 |---|---|
 | `../THEME_CRAFT.md` | the quality bar, workflow, critique checklist, worked examples, header template |
-| `src/gpu/argus_prelude.metal` | the prelude (helpers, `ArgusFrame`) |
+| `src/gpu/argus_prelude.metal` | the prelude (helpers, `ArgusFrame`, `ArgusStats`) |
+| `src/gpu/argus_stats.zig`, `src/desktop/system_stats.zig` | `@argus stats`: the struct and the harness's synthetic feed; the sampler and its thread |
 | `src/gpu/metal_theme.zig` | compiles themes, directives, state ping-pong, encodes frames |
 | `src/gpu/presenter.zig` | CAMetalLayer per Space window; Zig + Metal hybrids (Cygnus A) |
 | `src/theme_harness.zig` | `make harness` (`SEED=` for Metal); `.metal` files take the GPU path |
