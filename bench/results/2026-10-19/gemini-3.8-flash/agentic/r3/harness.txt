@@ -5,8 +5,8 @@
  Theme             : bench/.score/gemini_38_flash_agentic_r3/gemini_38_flash_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 11041.3 us (90.6 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 27147.0 us
+ Avg Frame Time    : 9013.2 us (110.9 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 13769.1 us
  Allocs at Init    : 1 (9247640 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -25,8 +25,8 @@
  Theme             : bench/.score/gemini_38_flash_agentic_r3/gemini_38_flash_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 13358.9 us (74.9 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 26149.0 us
+ Avg Frame Time    : 12804.1 us (78.1 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 23454.3 us
  Allocs at Init    : 1 (9247640 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -45,8 +45,8 @@
  Theme             : bench/.score/gemini_38_flash_agentic_r3/gemini_38_flash_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 9914.9 us (100.9 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 22399.2 us
+ Avg Frame Time    : 9229.0 us (108.4 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 10305.1 us
  Allocs at Init    : 1 (9247640 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -65,8 +65,8 @@
  Theme             : bench/.score/gemini_38_flash_agentic_r3/gemini_38_flash_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 10931.7 us (91.5 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 23504.9 us
+ Avg Frame Time    : 11572.8 us (86.4 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 20803.0 us
  Allocs at Init    : 1 (9247640 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -85,8 +85,8 @@
  Theme             : bench/.score/gemini_38_flash_agentic_r3/gemini_38_flash_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 14195.6 us (70.4 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 46187.3 us
+ Avg Frame Time    : 11881.2 us (84.2 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 23497.1 us
  Allocs at Init    : 1 (9247640 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -105,8 +105,8 @@
  Theme             : bench/.score/gemini_38_flash_agentic_r3/gemini_38_flash_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 9519.1 us (105.1 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 19954.4 us
+ Avg Frame Time    : 15593.8 us (64.1 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 44128.4 us
  Allocs at Init    : 1 (9247640 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -125,8 +125,8 @@
  Theme             : bench/.score/gemini_38_flash_agentic_r3/gemini_38_flash_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 11875.2 us (84.2 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 28105.5 us
+ Avg Frame Time    : 10277.7 us (97.3 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 18360.1 us
  Allocs at Init    : 1 (9247640 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS

@@ -48,7 +48,7 @@ def main():
             img = Image.open(os.path.join(base, model, mode, run, "frame.png")).convert("RGB").resize((TW, TH), Image.LANCZOS)
             sheet.paste(img, (x, y))
             ms = "%.2f ms" % (s["avg_us_median"] / 1000) if s.get("avg_us_median") else "-"
-            label = "%s · %s · %s · %s · %s" % (NAMES[model].replace("Claude ", ""), mode, run, s["verdict"], ms)
+            label = "%s · %s · %s · %s · %s" % (NAMES[model].replace("Claude ", "").replace(" (Argon)", ""), mode, run, s["verdict"], ms)
             dr.text((x + 2, y + TH + 6), label, fill=(225, 225, 230), font=font)
     sheet.save(out, optimize=True)  # full colour: a 256-colour palette bands the smooth gradients
     print(out, os.path.getsize(out), "bytes")

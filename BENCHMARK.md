@@ -91,52 +91,68 @@ they stay in the git history (`git log --all -- themes/<name>`) as reference sub
 
 ### Cross-model leaderboard (2026-10-19)
 
-Five models, both modes, 3 runs each (30 runs), with the benchmark exactly as written above.
-Every theme was rescored by the harness, not taken from the contestant's own report. The harness
-ran serially under `nice -n 10`, 7 interleaved passes per theme. The table shows medians over
-the runs, with the range in brackets. Methods, prompts, every run and what went wrong:
+Six models in both modes, 3 runs each, except Gemini 4 Argon's agentic mode, which has 1 run (†):
+34 runs in all. The benchmark was used exactly as written above. Every theme was rescored by the
+harness, not taken from the contestant's own report. All 34 were rescored together on the same
+machine: serially, under `nice -n 10`, in 7 interleaved passes. Each cell is the median over the
+runs, with the range in brackets. Methods, prompts, every run and what went wrong:
 [`docs/notes/bench-leaderboard.md`](docs/notes/bench-leaderboard.md). Themes, frames and harness
 reports: [`bench/results/2026-10-19/`](bench/results/2026-10-19/).
 
+**Argon is grading itself.** Argon (Google Gemini) wrote ARGUS-BENCH, the first Argus engine and
+the theme SDK, so its rows are scored on its own benchmark.
+
 | Model | Mode | Pass | Gates passed /8 | CPU ms/frame (passing runs) | Tier of the median | Gate failures | Harness runs to first own PASS |
 | :--- | :--- | :---: | :---: | ---: | :--- | :--- | :---: |
-| Claude Opus 5.5 | zero-shot | 3/3 | 8 | 2.32 (1.89–6.83) | Silver | none | - |
-| Claude Opus 5.5 | agentic | 3/3 | 8 | 2.72 (2.40–4.52) | Silver | none | 1 |
-| Claude Sonnet 5.5 | zero-shot | 3/3 | 8 | 4.10 (2.68–4.55) | Silver | none | - |
-| Claude Sonnet 5.5 | agentic | 3/3 | 8 | 2.92 (2.60–6.07) | Silver | none | 2 (1–2) |
-| Claude Haiku 5.5 | zero-shot | 2/3 | 8 (0–8) | 1.61 (1.03–2.19)\* | Gold\* | r1: compile error (`expected type 'u32', found 'usize'`) | - |
-| Claude Haiku 5.5 | agentic | 3/3 | 8 | 5.38 (2.98–6.69) | Bronze | none | 2 (1–2) |
-| Claude Fable 5.1 | zero-shot | 3/3 | 8 | 3.96 (3.58–5.83) | Silver | none | - |
-| Claude Fable 5.1 | agentic | 3/3 | 8 | 4.42 (2.08–5.45) | Bronze | none | 1 |
-| Gemini 3.8 Flash | zero-shot | 3/3 | 8 | 2.26 (1.47–11.56) | Silver | none | - |
-| Gemini 3.8 Flash | agentic | 3/3 | 8 | 6.76 (1.70–11.04) | Bronze | none | 1 (1–2) |
+| Claude Opus 5.5 | zero-shot | 3/3 | 8 | 2.19 (1.89–6.63) | Silver | none | - |
+| Claude Opus 5.5 | agentic | 3/3 | 8 | 2.93 (2.23–4.27) | Silver | none | 1 |
+| Claude Sonnet 5.5 | zero-shot | 3/3 | 8 | 4.19 (2.74–4.46) | Bronze | none | - |
+| Claude Sonnet 5.5 | agentic | 3/3 | 8 | 2.44 (2.41–4.91) | Silver | none | 2 (1–2) |
+| Claude Haiku 5.5 | zero-shot | 2/3 | 8 (0–8) | 1.40 (0.83–1.96)\* | Gold\* | r1: compile error (`expected type 'u32', found 'usize'`) | - |
+| Claude Haiku 5.5 | agentic | 3/3 | 8 | 4.69 (2.84–6.50) | Bronze | none | 2 (1–2) |
+| Claude Fable 5.1 | zero-shot | 3/3 | 8 | 3.77 (3.31–5.42) | Silver | none | - |
+| Claude Fable 5.1 | agentic | 3/3 | 8 | 3.84 (1.85–4.24) | Silver | none | 1 |
+| Gemini 3.8 Flash | zero-shot | 3/3 | 8 | 2.18 (1.26–11.57) | Silver | none | - |
+| Gemini 3.8 Flash | agentic | 3/3 | 8 | 6.58 (1.23–11.57) | Bronze | none | 1 (1–2) |
+| Gemini 4 Argon (Argon) | zero-shot | 1/3 | 0 (0–8) | 3.78 | Silver | r1: compile error (`expected type 'u32', found 'usize'`); r3: compile error (`name shadows primitive 'u01'`) | - |
+| Gemini 4 Argon (Argon) | agentic | 1/1† | 8 | 2.31 | Silver | none | 2 |
+
+† The owner's Gemini quota ran short, so Argon's agentic mode has 1 run, not 3. The cap was set
+before any of its results were known, not chosen because of them. That run hit the 50-minute
+limit without writing its final report. The theme it left in `themes/` is what was scored (see
+the note).
 
 ![The best run per model and mode by the scorecard (a PASS first, then frame time): frame 120 of each](docs/media/bench-leaderboard.png)
 
 What the table says, and what it doesn't:
 
-- **The gates no longer separate these models.** 29 of 30 runs pass all eight. The one failure is
-  Haiku 5.5's first zero-shot answer, which does not compile. A theme compiles or fails as a
-  whole, so a compile error scores 0 of 8.
-- **Frame time does not crown Opus.** In zero-shot, Haiku (1.61 ms) and Flash (2.26 ms) have lower
-  medians than Opus (2.32 ms). The fastest single runs are Haiku zero-shot r3 (1.03 ms) and Flash
-  zero-shot r2 (1.47 ms). Opus's zero-shot r1 is one of the slowest runs (6.83 ms). In agentic
-  mode Opus has the lowest median (2.72 ms), ahead of Sonnet (2.92 ms).
+- **The gates separate the models only at compile time.** 31 of 34 runs pass all eight gates. The
+  three failures are zero-shot compile errors: one from Haiku 5.5 and two from Argon. A theme
+  compiles or fails as a whole, so a compile error scores 0 of 8. Both of Argon's errors are traps
+  that §4 of this file describes: an integer-width mismatch (a `usize` stored as a `u32`), and a
+  variable named `u01`, which Trap 5 names explicitly.
+- **Frame time does not crown Opus.** In zero-shot, Haiku (1.40 ms) is fastest and Flash
+  (2.18 ms) ties Opus (2.19 ms). In agentic mode, Sonnet's median (2.44 ms) is lower than Opus's
+  (2.93 ms). Argon's single agentic run (2.31 ms) is lower than both. The fastest single runs are
+  Haiku zero-shot r3 (0.83 ms), Flash agentic r1 (1.23 ms) and Flash zero-shot r2 (1.26 ms).
 - \***Haiku's fast zero-shot themes are mostly the §3 skeleton.** Its two passing files share
   59–61% of their lines with the skeleton; no other run shares more than 33%. One draws concentric
   rings, the other cycles a colour palette over a precomputed spiral. Neither simulates a system.
   The gates check that a theme runs, not what it simulates.
-- **Variance is large.** Within one model and mode, frame times span up to 8× (Flash zero-shot,
-  1.47–11.56 ms). With 3 runs, differences between the medians are smaller than that spread, so
-  this table cannot rank the five models on speed.
-- **Agentic mode did not make themes faster.** The agents spent their iterations on the look and
-  the physics: Belousov-Zhabotinsky spirals, rotating Bose-Einstein condensates, Gray-Scott,
-  stable fluids, a GW150914 inspiral. In zero-shot, every Claude run except Haiku's two chose a
-  damped wave equation (rain on a pool, a ripple tank; Track B); all three Flash runs drew a Kerr
-  black hole (Track A).
-- **Tiers here are pessimistic.** Other work kept the shared M3 at load 5.6–6.9 throughout. The §3
-  skeleton, scored in every pass as a control, read 1.93 ms (median), against about 1.5 ms on an
-  idle machine. Treat every figure as roughly 25–30% slow.
+- **Variance is large.** Within one model and mode, frame times span up to 9× (Flash, 1.26–11.57 ms
+  and 1.23–11.57 ms). With 1–3 runs, differences between the medians are smaller than that spread,
+  so this table cannot rank the models on speed. Between the first 30-run rescore and this joint
+  one, Sonnet's zero-shot median moved from 4.10 to 4.19 ms, which crosses from Silver into Bronze.
+- **The models chose different subjects.** Every Claude run but Haiku's two zero-shot answers chose
+  Track B. In zero-shot those were damped wave equations (rain on a pool, a ripple tank). In agentic
+  mode the agents spent their iterations on the look and the physics: Belousov-Zhabotinsky spirals,
+  rotating Bose-Einstein condensates, Gray-Scott, stable fluids. Every Gemini zero-shot run (Flash
+  and Argon) drew a Kerr black hole (Track A). In agentic mode, Argon drew the black hole in
+  NGC 4889, Flash a GW150914 inspiral in one run and condensates in two. Agentic mode did not make
+  themes faster.
+- **Tiers here are pessimistic.** Other work kept the shared M3 at load 5.4–9.9 throughout. The §3
+  skeleton, scored in every pass as a control, read 1.95 ms (median), against about 1.5 ms on an
+  idle machine. Treat every figure as roughly 30% slow.
 - **There is no GPU column**, because these are CPU themes (`.zig`): the harness times `step()` and
   `draw()` on one CPU core. "CPU ms/frame" is the harness's "Avg Frame Time".
 

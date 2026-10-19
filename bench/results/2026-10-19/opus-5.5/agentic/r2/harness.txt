@@ -5,8 +5,8 @@
  Theme             : bench/.score/opus_55_agentic_r2/opus_55_agentic_r2.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 4126.4 us (242.3 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 10936.8 us
+ Avg Frame Time    : 3866.2 us (258.7 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 5044.0 us
  Allocs at Init    : 1 (4470864 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -25,8 +25,8 @@
  Theme             : bench/.score/opus_55_agentic_r2/opus_55_agentic_r2.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 4896.6 us (204.2 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 45579.8 us
+ Avg Frame Time    : 5324.9 us (187.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 11707.9 us
  Allocs at Init    : 1 (4470864 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -45,8 +45,8 @@
  Theme             : bench/.score/opus_55_agentic_r2/opus_55_agentic_r2.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 4521.9 us (221.1 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 12792.2 us
+ Avg Frame Time    : 4457.1 us (224.4 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 8345.2 us
  Allocs at Init    : 1 (4470864 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -65,8 +65,8 @@
  Theme             : bench/.score/opus_55_agentic_r2/opus_55_agentic_r2.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 6648.2 us (150.4 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 22049.1 us
+ Avg Frame Time    : 3988.0 us (250.8 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 6101.9 us
  Allocs at Init    : 1 (4470864 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -85,8 +85,8 @@
  Theme             : bench/.score/opus_55_agentic_r2/opus_55_agentic_r2.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 3925.4 us (254.8 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 5879.4 us
+ Avg Frame Time    : 4485.9 us (222.9 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 10168.8 us
  Allocs at Init    : 1 (4470864 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -105,8 +105,8 @@
  Theme             : bench/.score/opus_55_agentic_r2/opus_55_agentic_r2.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 4516.2 us (221.4 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 14274.5 us
+ Avg Frame Time    : 4274.0 us (234.0 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 15774.7 us
  Allocs at Init    : 1 (4470864 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -125,8 +125,8 @@
  Theme             : bench/.score/opus_55_agentic_r2/opus_55_agentic_r2.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 3687.4 us (271.2 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 5467.5 us
+ Avg Frame Time    : 3466.4 us (288.5 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 4300.6 us
  Allocs at Init    : 1 (4470864 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS

@@ -1,0 +1,7 @@
+### pass 1 (exit 2)
+Theme compilation failed:
+bench/.score/gemini_4_argon_zero_shot_r3/gemini_4_argon_zero_shot_r3.zig:116:19: error: name shadows primitive 'u01'
+            const u01: f32 = @as(f32, @floatFromInt(@as(u32, @truncate(rng >> 40)))) / 16777216.0;
+                  ^~~
+bench/.score/gemini_4_argon_zero_shot_r3/gemini_4_argon_zero_shot_r3.zig:116:19: note: consider using @"u01" to disambiguate
+make: *** [harness] Error 1

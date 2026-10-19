@@ -15,16 +15,16 @@
   "gates_consistent_across_repeats": true,
   "repeats": 7,
   "avg_us_each": [
-    11558.6,
-    12392.4,
-    10984.3,
-    14307.0,
-    14156.8,
-    10933.7,
-    10761.8
+    9526.2,
+    12465.0,
+    9594.3,
+    11850.1,
+    11565.8,
+    9351.9,
+    12937.6
   ],
-  "avg_us_median": 11558.6,
-  "avg_us_min": 10761.8,
-  "avg_us_max": 14307.0,
+  "avg_us_median": 11565.8,
+  "avg_us_min": 9351.9,
+  "avg_us_max": 12937.6,
   "tier": "Bronze"
 }

@@ -5,8 +5,8 @@
  Theme             : bench/.score/sonnet_55_agentic_r3/sonnet_55_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 4959.5 us (201.6 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 11128.2 us
+ Avg Frame Time    : 6842.6 us (146.1 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 19227.0 us
  Allocs at Init    : 1 (6294504 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -25,8 +25,8 @@
  Theme             : bench/.score/sonnet_55_agentic_r3/sonnet_55_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 6860.5 us (145.8 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 17067.0 us
+ Avg Frame Time    : 4538.6 us (220.3 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 12907.7 us
  Allocs at Init    : 1 (6294504 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -45,8 +45,8 @@
  Theme             : bench/.score/sonnet_55_agentic_r3/sonnet_55_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 6147.1 us (162.7 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 20519.9 us
+ Avg Frame Time    : 5418.0 us (184.6 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 11465.5 us
  Allocs at Init    : 1 (6294504 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -65,8 +65,8 @@
  Theme             : bench/.score/sonnet_55_agentic_r3/sonnet_55_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 7268.0 us (137.6 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 23222.6 us
+ Avg Frame Time    : 5377.8 us (186.0 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 11689.7 us
  Allocs at Init    : 1 (6294504 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -85,8 +85,8 @@
  Theme             : bench/.score/sonnet_55_agentic_r3/sonnet_55_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 5893.1 us (169.7 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 12506.5 us
+ Avg Frame Time    : 4210.7 us (237.5 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 5620.3 us
  Allocs at Init    : 1 (6294504 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -105,8 +105,8 @@
  Theme             : bench/.score/sonnet_55_agentic_r3/sonnet_55_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 6068.9 us (164.8 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 14532.1 us
+ Avg Frame Time    : 4913.9 us (203.5 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 9305.7 us
  Allocs at Init    : 1 (6294504 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS
@@ -125,8 +125,8 @@
  Theme             : bench/.score/sonnet_55_agentic_r3/sonnet_55_agentic_r3.zig (Stateful SDK Contract)
  Resolution        : 1920x1200 (tested stride=1936, stride=1920, and 320x200 watchdog)
  Frames Rendered   : 120 (fixed dt = 0.008000)
- Avg Frame Time    : 5790.0 us (172.7 FPS) | Budget: 16667.0 us
- Worst Frame Time  : 41905.9 us
+ Avg Frame Time    : 3820.5 us (261.7 FPS) | Budget: 16667.0 us
+ Worst Frame Time  : 4397.3 us
  Allocs at Init    : 1 (6294504 bytes)
  Allocs after Init : 0
  Watchdog 320x200  : PASS

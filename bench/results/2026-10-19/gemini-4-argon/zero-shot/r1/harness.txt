@@ -1,0 +1,12 @@
+### pass 1 (exit 2)
+Theme compilation failed:
+bench/.score/gemini_4_argon_zero_shot_r1/gemini_4_argon_zero_shot_r1.zig:447:41: error: expected type 'u32', found 'usize'
+            const kind_sel: u32 = p_idx % 8;
+                                  ~~~~~~^~~
+bench/.score/gemini_4_argon_zero_shot_r1/gemini_4_argon_zero_shot_r1.zig:447:41: note: unsigned 32-bit int cannot represent all possible unsigned 64-bit values
+referenced by:
+    argus_theme_init: bench/.score/gemini_4_argon_zero_shot_r1/argus_theme_sdk.zig:190:34
+    exportTheme [inlined]: bench/.score/gemini_4_argon_zero_shot_r1/argus_theme_sdk.zig:258:21
+    comptime: bench/.score/gemini_4_argon_zero_shot_r1/gemini_4_argon_zero_shot_r1.zig:778:20
+    3 reference(s) hidden; use '-freference-trace=6' to see all references
+make: *** [harness] Error 1
