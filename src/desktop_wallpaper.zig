@@ -1191,9 +1191,12 @@ const MacBridge = struct {
     }
 
     /// "FPS  30 | 60 | 120": one segment per rate this display offers, the chosen one lit.
+    /// The digits have no lowercase or descenders, so the row's usual text offset would sit them
+    /// 1.75 pt below the middle of their segments: they and the "FPS" caption are set that much
+    /// higher, so the numbers are centred in the pills and the caption shares their baseline.
     fn drawFpsControl(self: *MacBridge, ctx: ?*anyopaque, H: f64) void {
         const r = pl.fps_ctl;
-        self.drawLabel(ctx, H, r.x - 32.0, pl.ROW_B_Y + 5.0, "FPS", self.dict_small, C_MUTED, .left);
+        self.drawLabel(ctx, H, r.x - 32.0, pl.ROW_B_Y + 3.25, "FPS", self.dict_small, C_MUTED, .left);
         self.fillR(ctx, H, r, 6.0, .{ 0.118, 0.118, 0.137, 1.0 });
         self.strokeR(ctx, H, r, 6.0, 1.0, .{ 1.0, 1.0, 1.0, 0.08 });
         const n = frame_rate.offeredCount(self.display_max_fps);
@@ -1205,7 +1208,7 @@ const MacBridge = struct {
             if (on) self.fillR(ctx, H, .{ .x = sx + 1.5, .y = r.y + 1.5, .w = seg_w - 3.0, .h = r.h - 3.0 }, 4.5, C_ACCENT);
             var buf: [4]u8 = undefined;
             const txt = std.fmt.bufPrint(&buf, "{d}", .{hz}) catch "";
-            self.drawLabel(ctx, H, sx + seg_w * 0.5, r.y + 3.5, txt, self.dict_small, if (on) .{ 1.0, 1.0, 1.0, 1.0 } else C_MUTED, .center);
+            self.drawLabel(ctx, H, sx + seg_w * 0.5, r.y + 1.75, txt, self.dict_small, if (on) .{ 1.0, 1.0, 1.0, 1.0 } else C_MUTED, .center);
         }
     }
 
