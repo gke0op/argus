@@ -851,7 +851,7 @@ kernel void argus_init(constant ArgusFrame& f [[buffer(0)]],
                        uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= f.state_width || gid.y >= f.state_height) return;
     if (gid.y > 0u) { state.write(bake4(gid, f), gid); return; }
-    if (gid.x == 10u) state.write(float4(float(f.width), float(f.height), BAKE_TAG, 0.0f), gid);
+    if (gid.x == 10u) state.write(float4(float(f.width), float(f.height), (f.width <= 4u * f.state_width && f.height < f.state_height) ? BAKE_TAG : 0.0f, 0.0f), gid);
     if (gid.x > 9u) return;
     const Sim s = sim_start(f.seed);
     if (gid.x < 8u) state.write(sim_texel(s, gid.x), gid);

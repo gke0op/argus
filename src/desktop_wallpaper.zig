@@ -2415,6 +2415,10 @@ fn renderSpacesForFrame(b: *MacBridge, logic: bool) bool {
     const active_is_ours = active_idx < b.obs.n_spaces and
         (b.bench_space != null or b.obs.spaces[active_idx].space_id == b.obs.active_space_id);
     var rendered_any = false;
+    // swipe_mask is only recomputed in the first branch. Left set while a fullscreen app's Space
+    // is active, the Spaces a swipe into that app was bringing in would count as visible and draw
+    // every frame, unseen, until the user came back to a desktop Space.
+    if (b.obs.paused or !active_is_ours or b.screen_locked) b.swipe_mask = 0;
     if (!b.obs.paused and active_is_ours and !b.screen_locked) {
         b.obs.phase_accum += frame_rate.Pacer.phaseStep(b.frame_units, b.obs.spin_mult);
 
