@@ -8,7 +8,7 @@ for a few milliseconds of GPU a frame, or really anything you can write a pixel 
 
 https://github.com/user-attachments/assets/214949f1-89ae-4a92-bc46-31b52c7ffadf
 
-<p align="center"><sub>Cygnus A as the camera tilts to nearly edge-on. 120 FPS, rendered by the theme's own code. The other nine are <a href="#the-themes">at the bottom</a>.</sub></p>
+<p align="center"><sub>Cygnus A as the camera tilts to nearly edge-on. 120 FPS, rendered by the theme's own code. <a href="https://youtu.be/ib9DmonvtZE">In 4K at 60 FPS on YouTube</a>; the other nine are <a href="#the-themes">at the bottom</a>.</sub></p>
 
 ## What it is
 
