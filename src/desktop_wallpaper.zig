@@ -11,6 +11,7 @@ const login_item = @import("desktop/login_item.zig");
 const pl = @import("desktop/popover_layout.zig");
 const frame_rate = @import("desktop/frame_rate.zig");
 const swipe_detect = @import("desktop/swipe_detect.zig");
+const gpu_retry = @import("desktop/gpu_retry.zig");
 const system_stats = @import("desktop/system_stats.zig");
 const popover_dismiss = @import("desktop/popover_dismiss.zig");
 const reopen = @import("desktop/reopen.zig");
@@ -238,7 +239,9 @@ const MacBridge = struct {
     // GPU prototype (`--gpu`): Metal presenters for Spaces whose theme has a GPU port.
     gpu_enabled: bool = false,
     gpu: [MAX_SPACES]?gpu.Presenter = @splat(null),
-    gpu_tried: [MAX_SPACES]?*anyopaque = @splat(null),
+    /// When each Space's missing presenter is (re)made, or whether its theme draws on the CPU.
+    gpu_retry: [MAX_SPACES]gpu_retry.GpuRetry = @splat(.{}),
+    gpu_fail_log: gpu_retry.LogLimiter(GpuFailure) = .{},
     // Metal-only themes (themes/*.metal), one presenter per Space.
     mt: [MAX_SPACES]?gpu.ThemePresenter = @splat(null),
     // Frame rate (desktop/frame_rate.zig): the display link or timer that drives frames, the rate
@@ -795,7 +798,9 @@ const MacBridge = struct {
     }
 
     /// Steps the theme on the CPU and shades it on the GPU into the Space's CAMetalLayer.
-    /// False when the theme has no GPU port (the caller falls back to the CPU path).
+    /// False only when the dylib has no GPU port (the caller draws it on the CPU). A GPU build
+    /// whose presenter can't be made right now draws nothing and retries every 5 s: its CPU
+    /// fallback is the whole image on the main thread, a core's worth at 120 FPS.
     fn renderSpaceGpu(self: *MacBridge, idx: usize) bool {
         const sp = &self.obs.spaces[idx];
         // The Space's layer outlives theme changes: a new theme draws into the same layer.
@@ -809,10 +814,25 @@ const MacBridge = struct {
         if (keep == null and self.gpu[idx] == null) keep = self.takeMetalLayer(idx);
         defer if (keep) |k| gpu.retire(k, self.frame_idx);
         if (self.gpu[idx] == null) {
-            if (self.gpu_tried[idx] == sp.dylib_handle) return false; // not a GPU build: don't retry every frame
-            self.gpu_tried[idx] = sp.dylib_handle;
+            const retry = &self.gpu_retry[idx];
+            switch (retry.next(sp.dylib_handle, self.frame_idx)) {
+                .cpu => return false,
+                .wait => return true,
+                .create => {},
+            }
             const key = sc.themeSourceHash(sp.getPath(), true);
-            self.gpu[idx] = gpu.Presenter.create(sp.dylib_handle, sp.theme_state, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H, key, self.frame_idx, keep) orelse return false;
+            self.gpu[idx] = gpu.Presenter.create(sp.dylib_handle, sp.theme_state, sp.desktop_layer, self.color_space, NATIVE_W, NATIVE_H, key, self.frame_idx, keep) catch |e| {
+                if (e == error.NotGpuBuild) {
+                    retry.notGpuBuild(sp.dylib_handle);
+                    return false;
+                }
+                retry.failed(sp.dylib_handle, self.frame_idx);
+                const kind = GpuFailure.of(e);
+                if (self.gpu_fail_log.due(kind, self.frame_idx))
+                    std.debug.print("argus: Space {d}: {s}: GPU presenter not made ({s}); retrying every 5 s, nothing drawn meanwhile\n", .{ idx + 1, sp.getLabel(), @errorName(e) });
+                return true;
+            };
+            retry.created();
             keep = null;
             self.snap_tick[idx] = 0;
         }
@@ -1356,7 +1376,7 @@ const MacBridge = struct {
         if (idx >= self.obs.n_spaces) return;
         self.dropMetalTheme(idx);
         self.dropGpu(idx);
-        self.gpu_tried[idx] = null;
+        self.gpu_retry[idx] = .{};
         self.obs.spaces[idx].resetToDefault();
         self.applyThemeModeToSpace(idx, .passthrough);
         self.note_len = 0;
@@ -2381,6 +2401,26 @@ fn onPopoverMouseUp(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c)
 
 /// Length of the eject flash on a thumbnail (0.4 s at 30 Hz).
 const EJECT_FLASH_TICKS: usize = 12;
+
+/// Why a Space's GPU presenter wasn't made (gpu.Presenter.CreateError but NotGpuBuild), for
+/// the rate-limited log line.
+const GpuFailure = enum {
+    no_state,
+    metal_unavailable,
+    trace_failed,
+    no_engine_slot,
+    no_layer,
+
+    fn of(e: gpu.Presenter.CreateError) GpuFailure {
+        return switch (e) {
+            error.NoState, error.NotGpuBuild => .no_state,
+            error.MetalUnavailable => .metal_unavailable,
+            error.TraceFailed => .trace_failed,
+            error.NoEngineSlot => .no_engine_slot,
+            error.NoLayer => .no_layer,
+        };
+    }
+};
 
 /// A GPU Space not drawn for this long (2 s) parks its layer (frees its spare drawables).
 const GPU_PARK_TICKS: usize = 60;
@@ -3609,6 +3649,7 @@ test {
     _ = @import("desktop/popover_layout.zig");
     _ = @import("desktop/frame_rate.zig");
     _ = swipe_detect;
+    _ = gpu_retry;
     _ = @import("desktop/popover_dismiss.zig");
     _ = @import("desktop/reopen.zig");
     _ = @import("desktop/system_stats.zig");

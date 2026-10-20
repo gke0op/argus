@@ -382,28 +382,29 @@ pub const Presenter = struct {
     timing: GpuTiming = .{},
     shown_rows: u32 = 0,
 
-    /// Returns null when the dylib isn't a GPU build or Metal is unavailable.
+    /// Why `create` made no presenter. Only `NotGpuBuild` is for good (the dylib has no GPU
+    /// entry points, so the theme draws on the CPU); the others can pass, so the app retries.
+    pub const CreateError = error{ NotGpuBuild, NoState, MetalUnavailable, TraceFailed, NoEngineSlot, NoLayer };
+
     /// `w` x `h` is the fallback size; the GPU traces at the window's native pixel size.
     /// `key` identifies the theme source (0 = don't share); `tick` is the app's frame counter.
-    pub fn create(handle: ?*anyopaque, state_ptr: ?*anyopaque, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize, key: u64, tick: usize, reuse: mtl.Id) ?Presenter {
-        const h_lib = handle orelse return null;
-        const st = state_ptr orelse return null;
-        const fill_frame: FrameFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_frame") orelse return null));
-        const fill_static: StaticFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_static") orelse return null));
-        const fill_trace: TraceFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_trace_params") orelse return null));
-        const tables: TablesFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_tables") orelse return null));
-        mtl.load() catch return null; // nativeSize messages AppKit before the engine loads Metal
+    pub fn create(handle: ?*anyopaque, state_ptr: ?*anyopaque, host_layer: mtl.Id, color_space: ?*anyopaque, w: usize, h: usize, key: u64, tick: usize, reuse: mtl.Id) CreateError!Presenter {
+        const h_lib = handle orelse return error.NotGpuBuild;
+        const fill_frame: FrameFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_frame") orelse return error.NotGpuBuild));
+        const fill_static: StaticFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_static") orelse return error.NotGpuBuild));
+        const fill_trace: TraceFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_trace_params") orelse return error.NotGpuBuild));
+        const tables: TablesFn = @ptrCast(@alignCast(std.c.dlsym(h_lib, "argus_gpu_bh_tables") orelse return error.NotGpuBuild));
+        const st = state_ptr orelse return error.NoState;
+        mtl.load() catch return error.MetalUnavailable; // nativeSize messages AppKit before the engine loads Metal
 
         const size = nativeSize(host_layer, w, h);
         const engine = acquireEngine(key, size[0], size[1]) orelse blk: {
-            var e = traceEngine(st, fill_static, fill_trace, tables, size) orelse return null;
-            if (key == 0) {
-                e.deinit(); // unshared engines aren't supported: every hybrid has a source key
-                return null;
-            }
+            // Unshared engines aren't supported: every hybrid has a source key.
+            if (key == 0) return error.NoEngineSlot;
+            var e = traceEngine(st, fill_static, fill_trace, tables, size) orelse return error.TraceFailed;
             break :blk storeEngine(key, size[0], size[1], e, tick) orelse {
                 e.deinit();
-                return null;
+                return error.NoEngineSlot;
             };
         };
         const hdr = hdr_enabled;
@@ -411,7 +412,7 @@ pub const Presenter = struct {
         // window-sized buffer would only cost memory.
         const layer = makeLayer(engine.k.dev, host_layer, color_space, size[0], size[1], hdr, 2, reuse) orelse {
             releaseEngine(engine, tick);
-            return null;
+            return error.NoLayer;
         };
         return .{
             .handle = handle,
