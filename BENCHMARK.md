@@ -156,20 +156,24 @@ What the table says, and what it doesn't:
 - **There is no GPU column**, because these are CPU themes (`.zig`): the harness times `step()` and
   `draw()` on one CPU core. "CPU ms/frame" is the harness's "Avg Frame Time".
 
-### The seven shipped themes: measured cost
+### The shipped themes: measured cost
 
 Apple GPUs stay at low clocks when Argus paces frames at 30 FPS, so a theme's live cost is higher than its back-to-back cost. Judge GPU themes on the **paced** column (`make harness THEME=themes/X.metal` prints it as "Paced 30 FPS"). Measured on an M3 with 8 GB, 3 runs per theme; GPU busy, CPU and memory come from `Argus --offscreen --bench-space 0 --perf-log` with the theme on one Space (and on four, for the last column). An empty Argus costs 13 MB, 0.2% CPU and no GPU.
 
 | Theme | Back-to-back GPU | Paced 30 FPS GPU | GPU busy in Argus, 30 FPS | Argus CPU | Memory, 1 Space | Memory, 4 Spaces |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `themes/Tutorial_Tides.metal` | 0.63 ms | 1.27–1.36 ms | 7.4% (7.1–9.4) | 1.8–2.9% | 83 MB | 111 MB |
+| `themes/Phosphor_Terminal.metal`† | 0.95–0.98 ms | 1.1–1.7 ms | 5.9% (4.1–6.1) | 1.8–2.5% | 129–148 MB | 251 MB |
 | `themes/Ebru_Studio.metal` | 1.02 ms | 1.69–1.72 ms | 11.2% (9.2–11.9) | 2.1–2.4% | 114 MB | 215 MB |
 | `themes/Tutorial_Reef.metal` | 1.11–1.17 ms | 1.69–2.06 ms | 15.2% (10.2–15.4) | 1.6–2.2% | 91–100 MB | 139 MB |
 | `themes/Orion_Nebula.metal` | 1.69–1.71 ms | 2.02–2.75 ms | 14.3% (14.3–18.4) | 1.5–2.2% | 93 MB | 152 MB |
+| `themes/Aventurine_Horoscope.metal`† | 1.44–1.45 ms | 2.1–3.7 ms | 10.1% (6.3–10.2) | 1.8–3.3% | 121–130 MB | 205 MB |
 | `themes/Night_Tide.metal` | 2.52 ms | 2.73–2.90 ms | 25.3% (17.9–36.8) | 1.6–1.9% | 89–98 MB | 143 MB |
+| `themes/Roulette_Chrome.metal`† | 1.79–1.97 ms | 3.0–4.2 ms | 10.6% (4.9–12.6) | 1.5–2.3% | 99–117 MB | 191 MB |
 | `themes/Lizard_Island.metal` | 2.98–3.05 ms | 3.9–4.2 ms | ~32% (21–55)\* | 1.7–2.8% | 186–195 MB | 414–506 MB |
 | `themes/Cygnus_A.zig` on the GPU (HDR10, native 3024×1964) | 1.57–1.60 ms | 2.58–2.78 ms | 12.0% (11.9–12.3) | 1.0–3.1% | 276–299 MB | 387 MB |
 
+- †Measured on 2026-10-20 on a loaded machine. GPU busy is the median (range) of the three runs with the least other GPU work; a Tutorial_Tides control read the same way gave 6.2% (5.1–8.7), against its 7.4% above. The paced ranges are wider than the older rows for the same reason (the control read 1.08–1.57 ms). Phosphor_Terminal's figures include the `@argus stats` sampler. The 4-Space column is one run each.
 - \*Lizard_Island was measured later with the live app running alongside (itself showing Lizard Island), which inflates its GPU busy figure. Its memory is higher because each Space keeps its own 2048×2082 float16 state texture pair (~68 MB).
 - Metal themes render at 1920×1200; Cygnus_A traces and shades at the display's native size.
 - Cygnus_A also runs a one-time GPU ray trace per load (3.9 s at 3024×1964), shared by every Space
