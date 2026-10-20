@@ -6,6 +6,8 @@ All notable changes to Argus are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-10-20
+
 ### Changed
 
 - Off-screen Spaces no longer draw. Argus used to keep the themed Spaces either side of the one
@@ -49,6 +51,19 @@ All notable changes to Argus are recorded here. The format follows
 - GPU measurement tools: `tools/gpu_meter.py` (GPU power, clock states and per-process GPU time,
   no sudo), `tools/gpu_experiment.py`, `tools/swipe_probe.py`, and each GPU Space's GPU ms per
   frame in `--perf-log`. The investigation is in `docs/notes/gpu-busy-investigation.md`.
+
+### Fixed
+
+- A quasar Space could fall back to drawing its whole image on the CPU, for good and without a
+  word: about a core at 120 FPS. A Space whose GPU presenter can't be made now shows black and
+  retries every 5 s, logs why (once a minute per kind), and only a theme with no GPU build ever
+  draws on the CPU.
+- Swiping into a full-screen app left the swipe's arriving Spaces drawing, unseen, until you came
+  back to a desktop Space.
+- Roulette Chrome above 1920x1200 and Phosphor Terminal's glyph lookups read past their state
+  textures (neither showed at the size the app draws).
+- `docs/INSTALL.md`: the manual install moves the folder out of Downloads before the first open,
+  so macOS doesn't ask about Downloads access.
 
 ## [0.1.7] - 2026-10-18
 
@@ -246,6 +261,8 @@ First public release, as source and as a download (ad-hoc signed, not notarized)
   Zig and Metal themes, an Apple GPU architecture guide, GPU probe kernels (`make gpu-probes`,
   `make gpu-arch`) and a MetalFX upscaling demo (`make metalfx-demo`).
 
+[Unreleased]: https://github.com/gke0op/argus/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/gke0op/argus/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/gke0op/argus/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/gke0op/argus/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/gke0op/argus/compare/v0.1.4...v0.1.5
