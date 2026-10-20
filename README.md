@@ -8,7 +8,7 @@ for a few milliseconds of GPU a frame, or really anything you can write a pixel 
 
 https://github.com/user-attachments/assets/214949f1-89ae-4a92-bc46-31b52c7ffadf
 
-<p align="center"><sub>Cygnus A as the camera tilts to nearly edge-on. 120 FPS, rendered by the theme's own code. The other six are <a href="#the-themes">at the bottom</a>.</sub></p>
+<p align="center"><sub>Cygnus A as the camera tilts to nearly edge-on. 120 FPS, rendered by the theme's own code. The other nine are <a href="#the-themes">at the bottom</a>.</sub></p>
 
 ## What it is
 
@@ -109,7 +109,7 @@ live reload and open at login. Settings live in `.argus_settings.conf` next to
 Argus.app, one `key=value` per line.
 
 <p align="center">
-  <img src="docs/media/popover.png" alt="The Argus menu-bar popover: a strip of seven Space thumbnails, one per shipped theme, with Space V (Cygnus A) selected, plus pause and settings buttons" width="680">
+  <img src="docs/media/popover.png" alt="The Argus menu-bar popover: a strip of seven Space thumbnails with Space V (Cygnus A) selected, plus pause and settings buttons" width="680">
 </p>
 <p align="center">
   <img src="docs/media/settings.png" alt="The Argus Settings view: Space IV's preview and theme stepper set to Cygnus A, a speed slider at 1x, switches for live reload and open at login, and a 30 / 60 / 120 FPS selector" width="680">
@@ -220,8 +220,9 @@ CC0 and CC BY 4.0); see [NOTICE.md](NOTICE.md).
 
 ## The themes
 
-Seven themes ship with the app. Each clip is 9 s at 120 FPS, drawn offline by the theme's own
-code on the app's GPU path, paced the way the app paces it. None of it is a screen recording.
+Ten themes ship with the app. Each clip is drawn offline by the theme's own code on the app's
+GPU path, paced the way the app paces it, at 120 FPS (the roulette at 60). None of it is a
+screen recording.
 
 **Night Tide**: a night on the coast; the flashes in the surf follow published dinoflagellate
 research.
@@ -241,6 +242,22 @@ https://github.com/user-attachments/assets/fb49a17f-1f52-4e93-844d-7c3b3b9ba214
 ceiling of studio lights.
 
 https://github.com/user-attachments/assets/b802e6f5-b52d-45f7-ad17-f4f8cc562b2d
+
+**Roulette Chrome**: a single-zero casino wheel seen from above; the ball's laps, its bounces
+off the diamonds and the winning pocket all come out of the physics, nothing is scripted.
+
+https://github.com/user-attachments/assets/0938c00b-b386-4426-ba5a-8ce71db826c4
+
+**Aventurine Horoscope**: the sky right now, read the way Western astrology reads it: the
+planets in their signs for today's real date, retrogrades, aspects and the Moon's phase. Every
+five minutes it winds 30 days ahead and back.
+
+https://github.com/user-attachments/assets/c4bd3439-f595-4f0c-b977-59328536bc30
+
+**Phosphor Terminal**: this Mac's own vital signs (CPU per core, GPU, memory, network, the
+busiest processes, battery) on a green-phosphor terminal, in the DEC VT320's dot font.
+
+https://github.com/user-attachments/assets/23430e01-d9c9-4b60-889a-1f55d2884d6f
 
 **Tutorial Reef**: the second tutorial, a reaction-diffusion reef that remembers between frames.
 
