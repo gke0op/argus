@@ -190,6 +190,14 @@ or agentic (an agent in a clone runs the harness itself); BENCHMARK.md has the s
 Several earlier themes, now in the git history, started as answers to it, and the table in
 BENCHMARK.md records who wrote each one.
 
+We ran it on six models, both modes, 34 runs in all, every theme rescored by the harness: 31
+pass all eight gates, and frame times vary more within one model than between models. The
+leaderboard, every submission and what went wrong are in [BENCHMARK.md](BENCHMARK.md).
+
+<p align="center">
+  <img src="docs/media/bench-leaderboard.png" alt="ARGUS-BENCH contact sheet: the best run of each of six models in zero-shot and agentic mode, frame 120 of each, labelled with model, mode, run, PASS and frame time" width="820">
+</p>
+
 ## How it was made
 
 Argus started as a 24-hour build. Most of the code was written by AI systems directed by
