@@ -24,8 +24,10 @@ somewhere else; `ARGUS_VERSION=0.1.7` picks a release.
    it and run `shasum -a 256 -c Argus-v<version>-macos-arm64.zip.sha256` in the same folder.
 2. Double-click the zip. You get a folder `Argus-v<version>-macos-arm64` that holds `Argus.app`
    and `themes/`. **Keep them together.** Argus loads themes from the folder it sits in and
-   saves its settings there (`.argus_spaces.conf`, `.argus_settings.conf`). You can move or
-   rename the whole folder, for example to `~/Applications/Argus`, before you open the app.
+   saves its settings there (`.argus_spaces.conf`, `.argus_settings.conf`). Move the whole
+   folder out of Downloads, for example to `~/Applications/Argus`, before you open the app:
+   macOS asks before an app reads Downloads, Desktop or Documents, and if that is refused
+   Argus finds no themes.
 3. Open the app once using one of the two ways below. Argus is ad-hoc signed and not notarized:
    it is an open-source project without an Apple Developer ID. So the first time you open it,
    macOS says it cannot check the app for malware and will not open it. Pick one way:
@@ -35,8 +37,9 @@ somewhere else; `ARGUS_VERSION=0.1.7` picks a release.
 
    ```bash
    V=0.1.7   # the version you downloaded
-   xattr -dr com.apple.quarantine ~/Downloads/Argus-v$V-macos-arm64
-   open ~/Downloads/Argus-v$V-macos-arm64/Argus.app
+   ditto ~/Downloads/Argus-v$V-macos-arm64 ~/Applications/Argus
+   xattr -dr com.apple.quarantine ~/Applications/Argus
+   open ~/Applications/Argus/Argus.app
    ```
 
    Use the folder's real path if you moved it. Only do this for software you trust. You can
