@@ -135,7 +135,8 @@ static float glyph_sd(RTex pv, int c, int font, float2 q) {
     const float2 o = float2(g & 15, g >> 4) * CELL + float2(0.0f, float(ATLAS_Y));
     const float2 i = floor(q), w = q - i;
     const uint2 p = uint2(o + i);
-    const float4 a = pv.read(p), b = pv.read(p + uint2(1, 0)), c2 = pv.read(p + uint2(0, 1)), d = pv.read(p + uint2(1, 1));
+    const uint2 p1 = min(p + 1u, uint2(pv.get_width() - 1, pv.get_height() - 1)); // the (0-weight) far taps stay inside
+    const float4 a = pv.read(p), b = pv.read(uint2(p1.x, p.y)), c2 = pv.read(uint2(p.x, p1.y)), d = pv.read(p1);
     const float4 v = mix(mix(a, b, w.x), mix(c2, d, w.x), w.y);
     return ((font == 0 ? v.x : v.y) - 0.5f) * 2.0f * SPREAD;
 }
