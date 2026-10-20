@@ -15,7 +15,7 @@ note from the creator. If `NOTE.md` is empty, skip this.
 
 | Path | What it is |
 |---|---|
-| `themes/` | The seven shipped themes, the Zig SDK (`argus_theme_sdk.zig`) and the two tutorials |
+| `themes/` | The ten shipped themes, the Zig SDK (`argus_theme_sdk.zig`) and the two tutorials |
 | `src/desktop_wallpaper.zig`, `src/desktop/` | The app: Spaces, menu-bar popover, settings, frame pacing |
 | `src/gpu/` | Metal: the theme runner (`metal_theme.zig`), the shared prelude, the Kerr-disk engine for Cygnus A |
 | `src/theme_harness.zig` | The headless harness: compiles a theme, runs the gates, times it, writes a PNG |

@@ -15,7 +15,7 @@ two, in your own words, as a note from the creator. If `NOTE.md` is empty, skip 
 | Path | What it is |
 |---|---|
 | `Argus.app` | The app. Its eye in the menu bar opens the Spaces strip and Settings |
-| `themes/` | The seven themes, the Zig SDK (`argus_theme_sdk.zig`) and two tutorials |
+| `themes/` | The ten themes, the Zig SDK (`argus_theme_sdk.zig`) and two tutorials |
 | `.claude/skills/` | The theme-writing guides (readable by any agent, not only Claude) |
 | `WRITING_THEMES.md` | Where to start, for people and agents |
 | `INSTALL.md` | Install, update, uninstall |
