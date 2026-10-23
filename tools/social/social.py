@@ -12,19 +12,19 @@ app's own rasteriser, the clock). Above the screen a hook, below it a caption, t
 
 Formats:
   pov   several themes, one per Space, with macOS Space swipes between them and a caption each.
-  zoom  one theme; the camera pushes in from the whole MacBook until the theme fills the frame.
-        The theme is rendered once at the size the full zoom needs (one theme pixel or more per
-        output pixel at the end), and every frame is cut from it: no frame is ever upscaled.
+  orbit one Kerr-disk theme (Cygnus_A): the theme on the MacBook's screen, the Mac fades away, then
+        the camera moves around the black hole in the theme's own simulation (inclination and
+        image-plane scale; same hole, spin and disk), every frame traced natively at 1080x1920.
 
 Output: H.264 1080x1920 60 FPS MP4 with a silent stereo track (the sound slot) or --sound,
 chapters, a beats sidecar (JSON and an Audacity label track) and stills.
 
   python3 -I tools/social/social.py --themes Cygnus_A,Night_Tide,Roulette_Chrome,Phosphor_Terminal \
       --hook "POV: every desktop on your Mac is a different universe"
-  python3 -I tools/social/social.py --format zoom --themes Cygnus_A \
+  python3 -I tools/social/social.py --format orbit --themes Cygnus_A \
       --hook "wdym my wallpaper has general relativity"
 
-The themes are rendered once per run and shared by every --hook; pov intermediates go to a work
+The themes are rendered once per run and shared by every --hook; intermediates go to a work
 folder next to the output and are deleted at the end (--keep-work keeps them). See README.md.
 """
 import argparse, datetime, json, math, os, re, shutil, subprocess, sys
@@ -152,8 +152,9 @@ def spring(t, dur):
 
 # ---------------------------------------------------------------------------- geometry
 
-def geometry(dev):
-    """Canvas-pixel geometry of the Mac: the display rect (integer), the lid, the base."""
+def geometry(dev, dy=None):
+    """Canvas-pixel geometry of the Mac: the display rect (integer unless dy is given), the lid,
+    the base."""
     C = CANVAS
     pw, ph = dev["pt"]
     DW = C["DW"]
@@ -161,7 +162,7 @@ def geometry(dev):
     mm = DW / dev["active_mm"][0]  # px per mm
     lid_w = dev["body_w_mm"] * mm
     dx = round((C["W"] - DW) / 2)
-    dy = C["DY"]
+    dy = C["DY"] if dy is None else dy
     b = dev["bezel_mm"]
     lx0 = dx + DW / 2 - lid_w / 2
     g = dict(DW=DW, DH=DH, dx=dx, dy=dy, mm=mm, ptx=DW / pw, pty=DH / ph,
@@ -627,129 +628,187 @@ def make_pov(a, zig, dev, themes, cfgs, hooks, names, clock, clock_text, work):
         finish(a, name, out_mp4, fps, F, hook, themes, beats, labels)
 
 
-# ---------------------------------------------------------------------------- zoom: push in on one theme
+# ---------------------------------------------------------------------------- orbit: the camera moves in the simulation
 
-def make_zoom(a, zig, dev, themes, cfgs, hooks, names, clock, clock_text, work):
+def tour_pose(a, u, span0, incl0):
+    """The camera at tour progress u (0..1): (polar angle deg, span, roll deg, azimuth deg).
+    The probe keeps its distance (r = 1000 M) and flies over the top of the black hole: its polar
+    angle goes incl0 -> theta_min -> incl0 (sin^2 bump, lingering over the top) while its azimuth
+    sweeps 0 -> az_end, so it ends on the far side. It never crosses the spin axis: near the pole
+    the tracer's near-axis geodesics get very slow (0.7 s a 1080x1920 frame at 20 deg, 26 s at
+    15 deg, minutes below 5 deg, and no finish at 0.5 deg). Roll: 90 deg spread over the tour, so the
+    disk ends along the frame's long side, plus 180 deg while it passes over the top, as a camera
+    flying over the pole turns relative to the spin axis (the far side is seen upside down, its
+    rotation reversed). The span (lens) eases span0 -> span_top (the near face-on ring sized to
+    the frame's width) -> span_end (the edge-on disk along the frame's height)."""
+    bump = math.sin(math.pi * u) ** 2
+    theta = a.theta_min + (incl0 - a.theta_min) * (1 - bump)
+    roll = a.roll_end_extra * u + 180.0 * smootherstep((u - 0.25) / 0.5)
+    if u < 0.5:
+        lo, hi, w = span0, a.span_top, smootherstep(u / 0.5)
+    else:
+        lo, hi, w = a.span_top, a.span_end, smootherstep((u - 0.5) / 0.5)
+    span = math.exp(math.log(lo) + (math.log(hi) - math.log(lo)) * w)
+    return theta, span, roll, a.az_end * u
+
+
+def orbit_camera(a, fps, n_frames, span0, incl0):
+    """Per-frame camera: the wallpaper's own view (incl0, span0, no roll, azimuth 0) until
+    move_start, then the tour (tour_pose) eased in and out (smootherstep) to move_end, then held."""
+    return [tour_pose(a, smootherstep((i / fps - a.move_start) / (a.move_end - a.move_start)), span0, incl0)
+            for i in range(n_frames)]
+
+
+def orbit_strip(a, cmd, camf, span0, incl0, theme):
+    """Renders a.strip stills evenly along the tour (move_start to move_end, eased as in the video)
+    and tiles them, labelled with time and camera, into <out>/<name>-strip.png."""
+    n = a.strip
+    times = [a.move_start + (a.move_end - a.move_start) * k / (n - 1) for k in range(n)]
+    poses = [tour_pose(a, smootherstep(k / (n - 1)), span0, incl0) for k in range(n)]
+    with open(camf, "w") as fh:
+        fh.writelines(f"{t:.6f} {s:.4f} {r:.6f} {z:.6f}\n" for t, s, r, z in poses)
+    C = CANVAS
+    print(f"strip: {n} stills of {theme}", flush=True)
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True)
+    nbytes = C["W"] * C["H"] * 4
+    if r.returncode != 0 or len(r.stdout) != n * nbytes:
+        die(f"strip render failed: {r.stderr.decode()[-400:]}")
+    tw, th = 270, 480
+    sheet = Image.new("RGB", (n * (tw + 8) + 8, th + 96), (0, 0, 0))
+    d = ImageDraw.Draw(sheet)
+    f1, f2 = font(HELVETICA, 17, 1), font(HELVETICA, 14, 0)
+    for k, (t, (pol, sp, rl, az)) in enumerate(zip(times, poses)):
+        im = Image.frombuffer("RGBA", (C["W"], C["H"]), r.stdout[k * nbytes:(k + 1) * nbytes], "raw", "RGBA", 0, 1).convert("RGB")
+        x = 8 + k * (tw + 8)
+        sheet.paste(im.resize((tw, th), Image.LANCZOS), (x, 8))
+        d.text((x, th + 16), f"{t:.1f} s", font=f1, fill=WHITE)
+        d.text((x, th + 40), f"polar {pol:.1f}  az {az:.0f}", font=f2, fill=GREY)
+        d.text((x, th + 60), f"roll {rl:.0f}  lens {sp / span0:.2f}x", font=f2, fill=GREY)
+    name = (a.name[0] if a.name else "orbit") + "-strip.png"
+    sheet.save(os.path.join(a.out, name))
+    print(f"wrote {os.path.join(a.out, name)}", flush=True)
+
+
+def make_orbit(a, zig, dev, themes, cfgs, hooks, names, clock, clock_text, work):
+    """One Kerr-disk theme: the hook and the theme on the Mac's screen, the Mac fades away, then the
+    camera moves around the black hole in the theme's own simulation, traced natively at 1080x1920.
+    The whole video is one render: during the opening the screen shows exactly its part of that
+    render (the camera then is the wallpaper's own: the theme's inclination, the theme's frame
+    height across the display's height, centred on the screen), so the handoff is seamless."""
     if len(themes) != 1:
-        die("zoom takes one theme")
+        die("orbit takes one theme")
     theme, cfg = themes[0], cfgs[0]
+    kind, path = theme_kind(theme)
+    if kind != "kerr":
+        die("orbit needs a Kerr-disk theme: the camera moves in its simulation")
+    with open(path) as fh:
+        m = re.search(r"pub const INCL: f64 = ([0-9.]+) \* math\.pi / 180\.0;", fh.read())
+    if not m:
+        die(f"{theme}: no INCL in degrees found")
+    incl0 = float(m.group(1))
     fps = a.fps
     total = a.duration
     end_at = total - a.end
-    z0, z1 = a.zoom_start, a.zoom_end
-    if not (0 < z0 < z1 <= end_at - 0.25) or total > 60:
-        die("timeline: need 0 < zoom start < zoom end <= end card fade, and 60 s at most")
+    f0, f1 = a.mac_fade
+    if not (0 < f0 < f1 and a.move_start >= f0 and a.move_start < a.move_end <= end_at) or total > 60:
+        die("timeline: need 0 < Mac fade start < fade end, the move to start after the fade starts and end by the end card")
     F = round(total * fps)
     fade_f0, end_f = round((end_at - 0.25) * fps), round(end_at * fps)
 
     C = CANVAS
-    g = geometry(dev)
-    DW, DH, dx, dy = g["DW"], g["DH"], g["dx"], g["dy"]
-    fx, fy = cfg.get("focus", [0.5, 0.5])
-    Fx, Fy = dx + fx * DW, dy + fy * DH                    # the zoom's target, canvas px
-    s_end = C["H"] / (a.fill * DH)                        # the frame's height = fill x the display's
-    half_w, half_h = C["W"] / 2 / s_end, C["H"] / 2 / s_end
-    if Fx - half_w < dx or Fx + half_w > dx + DW or Fy - half_h < dy or Fy + half_h > dy + DH:
-        die("zoom: the final view leaves the display; lower --fill or move the theme's focus")
     pw, ph = dev["pt"]
-    rw = int(math.ceil(DW * s_end / 8) * 8)               # theme px >= output px at full zoom
-    size = (rw, round(rw * ph / pw))
-    dens = size[0] / DW / s_end
-    if dens < 1.0:
-        die("zoom: render too small for the final view")
-    print(f"render {theme}: {end_f} frames at {size[0]}x{size[1]}, {fps} FPS, after {cfg['warmup']} s warm-up; "
-          f"zoom 1 -> {s_end:.3f}x, {dens:.3f} theme px per output px at full zoom", flush=True)
+    DH0 = round(C["DW"] * ph / pw)
+    g = geometry(dev, dy=C["H"] / 2 - DH0 / 2)  # the screen centred on the render's centre (the hole)
+    DW, DH, dx, dy = g["DW"], g["DH"], g["dx"], g["dy"]
+    if dx + DW / 2 != C["W"] / 2:
+        die("orbit: the display must be centred")
+    cam = orbit_camera(a, fps, end_f, DH, incl0)
+    camf = os.path.join(work, "camera.txt")
+    with open(camf, "w") as fh:
+        fh.writelines(f"{i:.6f} {s:.4f} {r:.6f} {z:.6f}\n" for i, s, r, z in cam)
+    moving = sum(1 for k in range(1, end_f) if cam[k] != cam[k - 1])
+    print(f"render {theme}: {end_f} frames at {C['W']}x{C['H']}, {fps} FPS, after {cfg['warmup']} s warm-up; "
+          f"tour: polar angle {incl0:g} -> {a.theta_min:g} -> {incl0:g} deg, azimuth 0 -> {a.az_end:g} deg, "
+          f"roll 0 -> {cam[-1][2]:g} deg, span {DH} -> {a.span_top:g} -> {a.span_end:g}; {moving + 1} traces", flush=True)
+    skip = int(round(cfg["warmup"] * fps))
+    cmd = [zig, "run", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", "--dep", "theme",
+           "-Mroot=src/offline_render_bh.zig", "-O", "ReleaseFast", f"-Mtheme={os.path.relpath(path, ROOT)}", "--",
+           "--size", f"{C['W']}x{C['H']}", "--fps", str(fps), "--skip", str(skip), "--camera", camf,
+           "--meter-size", f"{pw * 2}x{ph * 2}", "--sigma", "0", "--hold-exposure"]
+    if a.strip:
+        return orbit_strip(a, cmd, camf, DH, incl0, theme)
 
-    K = s_end  # the Mac drawn at the full zoom's scale, so it is never upscaled either
-    region = (0, math.floor(g["lid"][1]) - 2, C["W"], math.ceil(g["base"][3]) + 2)
-    device = draw_device(dev, g, region, K, 2)
-    mbar = menu_bar(dev, g, K, zig, a.spaces, 0, clock_text, work)
+    # The Mac (device + menu bar), and where its screen lets the render through.
+    device = draw_device(dev, g, (0, 0, C["W"], C["H"]), 1, 4)
+    mbar = menu_bar(dev, g, 1, zig, a.spaces, 0, clock_text, work)
     layer = Image.new("RGBA", device.size, (0, 0, 0, 0))
-    layer.paste(mbar, (int(round((dx - region[0]) * K)), int(round((dy - region[1]) * K))))
+    layer.paste(mbar, (int(round(dx)), int(round(dy))))
     device = Image.alpha_composite(layer, device)
+    R = Raster((0, 0, C["W"], C["H"]), 1, 4)
+    inside = np.asarray(R.poly(bezel_polygon(dev, g)), np.float32)[..., None] / 255
+    dev_a = np.asarray(device, np.float32)[..., 3:4] / 255
+    dev_pm = np.asarray(device, np.float32)[..., :3] * dev_a
     endcard = end_card(zig, a.spaces, work, a.end_line1, a.end_line2)
 
-    def view(i):
-        t = i / fps
-        u = smootherstep((t - z0) / (z1 - z0))
-        s = math.exp(u * math.log(s_end))
-        qx, qy = Fx + (C["W"] / 2 - Fx) * u, Fy + (C["H"] / 2 - Fy) * u  # where the target sits on screen
-        return s, qx, qy
-
-    def place(out, img, wx0, wy0, wx1, wy1, s, qx, qy, mask):
-        """Pastes `img`, covering canvas rect (wx0..wx1, wy0..wy1), into the output at the view."""
-        X0, Y0 = (wx0 - Fx) * s + qx, (wy0 - Fy) * s + qy
-        X1, Y1 = (wx1 - Fx) * s + qx, (wy1 - Fy) * s + qy
-        ox0, oy0 = max(0, math.ceil(X0)), max(0, math.ceil(Y0))
-        ox1, oy1 = min(C["W"], math.floor(X1)), min(C["H"], math.floor(Y1))
-        if ox1 <= ox0 or oy1 <= oy0:
-            return
-        sx, sy = img.size[0] / (X1 - X0), img.size[1] / (Y1 - Y0)
-        box = ((ox0 - X0) * sx, (oy0 - Y0) * sy, (ox1 - X0) * sx, (oy1 - Y0) * sy)
-        piece = img.resize((ox1 - ox0, oy1 - oy0), Image.LANCZOS, box=box)
-        out.paste(piece, (ox0, oy0), piece if mask else None)
-
-    beats = [dict(kind="hook_out", start=round(z0 - 0.2, 4), end=round(z0 + 0.4, 4)),
-             dict(kind="zoom", start=z0, end=z1, scale=round(s_end, 4)),
+    beats = [dict(kind="mac_fade", start=f0, end=f1),
+             dict(kind="camera_tour", start=a.move_start, end=a.move_end, polar=[incl0, a.theta_min, incl0],
+                  azimuth=[0, a.az_end], roll=[0, round(cam[-1][2], 3)], span=[DH, a.span_top, a.span_end],
+                  over_the_top=round(a.move_start + (a.move_end - a.move_start) / 2, 4)),
              dict(kind="end_card", start=round(fade_f0 / fps, 4), full=round(end_at, 4))]
-    labels = [(z0, z1, f"zoom 1x -> {s_end:.2f}x"), (fade_f0 / fps, end_at, "end card")]
-    chapters = [(0, cfg["name"]), (fade_f0, "End card")]
+    labels = [(f0, f1, "Mac fades"), (a.move_start, a.move_end, f"tour over the top ({a.theta_min:g} deg from the pole)"),
+              (fade_f0 / fps, end_at, "end card")]
+    chapters = [(0, f"{cfg['name']} on the Mac"), (round(f0 * fps), f"{cfg['name']}"), (fade_f0, "End card")]
 
-    hook_imgs = []
     outs = []
     for hi, hook in enumerate(hooks):
-        name = names[hi] if names else f"zoom-{slug(hook)}"
+        name = names[hi] if names else f"orbit-{slug(hook)}"
         print(f"compose {name}", flush=True)
-        hook_imgs.append(hook_layer(hook, g["lid"][1]))
-        out_mp4 = os.path.join(a.out, name + ".mp4")
+        hl = np.asarray(hook_layer(hook, g["lid"][1]), np.float32)
+        ha = hl[..., 3:4] / 255
         hw = os.path.join(work, f"h{hi}")
         os.makedirs(hw)
-        outs.append((name, out_mp4, open_encoder(out_mp4, fps, F, a.sound, chapters, a.crf, hw)))
+        out_mp4 = os.path.join(a.out, name + ".mp4")
+        outs.append((name, out_mp4, hl[..., :3] * ha, ha, open_encoder(out_mp4, fps, F, a.sound, chapters, a.crf, hw)))
 
-    # One render, streamed straight into every hook's encoder: no intermediate files.
-    cmd = renderer_cmd(zig, theme, cfg, size, end_f, fps, clock)
-    nbytes = size[0] * size[1] * 4
+    nbytes = C["W"] * C["H"] * 4
     with open(os.path.join(work, "render.log"), "ab") as log:
         r = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=log, bufsize=nbytes)
         try:
             for i in range(F):
+                t = i / fps
+                mac = 1 - smoothstep(f0, f1, t)  # how much of the Mac (and the hook) is left
                 if i < end_f:
                     b = r.stdout.read(nbytes)
                     if len(b) != nbytes:
                         die(f"{theme}: the renderer stopped at frame {i}; see {os.path.join(work, 'render.log')}")
-                    th = Image.frombuffer("RGBA", size, b, "raw", "RGBA", 0, 1)
-                    s, qx, qy = view(i)
-                    base = Image.new("RGB", (C["W"], C["H"]), (0, 0, 0))
-                    place(base, th, dx, dy, dx + DW, dy + DH, s, qx, qy, False)
-                    place(base, device, region[0], region[1], region[0] + device.size[0] / K, region[1] + device.size[1] / K,
-                          s, qx, qy, True)
-                for hi, (name, out_mp4, enc) in enumerate(outs):
-                    if i < end_f:
-                        hv = 1 - smoothstep(z0 - 0.2, z0 + 0.4, i / fps)
-                        frame = base
-                        if hv > 0:
-                            h = hook_imgs[hi]
-                            if hv < 1:
-                                h = h.copy()
-                                h.putalpha(h.getchannel("A").point(lambda v: int(v * hv + 0.5)))
-                            frame = base.copy()
-                            frame.paste(h, (0, 0), h)
-                        arr = np.asarray(frame, np.uint8)
+                    th = np.frombuffer(b, np.uint8).reshape(C["H"], C["W"], 4)[..., :3]
+                    if mac > 0:
+                        base = th.astype(np.float32) * (inside + (1 - inside) * (1 - mac))
+                        base = base * (1 - dev_a * mac) + dev_pm * mac
                     else:
-                        arr = None
+                        base = None
+                for name, out_mp4, hpm, ha, enc in outs:
+                    if i < end_f:
+                        if base is None:
+                            frame = th.astype(np.float32) if i >= fade_f0 else th
+                        else:
+                            frame = base * (1 - ha * mac) + hpm * mac
+                    else:
+                        frame = 0.0
                     if i >= fade_f0:
                         e = smoothstep(fade_f0, end_f, i)
-                        src = arr.astype(np.float32) if arr is not None else 0.0
-                        arr = np.clip(src * (1 - e) + endcard * e + 0.5, 0, 255).astype(np.uint8)
-                    enc.stdin.write(arr.tobytes())
+                        frame = frame * (1 - e) + endcard * e
+                    if frame is not th:
+                        frame = np.clip(frame + 0.5, 0, 255).astype(np.uint8)
+                    enc.stdin.write(np.ascontiguousarray(frame).tobytes())
         finally:
             r.stdout.close()
             rc = r.wait()
-            for _, _, enc in outs:
+            for *_, enc in outs:
                 enc.stdin.close()
     if rc != 0:
         die(f"{theme}: renderer exited {rc}")
-    for (name, out_mp4, enc), hook in zip(outs, hooks):
+    for (name, out_mp4, *_, enc), hook in zip(outs, hooks):
         if enc.wait() != 0:
             die(f"{name}: encode failed")
         finish(a, name, out_mp4, fps, F, hook, themes, beats, labels)
@@ -759,18 +818,24 @@ def make_zoom(a, zig, dev, themes, cfgs, hooks, names, clock, clock_text, work):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--format", default="pov", choices=["pov", "zoom"])
+    ap.add_argument("--format", default="pov", choices=["pov", "orbit"])
     ap.add_argument("--device", default="mbp14", choices=sorted(DEVICES))
     ap.add_argument("--themes", required=True, help="comma-separated theme names (themes/<name>.metal or .zig)")
     ap.add_argument("--hook", action="append", required=True, help="hook text above the screen; variants: repeat it or separate them with |; \\n breaks a line")
     ap.add_argument("--name", action="append", help="output name per hook, same forms as --hook (default: <format>-<slug of the hook>)")
     ap.add_argument("--seg", type=float, default=3.0, help="pov: seconds per theme; the swipes start at seg, 2 seg, ...")
     ap.add_argument("--swipe", type=float, default=0.6, help="pov: Space-swipe duration, s")
-    ap.add_argument("--duration", type=float, default=12.0, help="zoom: length of the video, s")
-    ap.add_argument("--zoom-start", type=float, default=1.8, help="zoom: the push-in starts (the hook fades around it), s")
-    ap.add_argument("--zoom-end", type=float, default=9.0, help="zoom: full zoom reached, s")
-    ap.add_argument("--fill", type=float, default=0.92, help="zoom: the final frame's height as a fraction of the display's")
-    ap.add_argument("--spaces", type=int, default=4, help="zoom: Spaces shown in the eye glyph")
+    ap.add_argument("--duration", type=float, default=18.0, help="orbit: length of the video, s")
+    ap.add_argument("--mac-fade", type=float, nargs=2, default=[2.0, 3.2], metavar=("START", "END"), help="orbit: the Mac and the hook fade out, s")
+    ap.add_argument("--move-start", type=float, default=2.2, help="orbit: the camera starts moving, s")
+    ap.add_argument("--move-end", type=float, default=16.9, help="orbit: the camera arrives, s")
+    ap.add_argument("--theta-min", type=float, default=20, help="orbit: the tour's closest approach to the pole, degrees (keep >= 20: near the axis the tracer slows from ~1 s a frame to 26 s at 15 deg, minutes below 5)")
+    ap.add_argument("--az-end", type=float, default=180, help="orbit: how far the probe travels around the spin axis, degrees")
+    ap.add_argument("--roll-end-extra", type=float, default=90, help="orbit: roll spread over the tour on top of the 180 deg over the top (90: the disk ends along the long side)")
+    ap.add_argument("--span-top", type=float, default=720, help="orbit: lens over the top: output pixels per theme frame height (the screen's view is the display's height, 639)")
+    ap.add_argument("--span-end", type=float, default=1150, help="orbit: lens at the end, edge-on again")
+    ap.add_argument("--strip", type=int, default=0, help="orbit: render only N stills along the tour into NAME-strip.png, for approval")
+    ap.add_argument("--spaces", type=int, default=4, help="orbit: Spaces shown in the eye glyph")
     ap.add_argument("--end", type=float, default=1.0, help="seconds of end card at the end")
     ap.add_argument("--fps", type=int, default=60, choices=[30, 60])
     ap.add_argument("--clock", default="2026-10-23T21:41:00", help="local time on the menu bar (and on theme clocks), ISO")
@@ -808,7 +873,7 @@ def main():
     work = os.path.join(a.out, f".work-{os.getpid()}")
     os.makedirs(work)
     try:
-        (make_zoom if a.format == "zoom" else make_pov)(a, zig, dev, themes, cfgs, hooks, names, clock, clock_text, work)
+        (make_orbit if a.format == "orbit" else make_pov)(a, zig, dev, themes, cfgs, hooks, names, clock, clock_text, work)
     finally:
         if not a.keep_work:
             shutil.rmtree(work)

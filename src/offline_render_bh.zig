@@ -25,7 +25,9 @@
 // are the theme's; only the camera changes. A frame whose camera
 // differs from the previous one is traced afresh. --meter-size WxH meters exposure on the theme's
 // own field at that size (the wallpaper's framing) at each frame's inclination, instead of on
-// the output framing, so a zoom doesn't change the exposure.
+// the output framing, so a zoom doesn't change the exposure. --exposure X holds the exposure at X
+// instead of metering; --hold-exposure meters the first frame's camera once and holds that (a
+// camera that keeps its setting while it moves).
 //
 //   zig run -O ReleaseFast -target aarch64-macos -lc --dep theme -Mroot=src/offline_render_bh.zig \
 //     -O ReleaseFast -Mtheme=themes/Cygnus_A.zig -- --size 1920x1080 --frames 300 \
@@ -71,15 +73,24 @@ pub fn main(init: std.process.Init) !void {
     var camera: ?[]const u8 = null;
     var meter_w: u32 = 0;
     var meter_h: u32 = 0;
+    var fixed_expo: f64 = 0;
+    var hold_expo = false;
+    for (args[1..]) |x| {
+        if (std.mem.eql(u8, x, "--hold-exposure")) hold_expo = true;
+    }
     var i: usize = 1;
     while (i + 1 < args.len) : (i += 2) {
         const a = args[i];
         const v = args[i + 1];
+        if (std.mem.eql(u8, a, "--hold-exposure")) { // a flag: no value to skip
+            i -= 1;
+            continue;
+        }
         if (std.mem.eql(u8, a, "--size")) {
             const x = std.mem.indexOfScalar(u8, v, 'x') orelse return error.BadSize;
             w = try std.fmt.parseInt(u32, v[0..x], 10);
             h = try std.fmt.parseInt(u32, v[x + 1 ..], 10);
-        } else if (std.mem.eql(u8, a, "--frames")) frames = try std.fmt.parseInt(usize, v, 10) else if (std.mem.eql(u8, a, "--i0")) inc0 = try std.fmt.parseFloat(f64, v) else if (std.mem.eql(u8, a, "--i1")) inc1 = try std.fmt.parseFloat(f64, v) else if (std.mem.eql(u8, a, "--pre")) pre = try std.fmt.parseInt(usize, v, 10) else if (std.mem.eql(u8, a, "--sweep")) sweep = @max(1, try std.fmt.parseInt(usize, v, 10)) else if (std.mem.eql(u8, a, "--sigma")) sigma = try std.fmt.parseFloat(f64, v) else if (std.mem.eql(u8, a, "--skip")) skip = try std.fmt.parseInt(usize, v, 10) else if (std.mem.eql(u8, a, "--fps")) fps = try std.fmt.parseFloat(f64, v) else if (std.mem.eql(u8, a, "--camera")) camera = v else if (std.mem.eql(u8, a, "--meter-size")) {
+        } else if (std.mem.eql(u8, a, "--frames")) frames = try std.fmt.parseInt(usize, v, 10) else if (std.mem.eql(u8, a, "--i0")) inc0 = try std.fmt.parseFloat(f64, v) else if (std.mem.eql(u8, a, "--i1")) inc1 = try std.fmt.parseFloat(f64, v) else if (std.mem.eql(u8, a, "--pre")) pre = try std.fmt.parseInt(usize, v, 10) else if (std.mem.eql(u8, a, "--sweep")) sweep = @max(1, try std.fmt.parseInt(usize, v, 10)) else if (std.mem.eql(u8, a, "--sigma")) sigma = try std.fmt.parseFloat(f64, v) else if (std.mem.eql(u8, a, "--skip")) skip = try std.fmt.parseInt(usize, v, 10) else if (std.mem.eql(u8, a, "--fps")) fps = try std.fmt.parseFloat(f64, v) else if (std.mem.eql(u8, a, "--camera")) camera = v else if (std.mem.eql(u8, a, "--exposure")) fixed_expo = try std.fmt.parseFloat(f64, v) else if (std.mem.eql(u8, a, "--meter-size")) {
             const x = std.mem.indexOfScalar(u8, v, 'x') orelse return error.BadSize;
             meter_w = try std.fmt.parseInt(u32, v[0..x], 10);
             meter_h = try std.fmt.parseInt(u32, v[x + 1 ..], 10);
@@ -155,6 +166,10 @@ pub fn main(init: std.process.Init) !void {
     // inclination meters the same on every frame, so it is metered once.
     const lnx = try alloc.alloc(f64, frames);
     for (incl, lnx, 0..) |rad, *x, f| {
+        if (fixed_expo > 0 or (hold_expo and f > 0)) {
+            x.* = if (fixed_expo > 0) @log(fixed_expo) else lnx[0];
+            continue;
+        }
         if (f > 0 and rad == incl[f - 1] and (metered or span[f] == span[f - 1])) {
             x.* = lnx[f - 1];
             continue;

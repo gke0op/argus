@@ -56,7 +56,7 @@ quasars:
 	python3 -I tools/gen_quasars.py
 
 # Vertical social videos (tools/social/README.md): offline theme renders on a drawn Mac screen,
-# Space swipes (FORMAT=pov) or a push-in on one theme (FORMAT=zoom), hook, end card. HOOK and NAME take
+# Space swipes (FORMAT=pov) or a camera move in a Kerr theme's simulation (FORMAT=orbit), hook, end card. HOOK and NAME take
 # variants separated by |.
 FORMAT ?= pov
 THEMES ?= Cygnus_A,Night_Tide,Roulette_Chrome,Phosphor_Terminal
@@ -65,7 +65,7 @@ SOCIAL_OUT ?= $(HOME)/Desktop/argus-clips/social
 social:
 	ZIG=$(ZIG) python3 -I tools/social/social.py --format $(FORMAT) --themes $(THEMES) --out "$(SOCIAL_OUT)" \
 		--hook "$(HOOK)" $(if $(NAME),--name "$(NAME)") \
-		$(if $(SOUND),--sound "$(SOUND)") $(if $(SEG),--seg $(SEG)) $(if $(CLOCK),--clock $(CLOCK))
+		$(if $(SOUND),--sound "$(SOUND)") $(if $(SEG),--seg $(SEG)) $(if $(CLOCK),--clock $(CLOCK)) $(if $(STILLS),--stills $(STILLS))
 
 test:
 	python3 -I tools/gen_quasars.py --check
