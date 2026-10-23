@@ -1,24 +1,32 @@
 // ============================================================================
 // ARGUS DESKTOP // src/desktop/desktop_picture.zig
 //
-// Mission Control Spaces-bar stills. The Spaces bar draws each Space from its macOS desktop
-// picture and leaves out Argus's desktop-level windows, so a theme Space would show the system
-// wallpaper there. When a theme Space is visited (or a theme lands on the active Space) and has
-// settled for a second, its current frame is written once to a PNG and set as that Space's
-// desktop picture. The user's own picture is recorded first and put back when the Space returns
-// to passthrough ("macOS Default") or Argus quits.
+// Theme stills as each theme Space's macOS desktop picture, while Argus runs.
 //
-// `setDesktopImageURL:forScreen:` only reaches the active Space, so all of this happens per Space,
-// as each one is visited. Work is once per visit or theme load, never per frame: the per-tick
-// path is a few integer compares. The ledger on disk keeps the originals across restarts, so a
-// Space that still shows a still after a crash or quit is restored on its next visit.
+// macOS judges a Space from its desktop picture, not from Argus's desktop-level window above it:
+// - On macOS 26 the menu bar is clear, and over a bright picture WindowServer adds a frosted
+//   legibility band (its own window, the top ~83 pt, layered above desktop-level windows). That
+//   band blurs the live theme under it, so a dark theme gets a grey haze across the top.
+// - The Spaces bar in Mission Control draws each Space from its picture and leaves Argus out.
+// So when a theme Space is visited (or a theme lands on the active Space) and has settled for a
+// second, its current frame is written once to a PNG and set as that Space's desktop picture.
+// The user's own picture is recorded first and put back when the Space returns to passthrough
+// ("macOS Default") or Argus quits.
+//
+// `setDesktopImageURL:forScreen:` only reaches the active Space, so stills are set per Space, as
+// each one is visited. Work is once per visit or theme load, never per frame: the per-tick path
+// is a few integer compares. On quit, when every Space goes back to the same picture of the
+// user's (the usual case), one call with AppKit's all-Spaces option restores them all and makes
+// it the picture new Spaces start with; otherwise the active Space is restored and the ledger on
+// disk keeps the others' originals, restored on their next visit after a restart (also after a
+// crash).
 // ============================================================================
 
 const std = @import("std");
 const sc = @import("space_config.zig");
 const settings = @import("settings.zig");
 
-/// Settings key (desktop/settings.zig) that switches the feature on; off by default.
+/// Settings key (desktop/settings.zig); on unless set to 0.
 pub const SETTING_KEY = "mission_control_stills";
 
 pub const MAX_ENTRIES: usize = 32;
@@ -52,6 +60,26 @@ pub const Entry = struct {
         const n = @min(s.len, URL_MAX);
         @memcpy(self.orig_buf[0..n], s[0..n]);
         self.orig_len = n;
+    }
+};
+
+/// A Space and the desktop picture macOS has for it (url_len 0: unknown).
+pub const Pic = struct {
+    uuid_buf: [UUID_MAX]u8 = @splat(0),
+    uuid_len: usize = 0,
+    url_buf: [URL_MAX]u8 = @splat(0),
+    url_len: usize = 0,
+
+    pub fn uuid(self: *const Pic) []const u8 {
+        return self.uuid_buf[0..self.uuid_len];
+    }
+    pub fn url(self: *const Pic) []const u8 {
+        return self.url_buf[0..self.url_len];
+    }
+    pub fn setURL(self: *Pic, s: []const u8) void {
+        if (s.len > URL_MAX) return;
+        @memcpy(self.url_buf[0..s.len], s);
+        self.url_len = s.len;
     }
 };
 
@@ -149,6 +177,11 @@ const MsgIdx = *const fn (Id, Sel, usize) callconv(.c) Id;
 const MsgCStr = *const fn (Id, Sel, [*:0]const u8) callconv(.c) Id;
 const MsgRetCStr = *const fn (Id, Sel) callconv(.c) ?[*:0]const u8;
 const MsgSetDesktop = *const fn (Id, Sel, Id, Id, Id, ?*Id) callconv(.c) bool;
+const Msg2 = *const fn (Id, Sel, Id, Id) callconv(.c) Id;
+const MsgBoolArg = *const fn (Id, Sel, bool) callconv(.c) Id;
+const MsgRetBool1 = *const fn (Id, Sel, Id) callconv(.c) bool;
+const MsgRetUsize = *const fn (Id, Sel) callconv(.c) usize;
+const MsgPList = *const fn (Id, Sel, Id, usize, ?*anyopaque, ?*Id) callconv(.c) Id;
 
 const CGPoint = extern struct { x: f64, y: f64 };
 const CGSize = extern struct { width: f64, height: f64 };
@@ -163,6 +196,14 @@ const Native = struct {
     msgCStr: MsgCStr,
     msgRetCStr: MsgRetCStr,
     msgSetDesktop: MsgSetDesktop,
+    msg2: Msg2,
+    msgBoolArg: MsgBoolArg,
+    msgRetBool1: MsgRetBool1,
+    msgRetUsize: MsgRetUsize,
+    msgPList: MsgPList,
+    /// AppKit's `NSWorkspaceDesktopImageAllSpacesKey` (an exported NSString); null when this
+    /// macOS lacks it, and then quitting restores Spaces one visit at a time.
+    all_spaces_key: Id,
     CFRelease: *const fn (?*anyopaque) callconv(.c) void,
     CFStringCreateWithCString: *const fn (?*anyopaque, [*:0]const u8, u32) callconv(.c) ?*anyopaque,
     CFStringGetCString: *const fn (?*anyopaque, [*]u8, isize, u32) callconv(.c) bool,
@@ -187,6 +228,7 @@ const Native = struct {
     key_spaces: ?*anyopaque,
     key_id64: ?*anyopaque,
     key_uuid: ?*anyopaque,
+    key_type: ?*anyopaque,
     uti_png: ?*anyopaque,
 
     fn load() ?Native {
@@ -195,7 +237,8 @@ const Native = struct {
         const iio = std.c.dlopen("/System/Library/Frameworks/ImageIO.framework/ImageIO", .{ .LAZY = true }) orelse return null;
         const cg = std.c.dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", .{ .LAZY = true }) orelse return null;
         const sky = std.c.dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", .{ .LAZY = true }) orelse return null;
-        _ = std.c.dlopen("/System/Library/Frameworks/AppKit.framework/AppKit", .{ .LAZY = true }) orelse return null;
+        const appkit = std.c.dlopen("/System/Library/Frameworks/AppKit.framework/AppKit", .{ .LAZY = true }) orelse return null;
+        const all_key: ?*const Id = @ptrCast(@alignCast(std.c.dlsym(appkit, "NSWorkspaceDesktopImageAllSpacesKey")));
         const msg = std.c.dlsym(objc, "objc_msgSend") orelse return null;
         const mkstr: *const fn (?*anyopaque, [*:0]const u8, u32) callconv(.c) ?*anyopaque = @ptrCast(@alignCast(std.c.dlsym(cf, "CFStringCreateWithCString") orelse return null));
         return .{
@@ -207,6 +250,12 @@ const Native = struct {
             .msgCStr = @ptrCast(@alignCast(msg)),
             .msgRetCStr = @ptrCast(@alignCast(msg)),
             .msgSetDesktop = @ptrCast(@alignCast(msg)),
+            .msg2 = @ptrCast(@alignCast(msg)),
+            .msgBoolArg = @ptrCast(@alignCast(msg)),
+            .msgRetBool1 = @ptrCast(@alignCast(msg)),
+            .msgRetUsize = @ptrCast(@alignCast(msg)),
+            .msgPList = @ptrCast(@alignCast(msg)),
+            .all_spaces_key = if (all_key) |k| k.* else null,
             .CFRelease = @ptrCast(@alignCast(std.c.dlsym(cf, "CFRelease") orelse return null)),
             .CFStringCreateWithCString = mkstr,
             .CFStringGetCString = @ptrCast(@alignCast(std.c.dlsym(cf, "CFStringGetCString") orelse return null)),
@@ -231,6 +280,7 @@ const Native = struct {
             .key_spaces = mkstr(null, "Spaces", 0x08000100),
             .key_id64 = mkstr(null, "id64", 0x08000100),
             .key_uuid = mkstr(null, "uuid", 0x08000100),
+            .key_type = mkstr(null, "type", 0x08000100),
             .uti_png = mkstr(null, "public.png", 0x08000100),
         };
     }
@@ -258,7 +308,12 @@ const Native = struct {
         return out[0..sl.len];
     }
 
+    /// Sets the active Space's picture; with `all_spaces`, every Space of the main display's.
     fn setDesktopURL(self: *const Native, abs_url: []const u8) bool {
+        return self.setDesktopURLOn(abs_url, false);
+    }
+
+    fn setDesktopURLOn(self: *const Native, abs_url: []const u8, all_spaces: bool) bool {
         var buf: [URL_MAX + 1]u8 = undefined;
         if (abs_url.len > URL_MAX) return false;
         @memcpy(buf[0..abs_url.len], abs_url);
@@ -266,7 +321,11 @@ const Native = struct {
         const screen = self.mainScreen() orelse return false;
         const str = self.msgCStr(self.getClass("NSString"), self.sel("stringWithUTF8String:"), @ptrCast(&buf)) orelse return false;
         const url = self.msg1(self.getClass("NSURL"), self.sel("URLWithString:"), str) orelse return false;
-        const opts = self.msg0(self.getClass("NSDictionary"), self.sel("dictionary"));
+        const opts = if (all_spaces) blk: {
+            const key = self.all_spaces_key orelse return false;
+            const yes = self.msgBoolArg(self.getClass("NSNumber"), self.sel("numberWithBool:"), true);
+            break :blk self.msg2(self.getClass("NSDictionary"), self.sel("dictionaryWithObject:forKey:"), yes, key);
+        } else self.msg0(self.getClass("NSDictionary"), self.sel("dictionary"));
         var err: Id = null;
         return self.msgSetDesktop(self.workspace(), self.sel("setDesktopImageURL:forScreen:options:error:"), url, screen, opts, &err);
     }
@@ -292,6 +351,78 @@ const Native = struct {
             }
         }
         return null;
+    }
+
+    /// The UUIDs of every current Space, on every display. Null when SkyLight reports none.
+    fn currentSpaceUUIDs(self: *const Native, out: []Pic) ?usize {
+        const displays = self.CGSCopyManagedDisplaySpaces(self.CGSMainConnectionID()) orelse return null;
+        defer self.CFRelease(displays);
+        var n: usize = 0;
+        var d: isize = 0;
+        while (d < self.CFArrayGetCount(displays)) : (d += 1) {
+            const disp = self.CFArrayGetValueAtIndex(displays, d) orelse continue;
+            const spaces = self.CFDictionaryGetValue(disp, self.key_spaces) orelse continue;
+            var s: isize = 0;
+            while (s < self.CFArrayGetCount(spaces)) : (s += 1) {
+                const sp = self.CFArrayGetValueAtIndex(spaces, s) orelse continue;
+                // Desktops only (type 0); a fullscreen app's Space has no picture of its own.
+                var kind: i64 = 0;
+                if (self.CFDictionaryGetValue(sp, self.key_type)) |t| _ = self.CFNumberGetValue(t, 4, &kind);
+                if (kind != 0) continue;
+                const u = self.CFDictionaryGetValue(sp, self.key_uuid) orelse continue;
+                if (n == out.len) return null; // more Spaces than we can check: don't guess
+                out[n] = .{};
+                if (!self.CFStringGetCString(u, &out[n].uuid_buf, UUID_MAX, 0x08000100)) return null;
+                out[n].uuid_len = std.mem.indexOfScalar(u8, &out[n].uuid_buf, 0) orelse return null;
+                if (out[n].uuid_len > 0) n += 1;
+            }
+        }
+        return if (n > 0) n else null;
+    }
+
+    fn nsString(self: *const Native, z: [*:0]const u8) Id {
+        return self.msgCStr(self.getClass("NSString"), self.sel("stringWithUTF8String:"), z);
+    }
+
+    /// `obj[key]` when `obj` is a dictionary, else null (the store's layout is not ours to trust).
+    fn dictGet(self: *const Native, obj: Id, key: [*:0]const u8) Id {
+        const o = obj orelse return null;
+        if (!self.msgRetBool1(o, self.sel("isKindOfClass:"), self.getClass("NSDictionary"))) return null;
+        return self.msg1(o, self.sel("objectForKey:"), self.nsString(key));
+    }
+
+    /// Reads, never writes, the per-Space desktop pictures macOS keeps in the wallpaper store
+    /// (`com.apple.wallpaper/Store/Index.plist`, macOS 14+): `Spaces/<uuid>/Default/Desktop/
+    /// Content/Choices[0]` holds an image choice whose `Configuration` plist has `url.relative`.
+    /// Fills `pics[i].url` for each Space in `pics` (url_len stays 0 where the store has no image).
+    /// False when the store cannot be read.
+    fn storePictures(self: *const Native, pics: []Pic) bool {
+        const home = std.c.getenv("HOME") orelse return false;
+        var path_buf: [600]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, "{s}/Library/Application Support/com.apple.wallpaper/Store/Index.plist\x00", .{std.mem.sliceTo(home, 0)}) catch return false;
+        const root = self.msg1(self.getClass("NSDictionary"), self.sel("dictionaryWithContentsOfFile:"), self.nsString(@ptrCast(path.ptr)));
+        const spaces = self.dictGet(root, "Spaces") orelse return false;
+        for (pics) |*pic| {
+            var ubuf: [UUID_MAX + 1]u8 = @splat(0);
+            @memcpy(ubuf[0..pic.uuid_len], pic.uuid());
+            const content = self.dictGet(self.dictGet(self.dictGet(self.msg1(spaces, self.sel("objectForKey:"), self.nsString(@ptrCast(&ubuf))), "Default"), "Desktop"), "Content");
+            const choices = self.dictGet(content, "Choices") orelse continue;
+            if (!self.msgRetBool1(choices, self.sel("isKindOfClass:"), self.getClass("NSArray"))) continue;
+            if (self.msgRetUsize(choices, self.sel("count")) != 1) continue; // shuffles and such: not one picture
+            const choice = self.msgIdx(choices, self.sel("objectAtIndex:"), 0);
+            const provider = self.dictGet(choice, "Provider") orelse continue;
+            const prov = self.msgRetCStr(provider, self.sel("UTF8String")) orelse continue;
+            if (!std.mem.eql(u8, std.mem.sliceTo(prov, 0), "com.apple.wallpaper.choice.image")) continue;
+            const cfg = self.dictGet(choice, "Configuration") orelse continue;
+            if (!self.msgRetBool1(cfg, self.sel("isKindOfClass:"), self.getClass("NSData"))) continue;
+            var err: Id = null;
+            const plist = self.msgPList(self.getClass("NSPropertyListSerialization"), self.sel("propertyListWithData:options:format:error:"), cfg, 0, null, &err);
+            const rel = self.dictGet(self.dictGet(plist, "url"), "relative") orelse continue;
+            if (!self.msgRetBool1(rel, self.sel("isKindOfClass:"), self.getClass("NSString"))) continue;
+            const u = self.msgRetCStr(rel, self.sel("UTF8String")) orelse continue;
+            pic.setURL(std.mem.sliceTo(u, 0));
+        }
+        return true;
     }
 
     /// A private copy of a frame. Theme frames wrap a pixel buffer that the next render overwrites,
@@ -361,9 +492,11 @@ pub const DesktopPictures = struct {
     dir_len: usize = 0,
     /// Native side loaded and the stills folder exists.
     ready: bool = false,
-    /// The user setting (`mission_control_stills`). When off, every visited Space that still
-    /// shows one of our stills gets its own picture back.
+    /// The user setting (`mission_control_stills`, on by default). When off, every visited Space
+    /// that still shows one of our stills gets its own picture back.
     enabled: bool = false,
+    /// Set when a still's frame has been copied for encoding; see takeStillStarted.
+    still_started: bool = false,
 
     // Current visit
     cur_space_id: u64 = 0,
@@ -376,7 +509,7 @@ pub const DesktopPictures = struct {
     job: Job = .{},
 
     pub fn init(self: *DesktopPictures) void {
-        self.enabled = settings.getBool(SETTING_KEY, false);
+        self.enabled = settings.getBool(SETTING_KEY, true);
         const home = std.c.getenv("HOME") orelse return;
         const dir = std.fmt.bufPrint(&self.dir_buf, "{s}" ++ STILLS_SUBDIR, .{std.mem.sliceTo(home, 0)}) catch return;
         self.dir_len = dir.len;
@@ -453,6 +586,19 @@ pub const DesktopPictures = struct {
             frame -% self.sig_since == SETTLE_TICKS - 2;
     }
 
+    /// True while the active Space's still is yet to be taken: its preview must be a full frame.
+    /// Otherwise previews stay small, so a GPU Space keeps no full-size copy of its frame around.
+    pub fn wantsFullFrame(self: *const DesktopPictures) bool {
+        return self.ready and self.enabled and !self.done and self.last_sig != 0;
+    }
+
+    /// True once after a still's frame was copied for encoding: the caller can go back to a
+    /// small preview and release the full-size one.
+    pub fn takeStillStarted(self: *DesktopPictures) bool {
+        defer self.still_started = false;
+        return self.still_started;
+    }
+
     /// Called every tick; costs a few compares unless the active Space or its theme just changed.
     /// `sig` is `stillSignature` of the active Space; `cg_image` is its latest presented frame.
     pub fn tick(self: *DesktopPictures, space_id: u64, theme_sig: u64, cg_image: ?*anyopaque, frame: usize) void {
@@ -517,6 +663,7 @@ pub const DesktopPictures = struct {
             return;
         };
         t.detach();
+        self.still_started = true;
     }
 
     /// Main thread, after the encode: set the still only if the user is still on that Space and
@@ -600,12 +747,50 @@ pub const DesktopPictures = struct {
         }
     }
 
-    /// On quit: restore the active Space. Other Spaces cannot be reached through the public API
-    /// without visiting them; their originals stay in the ledger and come back on their next visit
-    /// after Argus starts again (immediately for a Space that is no longer themed, or when the
-    /// feature is off).
-    pub fn restoreActiveForQuit(self: *DesktopPictures, space_id: u64) void {
+    /// The one picture of the user's that every Space goes back to on quit, when there is exactly
+    /// one and at least one Space shows a still of ours; else null. `pics` are all current Spaces
+    /// with the picture macOS has for each (url_len 0: unknown, which rules this out).
+    pub fn quitPicture(self: *DesktopPictures, pics: []const Pic) ?[]const u8 {
+        var common: ?[]const u8 = null;
+        var any_ours = false;
+        for (pics) |*p| {
+            if (p.url_len == 0) return null;
+            const ours = self.isOurs(p.url());
+            const own = self.originalFor(p.uuid(), p.url()) orelse return null;
+            if (self.isOurs(own)) return null;
+            any_ours = any_ours or ours;
+            if (common) |c| {
+                if (!std.mem.eql(u8, c, own)) return null;
+            } else common = own;
+        }
+        return if (any_ours) common else null;
+    }
+
+    /// On quit, when every Space goes back to the same picture: set it on all Spaces at once.
+    /// That also makes it the picture new Spaces start with. False when it does not apply.
+    fn restoreAllForQuit(self: *DesktopPictures) bool {
+        const n = &self.native.?;
+        if (n.all_spaces_key == null) return false;
+        var pics: [MAX_ENTRIES]Pic = undefined;
+        const count = n.currentSpaceUUIDs(&pics) orelse return false;
+        if (!n.storePictures(pics[0..count])) return false;
+        var url_buf: [URL_MAX]u8 = undefined;
+        const pick = self.quitPicture(pics[0..count]) orelse return false;
+        @memcpy(url_buf[0..pick.len], pick);
+        if (!n.setDesktopURLOn(url_buf[0..pick.len], true)) return false;
+        for (self.ledger.entries[0..self.ledger.n]) |*e| e.applied_sig = 0;
+        self.saveLedger();
+        return true;
+    }
+
+    /// On quit: every Space back to the user's picture in one call when they all share one;
+    /// otherwise the active Space. Other Spaces cannot be reached through the public API without
+    /// visiting them; their originals stay in the ledger and come back on their next visit after
+    /// Argus starts again (immediately for a Space that is no longer themed, or when the feature
+    /// is off).
+    pub fn restoreForQuit(self: *DesktopPictures, space_id: u64) void {
         if (!self.ready) return;
+        if (self.restoreAllForQuit()) return;
         var ubuf: [UUID_MAX]u8 = @splat(0);
         const u = self.native.?.spaceUUID(space_id, &ubuf) orelse return;
         self.restore(u);
@@ -721,4 +906,45 @@ test "file URLs percent-encode spaces and keep path separators" {
     var buf: [256]u8 = undefined;
     const u = fileURL("/Users/me/Library/Application Support/Argus/Desktop Stills/AB-1f.png", &buf).?;
     try std.testing.expectEqualStrings("file:///Users/me/Library/Application%20Support/Argus/Desktop%20Stills/AB-1f.png", u);
+}
+
+fn testPic(space_uuid: []const u8, url: []const u8) Pic {
+    var p: Pic = .{};
+    @memcpy(p.uuid_buf[0..space_uuid.len], space_uuid);
+    p.uuid_len = space_uuid.len;
+    p.setURL(url);
+    return p;
+}
+
+const STILL_A = "file:///Users/me/Library/Application%20Support/Argus/Desktop%20Stills/AAAA-1-beef.png";
+const LAKE = "file:///Users/me/Pictures/Lake%20Tahoe.heic";
+
+test "quit: every Space goes back to the one picture they share" {
+    var dp: DesktopPictures = .{};
+    dp.ledger.findOrAdd("AAAA-1").?.setOriginal(LAKE);
+    const pics = [_]Pic{
+        testPic("AAAA-1", STILL_A), // our still, original recorded
+        testPic("BBBB-2", LAKE), // never themed
+        testPic("CCCC-3", STILL_A), // seeded by macOS from AAAA-1's still when it was created
+    };
+    try std.testing.expectEqualStrings(LAKE, dp.quitPicture(&pics).?);
+}
+
+test "quit: Spaces with different pictures are restored one at a time" {
+    var dp: DesktopPictures = .{};
+    dp.ledger.findOrAdd("AAAA-1").?.setOriginal(LAKE);
+    const pics = [_]Pic{ testPic("AAAA-1", STILL_A), testPic("BBBB-2", "file:///Users/me/Pictures/Other.jpg") };
+    try std.testing.expect(dp.quitPicture(&pics) == null);
+}
+
+test "quit: nothing of ours on screen, or a picture we cannot read, sets nothing" {
+    var dp: DesktopPictures = .{};
+    dp.ledger.findOrAdd("AAAA-1").?.setOriginal(LAKE);
+    const plain = [_]Pic{ testPic("AAAA-1", LAKE), testPic("BBBB-2", LAKE) };
+    try std.testing.expect(dp.quitPicture(&plain) == null);
+    const unknown = [_]Pic{ testPic("AAAA-1", STILL_A), testPic("BBBB-2", "") }; // e.g. a dynamic wallpaper
+    try std.testing.expect(dp.quitPicture(&unknown) == null);
+    var orphan: DesktopPictures = .{}; // a still whose original was never recorded
+    const pics = [_]Pic{testPic("AAAA-1", STILL_A)};
+    try std.testing.expect(orphan.quitPicture(&pics) == null);
 }

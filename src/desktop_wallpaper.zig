@@ -256,6 +256,9 @@ const MacBridge = struct {
     ctrl_instance: ?*anyopaque = null,
     // GPU Spaces have no CPU frame; they publish a snapshot as sp.cg_image for the menu previews.
     snap_tick: [MAX_SPACES]usize = @splat(0), // frame_idx + 1 of the last snapshot, 0 = none yet
+    // A GPU Space whose full-size preview served a desktop-picture still: once a small preview
+    // replaces it, its canvas-sized buffer goes back to the system.
+    native_release: [MAX_SPACES]bool = @splat(false),
     // frame_idx of each GPU Space's last frame; hidden ones are parked after GPU_PARK_TICKS.
     gpu_drawn_tick: [MAX_SPACES]usize = @splat(0),
     perf_renders: [MAX_SPACES]u16 = @splat(0),
@@ -685,10 +688,12 @@ const MacBridge = struct {
         return last == 0 or (self.popover_visible and self.frame_idx + 1 >= last + 15);
     }
 
-    /// A GPU Space's preview: full canvas size while Mission Control stills use it (they write
-    /// it to disk as the Space's picture), otherwise a small image just for the menu.
+    /// A GPU Space's preview: full canvas size for the active Space while its desktop-picture
+    /// still is being taken (it is written to disk as the Space's picture), otherwise a small
+    /// image just for the menu.
     fn previewTarget(self: *MacBridge, idx: usize) struct { px: []u32, w: usize, h: usize } {
-        if (g_pictures.enabled) return .{ .px = &self.obs.space_native_pixels[idx], .w = NATIVE_W, .h = NATIVE_H };
+        const active = self.bench_space orelse self.obs.active_space_idx;
+        if (idx == active and g_pictures.wantsFullFrame()) return .{ .px = &self.obs.space_native_pixels[idx], .w = NATIVE_W, .h = NATIVE_H };
         return .{ .px = &self.obs.preview_pixels[idx], .w = obs_mod.PREVIEW_W, .h = obs_mod.PREVIEW_H };
     }
 
@@ -706,6 +711,13 @@ const MacBridge = struct {
         const sp = &self.obs.spaces[idx];
         if (sp.cg_image) |old| self.CGImageRelease(old);
         sp.cg_image = img orelse return;
+        // The full-size frame is no longer the preview: hand its pages back (fresh zero pages;
+        // the next full-size snapshot rewrites the whole buffer). Not while the menu is open,
+        // which may still be drawing the full-size image.
+        if (self.native_release[idx] and t.w != NATIVE_W and !self.popover_visible) {
+            self.native_release[idx] = false;
+            self.obs.resetSpaceNativeBuffer(idx);
+        }
     }
 
     /// Once a tick: finished traces drop their temporary buffers, unused traced images are
@@ -1855,7 +1867,7 @@ fn appBundlePath(out: []u8) ?[]const u8 {
 
 /// Every way out of Argus: put the active Space's own desktop picture back first.
 fn quitArgus(b: *MacBridge) noreturn {
-    g_pictures.restoreActiveForQuit(b.CGSGetActiveSpace(b.cgs_conn));
+    g_pictures.restoreForQuit(b.CGSGetActiveSpace(b.cgs_conn));
     std.process.exit(0);
 }
 
@@ -2684,6 +2696,11 @@ fn onTick(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
         // GPU Spaces publish a CPU snapshot only on load or while the menu is open: ask for one.
         if (g_pictures.wantsFreshFrame(b.frame_idx)) b.snap_tick[active_idx] = 0;
         g_pictures.tick(cur_space_id, desktop_picture.stillSignature(sp), sp.cg_image, b.frame_idx);
+        // The still has its own copy of the frame: back to a small preview for this Space.
+        if (g_pictures.takeStillStarted()) {
+            b.snap_tick[active_idx] = 0;
+            b.native_release[active_idx] = true;
+        }
     }
 
     b.frame_idx += 1;
@@ -3274,7 +3291,8 @@ pub fn main(init: std.process.Init) !void {
     installPopoverDismissal(&bridge, msgSend_raw, ctrl_instance);
     installReopenHandlers(&bridge, msgSend_raw, ctrl_instance);
     if (!normal_window) {
-        g_pictures.init();
+        // Never from a measurement instance: it would set the user's desktop pictures.
+        if (!offscreen) g_pictures.init();
         _ = signal(15, onQuitSignal); // SIGTERM
         _ = signal(2, onQuitSignal); // SIGINT
         _ = signal(1, onQuitSignal); // SIGHUP

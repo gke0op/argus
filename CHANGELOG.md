@@ -6,6 +6,19 @@ All notable changes to Argus are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- No more frosted band across the top of a theme. On macOS 26 the menu bar is clear, and when
+  the system desktop picture is bright behind it, macOS lays a frosted legibility band over the
+  top of the screen, above Argus, blurring the live theme. macOS decides this from the desktop
+  picture, not from what Argus shows, so while Argus runs each theme Space's desktop picture is
+  now a still of its theme (the Mission Control stills, now on by default). macOS then judges the
+  theme itself, and the Spaces bar in Mission Control shows it too. Your own picture comes back
+  when a Space goes back to macOS Default and when Argus quits: on every Space at once when they
+  all had the same picture, otherwise on the Space you're on, and on the others the next time
+  Argus visits them. `mission_control_stills=0` in `.argus_settings.conf` turns it off.
+  Measurement instances (`--offscreen`) never touch desktop pictures.
+
 ## [0.1.8] - 2026-10-20
 
 ### Changed
