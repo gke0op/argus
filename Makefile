@@ -5,7 +5,7 @@ THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: icon quasars all app desktop kronos harness check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch
+.PHONY: icon quasars all app desktop kronos harness check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
 
 all: app kronos
 
@@ -54,6 +54,18 @@ icon:
 # any local configurations in tools/local/*.json, which stay untracked).
 quasars:
 	python3 -I tools/gen_quasars.py
+
+# Vertical social videos (tools/social/README.md): offline theme renders on a drawn Mac screen,
+# Space swipes (FORMAT=pov) or a camera move in a Kerr theme's simulation (FORMAT=orbit), hook, end card. HOOK and NAME take
+# variants separated by |.
+FORMAT ?= pov
+THEMES ?= Cygnus_A,Night_Tide,Roulette_Chrome,Phosphor_Terminal
+HOOK ?= POV: every desktop on your Mac is a different universe
+SOCIAL_OUT ?= $(HOME)/Desktop/argus-clips/social
+social:
+	ZIG=$(ZIG) python3 -I tools/social/social.py --format $(FORMAT) --themes $(THEMES) --out "$(SOCIAL_OUT)" \
+		--hook "$(HOOK)" $(if $(NAME),--name "$(NAME)") \
+		$(if $(SOUND),--sound "$(SOUND)") $(if $(SEG),--seg $(SEG)) $(if $(CLOCK),--clock $(CLOCK)) $(if $(STILLS),--stills $(STILLS))
 
 test:
 	python3 -I tools/gen_quasars.py --check
