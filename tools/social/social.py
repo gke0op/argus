@@ -652,11 +652,30 @@ def tour_pose(a, u, span0, incl0):
     return theta, span, roll, a.az_end * u
 
 
+def dip_cross(a, incl0):
+    """Fraction of the dip at which the camera is in the disk's plane (polar 90 deg)."""
+    target = (90.0 - incl0) / (a.dip_to - incl0)
+    lo, hi = 0.0, 1.0
+    for _ in range(50):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if smootherstep(mid) < target else (lo, mid)
+    return lo
+
+
 def orbit_camera(a, fps, n_frames, span0, incl0):
     """Per-frame camera: the wallpaper's own view (incl0, span0, no roll, azimuth 0) until
-    move_start, then the tour (tour_pose) eased in and out (smootherstep) to move_end, then held."""
-    return [tour_pose(a, smootherstep((i / fps - a.move_start) / (a.move_end - a.move_start)), span0, incl0)
-            for i in range(n_frames)]
+    move_start, then the tour (tour_pose) eased in and out (smootherstep) to move_end. Then the
+    dip: the polar angle eases from incl0 through the disk's plane (90 deg: the infinitely thin
+    disk vanishes edge-on, leaving the lensed ring) to dip_to, just below it, with the roll and
+    the lens held, so the disk keeps running along the frame's height."""
+    rows = []
+    for i in range(n_frames):
+        t = i / fps
+        th, sp, rl, az = tour_pose(a, smootherstep((t - a.move_start) / (a.move_end - a.move_start)), span0, incl0)
+        if a.dip_to:
+            th += (a.dip_to - incl0) * smootherstep((t - a.dip_start) / (a.dip_end - a.dip_start))
+        rows.append((th, sp, rl, az))
+    return rows
 
 
 def orbit_strip(a, cmd, camf, span0, incl0, theme):
@@ -712,6 +731,8 @@ def make_orbit(a, zig, dev, themes, cfgs, hooks, names, clock, clock_text, work)
     f0, f1 = a.mac_fade
     if not (0 < f0 < f1 and a.move_start >= f0 and a.move_start < a.move_end <= end_at) or total > 60:
         die("timeline: need 0 < Mac fade start < fade end, the move to start after the fade starts and end by the end card")
+    if a.dip_to and not (a.move_start < a.dip_start < a.dip_end <= end_at):
+        die("timeline: the dip must start after the tour does and end by the end card")
     F = round(total * fps)
     fade_f0, end_f = round((end_at - 0.25) * fps), round(end_at * fps)
 
@@ -754,8 +775,11 @@ def make_orbit(a, zig, dev, themes, cfgs, hooks, names, clock, clock_text, work)
              dict(kind="camera_tour", start=a.move_start, end=a.move_end, polar=[incl0, a.theta_min, incl0],
                   azimuth=[0, a.az_end], roll=[0, round(cam[-1][2], 3)], span=[DH, a.span_top, a.span_end],
                   over_the_top=round(a.move_start + (a.move_end - a.move_start) / 2, 4)),
+             *([dict(kind="dip", start=a.dip_start, end=a.dip_end, polar=[incl0, a.dip_to],
+                     disk_plane=round(a.dip_start + (a.dip_end - a.dip_start) * dip_cross(a, incl0), 4))] if a.dip_to else []),
              dict(kind="end_card", start=round(fade_f0 / fps, 4), full=round(end_at, 4))]
     labels = [(f0, f1, "Mac fades"), (a.move_start, a.move_end, f"tour over the top ({a.theta_min:g} deg from the pole)"),
+              *([(a.dip_start, a.dip_end, f"dip through the disk plane to {a.dip_to:g} deg")] if a.dip_to else []),
               (fade_f0 / fps, end_at, "end card")]
     chapters = [(0, f"{cfg['name']} on the Mac"), (round(f0 * fps), f"{cfg['name']}"), (fade_f0, "End card")]
 
@@ -825,7 +849,7 @@ def main():
     ap.add_argument("--name", action="append", help="output name per hook, same forms as --hook (default: <format>-<slug of the hook>)")
     ap.add_argument("--seg", type=float, default=3.0, help="pov: seconds per theme; the swipes start at seg, 2 seg, ...")
     ap.add_argument("--swipe", type=float, default=0.6, help="pov: Space-swipe duration, s")
-    ap.add_argument("--duration", type=float, default=18.0, help="orbit: length of the video, s")
+    ap.add_argument("--duration", type=float, default=20.0, help="orbit: length of the video, s")
     ap.add_argument("--mac-fade", type=float, nargs=2, default=[2.0, 3.2], metavar=("START", "END"), help="orbit: the Mac and the hook fade out, s")
     ap.add_argument("--move-start", type=float, default=2.2, help="orbit: the camera starts moving, s")
     ap.add_argument("--move-end", type=float, default=16.9, help="orbit: the camera arrives, s")
@@ -834,6 +858,9 @@ def main():
     ap.add_argument("--roll-end-extra", type=float, default=90, help="orbit: roll spread over the tour on top of the 180 deg over the top (90: the disk ends along the long side)")
     ap.add_argument("--span-top", type=float, default=720, help="orbit: lens over the top: output pixels per theme frame height (the screen's view is the display's height, 639)")
     ap.add_argument("--span-end", type=float, default=1150, help="orbit: lens at the end, edge-on again")
+    ap.add_argument("--dip-to", type=float, default=96, help="orbit: after the tour, dip through the disk's plane to this polar angle, degrees (0 = no dip)")
+    ap.add_argument("--dip-start", type=float, default=16.6, help="orbit: the dip starts, s")
+    ap.add_argument("--dip-end", type=float, default=18.6, help="orbit: the dip arrives, s")
     ap.add_argument("--strip", type=int, default=0, help="orbit: render only N stills along the tour into NAME-strip.png, for approval")
     ap.add_argument("--spaces", type=int, default=4, help="orbit: Spaces shown in the eye glyph")
     ap.add_argument("--end", type=float, default=1.0, help="seconds of end card at the end")

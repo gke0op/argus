@@ -7,20 +7,23 @@ Vertical (9:16) clips of Argus themes on a Mac screen, for TikTok, Reels and Sho
 make social ZIG=path/to/zig-0.17.0 THEMES=Cygnus_A,Night_Tide,Roulette_Chrome,Phosphor_Terminal \
   HOOK="POV: every desktop on your Mac is a different universe" NAME=pov-different-universe
 
-# zoom: one theme, the camera pushes in from the whole MacBook until the theme fills the frame
-make social ZIG=path/to/zig-0.17.0 FORMAT=zoom THEMES=Cygnus_A \
-  HOOK="wdym my wallpaper has general relativity" NAME=pov-general-relativity
+# orbit: a Kerr-disk theme on the MacBook, the Mac fades, then a probe tours the black hole
+make social ZIG=path/to/zig-0.17.0 FORMAT=orbit THEMES=Cygnus_A \
+  HOOK="wdym my wallpaper has general relativity" NAME=pov-general-relativity STILLS=1,2.6,9.55,16.9,18.6,19.5
+
+# the same path as a labelled 8-still strip, for approval before the full render
+ZIG=path/to/zig-0.17.0 python3 -I tools/social/social.py --format orbit --themes Cygnus_A --hook x --name tour --strip 8
 ```
 
-To render several hook variants in one run, separate them with `|` in `HOOK` and `NAME`. Every variant uses the same theme render. A pov run takes about 25 s on an M3; a zoom run takes about 70 s.
+To render several hook variants in one run, separate them with `|` in `HOOK` and `NAME`. Every variant uses the same theme render. A pov run takes about 25 s on an M3. An orbit run takes about 15–20 min, because every frame of the camera move is a fresh trace.
 
 Output goes to `~/Desktop/argus-clips/social/` (set `SOCIAL_OUT=` to change it):
 
 | File | What it is |
 |---|---|
-| `NAME.mp4` | 1080×1920, 60 FPS, 12 s by default. H.264 High@4.2, CRF 16 (VBV cap 24 Mb/s), tagged BT.709, `+faststart`. It has a silent 48 kHz stereo AAC track (the sound slot) and chapters |
-| `NAME_1s.png`, `_6s.png`, `_11s.png` | Stills for review, decoded from the MP4 |
-| `NAME.beats.json` | The beats for the sound pass. pov: the start, peak velocity and settle time of each Space swipe. zoom: when the hook fades and when the zoom runs. Both: when the end card fades in |
+| `NAME.mp4` | 1080×1920, 60 FPS, 12 s by default (orbit: 20 s). H.264 High@4.2, CRF 16 (VBV cap 24 Mb/s), tagged BT.709, `+faststart`. It has a silent 48 kHz stereo AAC track (the sound slot) and chapters |
+| `NAME_1s.png`, `_6s.png`, `_11s.png` | Stills for review, decoded from the MP4 (default times; `STILLS=` sets others) |
+| `NAME.beats.json` | The beats for the sound pass. pov: the start, peak velocity and settle time of each Space swipe. orbit: the Mac's fade, the tour, its pass over the top, the dip and the moment it crosses the disk's plane. Both: when the end card fades in |
 | `NAME.labels.txt` | The same beats as an Audacity label track |
 
 Other options (run `python3 tools/social/social.py --help` for the full list):
@@ -28,7 +31,8 @@ Other options (run `python3 tools/social/social.py --help` for the full list):
 - `SOUND=track.m4a` lays audio under the video instead of silence.
 - `SEG=` sets seconds per theme in pov.
 - `CLOCK=2026-10-23T21:41:00` sets the menu-bar clock.
-- `--zoom-start`, `--zoom-end` and `--fill` set the zoom's timing and how much of the display's height the final frame shows.
+- `--mac-fade`, `--move-start`/`--move-end`, `--theta-min`, `--az-end`, `--roll-end-extra`, `--span-top`/`--span-end` and `--dip-to`/`--dip-start`/`--dip-end` set the orbit's timing and path.
+- `--strip N` renders only N labelled stills along the path.
 - `--guides` also writes a still with the platforms' UI zones washed red.
 - `--keep-work` keeps the intermediates.
 
@@ -43,18 +47,33 @@ Other options (run `python3 tools/social/social.py --help` for the full list):
 | 10.75–11 s | Fade to the end card |
 | 11–12 s | End card |
 
-**zoom**:
+**orbit** (Cygnus_A, 20 s): a probe tours the black hole.
 
 | Time | What happens |
 |---|---|
-| 0–1.6 s | The whole MacBook with the hook above it |
-| 1.6–2.2 s | The hook fades out as the zoom begins |
-| 1.8–9 s | The camera pushes in (smootherstep, constant speed in log scale) on the theme's focus point (`themes.json`; for Cygnus_A, the shadow's centre) until the frame's height is 92 % of the display's. No caption |
-| 9–10.75 s | Hold at full zoom |
-| 10.75–11 s | Fade to the end card |
-| 11–12 s | End card |
+| 0–2 s | The hook, and Cygnus A on the MacBook's screen, exactly as the wallpaper shows it |
+| 2–3.2 s | The Mac and the hook fade out. Only the black hole is left, and its disk now runs past where the screen's edges were |
+| 2.2–16.9 s | **The tour.** At a constant distance (r = 1000 M) the probe rises from the theme's 88° over the top of the hole to 20° from the pole, at 9.55 s. That is the near face-on "eye": the shadow inside a round glowing disk, with the lens set so the glow fits the frame's width. It comes back down to 88° on the far side, 180° of azimuth around. The roll turns 270° in all: the 180° that flying over the top turns the view (the far side arrives upside down, with the lensed arc and the bright, approaching side swapped), plus 90° so the disk ends along the frame's long side. The lens eases 1.0× (the screen's view) → 1.13× (over the top) → 1.8× (edge-on, the disk along the full height). Smootherstep throughout, and no words |
+| 16.6–18.6 s | **The dip.** Still edge-on and still vertical, the probe drops through the disk's plane to 96°, just below it. At 90° the infinitely thin disk vanishes and leaves the bare lensed ring; below the plane the disk reopens from underneath |
+| 18.75–19 s | Fade to the end card |
+| 19–20 s | End card |
 
-The zoom renders the theme once, at the size full zoom needs. For Cygnus_A that is 3216×2089, or 1.001 theme pixels per output pixel at the end, and every frame is cut from it. The Mac is drawn at the same scale. So no frame is ever upscaled, and the tool refuses a setup that would need it. The theme render streams straight into the encoder, with no intermediate files.
+The whole video is **one render** of the theme, at 1080×1920 and 60 FPS:
+- **Seamless handoff.** During the opening, the screen shows exactly its part of that render. The camera then is the wallpaper's own: the theme's inclination, no roll, and the theme's frame height (2 HALF_H) across the display's height, centred on the screen. So the first frame of the move is the on-screen view by construction.
+- **A real camera move.** The camera moves in the simulation through `src/offline_render_bh.zig --camera`, one "polar span roll azimuth" line per frame. Roll and azimuth are the engine's `TraceParams.roll`/`phi0`, compiled in only for the offline renderer (`BH_CAMERA_MOVES`). Every frame is traced afresh, natively at 1080×1920. Nothing is cropped or upscaled.
+- **Physically consistent.** The hole, its spin, the disk and its turbulence are the theme's own; only the camera moves.
+- **Exposure.** It holds the wallpaper's own metered value (9.90) for the whole tour (`--hold-exposure`), like a camera keeping its setting. The theme's meter rule would raise exposure face-on to 11.8 and wash the disk out to white.
+
+**Why 20° and not over the pole.** Rays from a camera near the spin axis have tiny angular momentum, and the integrator resolves their turn near the axis in tiny steps. Measured per 1080×1920 frame:
+- 0.6–0.7 s at 60–20°;
+- 26 s at 15°;
+- 67 s at 10°;
+- 4 min at 2°;
+- no finish at 0.5°.
+
+The pole itself (θ = 0) is singular in the ray setup. A tour 20° from the pole costs nothing extra and looks the same to the eye.
+
+"From below" needs a crossing of the disk's plane, because a path over the top stays above the disk the whole way. That is the dip.
 
 ## The Mac (`DEVICES` in social.py)
 
@@ -76,7 +95,7 @@ The model is the **14-inch MacBook Pro (M3, Mac15,3)**, the machine Argus is dev
 - The lid's corner is concentric with the display's (12.5 mm).
 - A 0.9 mm aluminium edge shows around the glass.
 
-Every theme renders at the display's aspect (1920×1247 for pov), so nothing is letterboxed. The menu bar shows Finder's menus, the Argus eye glyph and the clock:
+In pov, every theme renders at the display's aspect (1920×1247), so nothing is letterboxed. The menu bar shows Finder's menus, the Argus eye glyph and the clock:
 - The eye glyph is drawn by the app's own rasteriser (`src/desktop/status_glyph.zig`, via `eye_glyph.zig`).
 - The type and the glyph are 1.4× their true size, so they read on a phone.
 - There is no Apple logo and no "MacBook Pro" chin label, because Apple's trademark rules don't allow them in promotion.
