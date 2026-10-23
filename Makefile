@@ -56,7 +56,8 @@ quasars:
 	python3 -I tools/gen_quasars.py
 
 # Vertical social videos (tools/social/README.md): offline theme renders on a drawn Mac screen,
-# Space swipes, hook and caption, end card. HOOK takes variants separated by |.
+# Space swipes (FORMAT=pov) or a push-in on one theme (FORMAT=zoom), hook, end card. HOOK and NAME take
+# variants separated by |.
 FORMAT ?= pov
 THEMES ?= Cygnus_A,Night_Tide,Roulette_Chrome,Phosphor_Terminal
 HOOK ?= POV: every desktop on your Mac is a different universe

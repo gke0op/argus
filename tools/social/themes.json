@@ -1,9 +1,10 @@
 {
-  "_comment": "Per-theme defaults for tools/social/social.py: the caption under the screen (name, line) and warmup, seconds of the theme's own simulation before its first shown frame (time the app would already have run). Optional seed: f.seed for Metal themes (default 0x5EED, the harness's). A theme not listed here gets its file name as the caption, no second line and 8 s of warm-up.",
+  "_comment": "Per-theme defaults for tools/social/social.py: the caption under the screen (name, line) and warmup, seconds of the theme's own simulation before its first shown frame (time the app would already have run). Optional seed: f.seed for Metal themes (default 0x5EED, the harness's). Optional focus: the zoom format's target, as a fraction of the frame (Cygnus_A: the shadow's centre, measured on a 1512x982 render). A theme not listed here gets its file name as the caption, no second line and 8 s of warm-up.",
   "Cygnus_A": {
     "name": "Cygnus A",
     "line": "A spinning black hole, every light ray traced",
-    "warmup": 10
+    "warmup": 10,
+    "focus": [0.515, 0.5]
   },
   "Night_Tide": {
     "name": "Night Tide",

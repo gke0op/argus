@@ -4,17 +4,27 @@ tools/social/social.py -- vertical social videos of Argus themes ("POV: my Mac w
 
 Each theme is rendered offline by its own code on the app's GPU path (src/offline_render_metal.zig
 for Metal themes, src/offline_render_bh.zig for Kerr-disk Zig themes such as Cygnus_A), paced as
-the app paces it at the output frame rate. Nothing is screen-recorded. The Mac around it is drawn
-here: a MacBook-style lid and base, a minimal menu bar (Finder's menus, the Argus eye glyph drawn
-by the app's own rasteriser, the clock), Space swipes between the themes, a hook above the screen,
-a caption below it, and an end card. Output: H.264 1080x1920 60 FPS MP4 with a silent stereo
-track (the sound slot) or --sound, chapters at the swipes, a beats sidecar (JSON and an Audacity
-label track) and stills.
+the app paces it at the output frame rate, at the Mac's own display aspect. Nothing is
+screen-recorded. The Mac around it is drawn here from a measured model (DEVICES): the lid, bezels
+and base to the chassis dimensions, the display's outline (rounded top corners, the notch) as
+macOS itself reports it, and a minimal menu bar (Finder's menus, the Argus eye glyph drawn by the
+app's own rasteriser, the clock). Above the screen a hook, below it a caption, then an end card.
+
+Formats:
+  pov   several themes, one per Space, with macOS Space swipes between them and a caption each.
+  zoom  one theme; the camera pushes in from the whole MacBook until the theme fills the frame.
+        The theme is rendered once at the size the full zoom needs (one theme pixel or more per
+        output pixel at the end), and every frame is cut from it: no frame is ever upscaled.
+
+Output: H.264 1080x1920 60 FPS MP4 with a silent stereo track (the sound slot) or --sound,
+chapters, a beats sidecar (JSON and an Audacity label track) and stills.
 
   python3 -I tools/social/social.py --themes Cygnus_A,Night_Tide,Roulette_Chrome,Phosphor_Terminal \
-      --hook "wdym my wallpaper has general relativity" --hook "POV: every desktop ..."
+      --hook "POV: every desktop on your Mac is a different universe"
+  python3 -I tools/social/social.py --format zoom --themes Cygnus_A \
+      --hook "wdym my wallpaper has general relativity"
 
-The themes are rendered once per run and shared by every --hook; intermediates go to a work
+The themes are rendered once per run and shared by every --hook; pov intermediates go to a work
 folder next to the output and are deleted at the end (--keep-work keeps them). See README.md.
 """
 import argparse, datetime, json, math, os, re, shutil, subprocess, sys
@@ -31,23 +41,61 @@ SF = "/System/Library/Fonts/SFNS.ttf"              # the menu bar's font (variab
 
 WHITE = (255, 255, 255)
 GREY = (154, 163, 181)  # the social card's tagline grey-blue
+GLASS = (8, 8, 9)
+EDGE_RGB = (84, 86, 91)
 
-# Layout of the "pov" format (framing B): a 16:9 Mac screen in the middle of a 9:16 canvas.
-# Safe zones (TikTok / Reels / Shorts UI): text stays left of SAFE_RIGHT, below SAFE_TOP and
-# above SAFE_BOTTOM (the bottom 20 %). The screen itself may sit under the right-hand buttons.
-POV = dict(
-    W=1080, H=1920,
-    DW=976, DH=549,               # the display, 16:9
-    BEZEL=(14, 14, 14, 20),       # left, top, right, bottom glass around the display
-    EDGE=3,                       # the lid's aluminium edge
-    LID_Y=670, LID_R=24, DISP_R=10,
-    BASE_H=16, BASE_OVER=24,      # the base's front lip: height, overhang past the lid
-    MB_H=26, NOTCH_W=124, NOTCH_R=9,
-    MARGIN=44,                    # text column, aligned with the lid
-    SAFE_TOP=210, SAFE_RIGHT=924, SAFE_BOTTOM=1536,
-    HOOK_GAP=56,                  # hook baseline block ends this far above the lid
-    CAP_GAP=50,                   # caption starts this far below the base
-)
+# ---------------------------------------------------------------------------- the Mac
+#
+# 14-inch MacBook Pro (M3, Mac15,3), the machine Argus is developed on. Measured on it
+# (AppKit/CoreGraphics, 2026-10-23): 1512 x 982 pt at 2x = 3024 x 1964 px; the menu bar 33 pt
+# (frame top minus visibleFrame top); NSScreen.bezelPath, the display's visible outline, below
+# (its 25 elements, y up as AppKit gives it). Apple's published figures: 254 ppi (-> a 302.4 x
+# 196.4 mm active area), body 312.6 x 221.2 x 15.5 mm. Derived: side bezel (312.6 - 302.4) / 2 =
+# 5.1 mm. Assumed (no published figure): top bezel = side bezel; the lid spans the body's depth,
+# so the bottom bezel (chin and hinge) is 221.2 - 196.4 - 5.1 = 19.7 mm; the base's front face
+# 10.5 mm of the 15.5 mm closed height; the lid's corner concentric with the display's (12.5 mm);
+# a 0.9 mm aluminium edge seen around the glass. No "MacBook Pro" chin label, no Apple logo.
+MBP14_BEZEL_PATH = [  # ("M"|"L", (x, y)) or ("C", c1, c2, end), AppKit points, y up
+    ("M", (0.076, 944.871)),
+    ("C", (0.076, 947.816), (0.0, 958.928), (0.646, 964.331)),
+    ("C", (1.321, 969.957), (2.964, 973.459), (5.753, 976.248)),
+    ("C", (8.542, 979.037), (12.044, 980.681), (17.669, 981.354)),
+    ("C", (23.072, 982.0), (34.186, 981.924), (37.129, 981.924)),
+    ("L", (657.700, 981.924)),
+    ("C", (662.995, 981.924), (664.523, 980.396), (664.523, 975.101)),
+    ("L", (664.523, 964.336)),
+    ("C", (664.523, 959.771), (664.323, 956.123), (667.546, 952.900)),
+    ("C", (670.769, 949.677), (674.417, 949.879), (678.982, 949.879)),
+    ("L", (835.330, 949.879)),
+    ("C", (839.896, 949.879), (843.544, 949.677), (846.766, 952.900)),
+    ("C", (849.989, 956.123), (849.787, 959.771), (849.787, 964.336)),
+    ("L", (849.787, 975.101)),
+    ("C", (849.787, 980.396), (851.316, 981.924), (856.612, 981.924)),
+    ("L", (1477.181, 981.924)),
+    ("C", (1480.126, 981.924), (1491.238, 982.0), (1496.641, 981.354)),
+    ("C", (1502.269, 980.681), (1505.770, 979.037), (1508.559, 976.248)),
+    ("C", (1511.348, 973.459), (1512.991, 969.957), (1513.664, 964.331)),
+    ("C", (1514.312, 958.928), (1514.234, 947.816), (1514.234, 944.871)),
+    ("L", (1514.234, -1.478)),
+    ("L", (0.076, -1.478)),
+]
+
+DEVICES = {
+    "mbp14": dict(
+        label="14-inch MacBook Pro (M3)",
+        pt=(1512, 982), menubar_pt=33, bezel_path=MBP14_BEZEL_PATH,
+        active_mm=(302.4, 196.4), body_w_mm=312.6,
+        bezel_mm=dict(side=5.1, top=5.1, bottom=19.7), base_mm=10.5, lid_r_mm=12.5, edge_mm=0.9,
+        base_r_mm=3.0, scoop_mm=(45.0, 2.0),
+    ),
+}
+
+# The canvas and its safe zones (TikTok / Reels / Shorts UI): text stays left of SAFE_RIGHT, below
+# SAFE_TOP and above SAFE_BOTTOM (the bottom 20 %). The screen itself may sit under the right-hand
+# buttons. The display is DW px wide; everything else on the Mac follows from the device's mm.
+CANVAS = dict(W=1080, H=1920, DW=984, DY=600, MARGIN=44, SAFE_TOP=210, SAFE_RIGHT=924, SAFE_BOTTOM=1536,
+              HOOK_GAP=56, CAP_GAP=46)
+MENU_TYPE = 1.4      # menu-bar type and glyph at 1.4x their true size, to read on a phone
 
 SPRING_W = 13.3      # critically damped spring, 1/s: 99 % of the way at 0.5 s
 GAP_PX = 18          # dark gap between two Spaces while they slide
@@ -65,7 +113,8 @@ def run(cmd, **kw):
 
 
 def zig_path():
-    z = os.environ.get("ZIG") or (os.path.join(ROOT, ".toolchain", "zig") if os.access(os.path.join(ROOT, ".toolchain", "zig"), os.X_OK) else shutil.which("zig"))
+    tc = os.path.join(ROOT, ".toolchain", "zig")
+    z = os.environ.get("ZIG") or (tc if os.access(tc, os.X_OK) else shutil.which("zig"))
     if not z:
         die("no zig: set ZIG to a Zig 0.17.0 binary (`make zig` installs one)")
     v = subprocess.run([z, "version"], capture_output=True, text=True).stdout.strip()
@@ -86,6 +135,11 @@ def smoothstep(e0, e1, x):
     return t * t * (3 - 2 * t)
 
 
+def smootherstep(x):
+    t = min(max(x, 0.0), 1.0)
+    return t * t * t * (t * (6 * t - 15) + 10)
+
+
 def spring(t, dur):
     """Space-swipe position 0..1: a critically damped spring from rest, normalised to land at dur."""
     if t <= 0:
@@ -94,6 +148,250 @@ def spring(t, dur):
         return 1.0
     g = lambda s: 1 - (1 + SPRING_W * s) * math.exp(-SPRING_W * s)
     return g(t) / g(dur)
+
+
+# ---------------------------------------------------------------------------- geometry
+
+def geometry(dev):
+    """Canvas-pixel geometry of the Mac: the display rect (integer), the lid, the base."""
+    C = CANVAS
+    pw, ph = dev["pt"]
+    DW = C["DW"]
+    DH = round(DW * ph / pw)
+    mm = DW / dev["active_mm"][0]  # px per mm
+    lid_w = dev["body_w_mm"] * mm
+    dx = round((C["W"] - DW) / 2)
+    dy = C["DY"]
+    b = dev["bezel_mm"]
+    lx0 = dx + DW / 2 - lid_w / 2
+    g = dict(DW=DW, DH=DH, dx=dx, dy=dy, mm=mm, ptx=DW / pw, pty=DH / ph,
+             lid=(lx0, dy - b["top"] * mm, lx0 + lid_w, dy + DH + b["bottom"] * mm),
+             lid_r=dev["lid_r_mm"] * mm, edge=dev["edge_mm"] * mm)
+    g["base"] = (g["lid"][0], g["lid"][3], g["lid"][2], g["lid"][3] + dev["base_mm"] * mm)
+    return g
+
+
+def bezel_polygon(dev, g, steps=32):
+    """The display's visible outline (bezelPath) in canvas px, y down, flattened to a polygon. The
+    path spans 0.08..1514.23 x -1.48..982 pt; it is fitted to the display rect."""
+    pts = []
+    path = dev["bezel_path"]
+    xs = [p[0] for el in path for p in el[1:]]
+    ys = [p[1] for el in path for p in el[1:]]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    to = lambda p: (g["dx"] + (p[0] - x0) / (x1 - x0) * g["DW"], g["dy"] + (y1 - p[1]) / (y1 - y0) * g["DH"])
+    cur = None
+    for el in path:
+        if el[0] in ("M", "L"):
+            cur = el[1]
+            pts.append(to(cur))
+        else:
+            c1, c2, e = el[1], el[2], el[3]
+            for k in range(1, steps + 1):
+                t = k / steps
+                u = 1 - t
+                p = tuple(u ** 3 * cur[i] + 3 * u * u * t * c1[i] + 3 * u * t * t * c2[i] + t ** 3 * e[i] for i in range(2))
+                pts.append(to(p))
+            cur = e
+    return pts
+
+
+class Raster:
+    """Draws shapes given in canvas px into a region of the canvas at K pixels per canvas px,
+    anti-aliased by drawing masks at ss x and downsampling."""
+
+    def __init__(self, region, K, ss):
+        self.ox, self.oy, ox1, oy1 = region
+        self.K, self.ss = K, ss
+        self.size = (int(math.ceil((ox1 - self.ox) * K)), int(math.ceil((oy1 - self.oy) * K)))
+        self.img = Image.new("RGBA", self.size, (0, 0, 0, 0))
+
+    def p(self, x, y, s=None):
+        s = self.ss if s is None else s
+        return ((x - self.ox) * self.K * s, (y - self.oy) * self.K * s)
+
+    def mask(self, draw_fn):
+        w, h = self.size
+        m = Image.new("L", (w * self.ss, h * self.ss), 0)
+        draw_fn(ImageDraw.Draw(m))
+        return m.resize(self.size, Image.BOX) if self.ss > 1 else m
+
+    def rrect(self, box, r, corners=(True, True, True, True)):
+        x0, y0 = self.p(box[0], box[1])
+        x1, y1 = self.p(box[2], box[3])
+        return self.mask(lambda d: d.rounded_rectangle([x0, y0, x1, y1], radius=r * self.K * self.ss, fill=255, corners=corners))
+
+    def poly(self, pts):
+        return self.mask(lambda d: d.polygon([self.p(x, y) for x, y in pts], fill=255))
+
+    def fill(self, rgb, mask):
+        self.img.paste(Image.new("RGBA", self.size, rgb + (255,)), (0, 0), mask)
+
+
+def draw_device(dev, g, region, K, ss):
+    """The Mac as an RGBA layer of `region` at K px per canvas px: the lid's aluminium edge, the
+    glass (with the display's outline cut out: rounded top corners and the notch stay glass), the
+    hinge line and the base's front face with its opening scoop."""
+    R = Raster(region, K, ss)
+    lx0, ly0, lx1, ly1 = g["lid"]
+    e, mm = g["edge"], g["mm"]
+    hole = R.poly(bezel_polygon(dev, g))
+    keep = 1 - np.asarray(hole, np.float32) / 255
+    cut = lambda m: Image.fromarray((np.asarray(m, np.float32) * keep + 0.5).astype(np.uint8), "L")
+    R.fill(EDGE_RGB, cut(R.rrect(g["lid"], g["lid_r"], corners=(True, True, False, False))))
+    R.fill(GLASS, cut(R.rrect((lx0 + e, ly0 + e, lx1 - e, ly1), g["lid_r"] - e, corners=(True, True, False, False))))
+    # The base's front face: a silver gradient, rounded below.
+    bx0, by0, bx1, by1 = g["base"]
+    face = R.rrect((bx0, by0 - 20, bx1, by1), dev["base_r_mm"] * mm)
+    top_px, bot_px = R.p(0, by0, 1)[1], R.p(0, by1, 1)[1]
+    ys = np.arange(R.size[1], dtype=np.float32)[:, None]
+    t = np.clip((ys - top_px) / max(bot_px - top_px, 1), 0, 1)
+    grad = np.zeros((R.size[1], R.size[0], 4), np.uint8)
+    for i, (c0, c1) in enumerate(zip((214, 215, 218), (118, 120, 125))):
+        grad[..., i] = (c0 + (c1 - c0) * t).astype(np.uint8)
+    grad[..., 3] = 255
+    clip = R.mask(lambda d: d.rectangle([*R.p(bx0 - 1, by0), *R.p(bx1 + 1, by1 + 1)], fill=255))
+    m = Image.fromarray(np.minimum(np.asarray(face), np.asarray(clip)), "L")
+    R.img.paste(Image.fromarray(grad, "RGBA"), (0, 0), m)
+    R.fill((24, 24, 26), R.mask(lambda d: d.rectangle([*R.p(lx0 + e, by0), *R.p(lx1 - e, by0 + 0.6 * mm)], fill=255)))
+    sw, sh = dev["scoop_mm"][0] * mm, dev["scoop_mm"][1] * mm
+    cx = (bx0 + bx1) / 2
+    scoop = R.mask(lambda d: d.ellipse([*R.p(cx - sw / 2, by0 - sh), *R.p(cx + sw / 2, by0 + sh)], fill=255))
+    R.fill((70, 72, 76), Image.fromarray(np.minimum(np.asarray(scoop), np.asarray(clip)), "L"))
+    return R.img
+
+
+def eye_glyph(zig, px, n, cur, work):
+    out = os.path.join(work, f"eye_{px}_{n}_{cur}.pgm")
+    if not os.path.exists(out):
+        with open(out, "wb") as fh:
+            run([zig, "run", "-O", "ReleaseFast", "--dep", "status_glyph", "-Mroot=tools/social/eye_glyph.zig",
+                 "-Mstatus_glyph=src/desktop/status_glyph.zig", "--", str(px), str(n), str(cur)], cwd=ROOT, stdout=fh)
+    return Image.open(out)
+
+
+def menu_bar(dev, g, K, zig, n, cur, clock_text, work):
+    """The menu bar as an RGBA layer of the display (DW x DH at K): a light dark tint, Finder's
+    menus left of the notch, the eye glyph (iris on Space cur of n) and the clock at the right."""
+    W, H = int(round(g["DW"] * K)), int(round(g["DH"] * K))
+    mb = dev["menubar_pt"] * g["pty"] * K
+    pt = g["ptx"] * K
+    im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    tint = Image.new("RGBA", (W, int(math.ceil(mb))), (0, 0, 0, 46))
+    im.paste(tint, (0, 0))
+    size = 13 * pt * MENU_TYPE
+    bold = font(SF, round(size), variation="Bold")
+    reg = font(SF, round(size), variation="Medium")
+    d = ImageDraw.Draw(im)
+    cy = mb / 2
+    x = 20 * pt
+    d.text((x, cy), "Finder", font=bold, fill=(255, 255, 255, 245), anchor="lm")
+    x += bold.getlength("Finder") + 16 * pt * MENU_TYPE
+    for m in ["File", "Edit", "View", "Go", "Window", "Help"]:
+        d.text((x, cy), m, font=reg, fill=(255, 255, 255, 240), anchor="lm")
+        x += reg.getlength(m) + 14 * pt * MENU_TYPE
+    notch_x0 = 664.5 * pt  # from the bezel path
+    if x > notch_x0:
+        die("menu bar: the menus run under the notch")
+    cx = W - 12 * pt - reg.getlength(clock_text)
+    d.text((cx, cy), clock_text, font=reg, fill=(255, 255, 255, 245), anchor="lm")
+    gp = min(96, round(16 * pt * MENU_TYPE))
+    gl = eye_glyph(zig, gp, n, cur, work)
+    im.paste(Image.new("RGBA", gl.size, (255, 255, 255, 255)), (int(round(cx - 14 * pt * MENU_TYPE - gp)), int(round(cy - gp / 2))), gl)
+    return im
+
+
+# ---------------------------------------------------------------------------- type
+
+def wrap(text, fnt, max_w):
+    lines = []
+    for para in text.split("\n"):
+        cur = ""
+        for word in para.split():
+            trial = (cur + " " + word).strip()
+            if fnt.getlength(trial) <= max_w or not cur:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = word
+        lines.append(cur)
+    return lines
+
+
+def caption_layer(cfg, h):
+    """A caption (name, then one line in grey) as float RGB of a full-width strip on black."""
+    C = CANVAS
+    im = Image.new("RGB", (C["W"], h), (0, 0, 0))
+    d = ImageDraw.Draw(im)
+    x = C["MARGIN"]
+    fmax = C["SAFE_RIGHT"] - x
+    fn = font(HELVETICA, 46, 1)
+    fl = font(HELVETICA, 34, 0)
+    name, line = cfg["name"], cfg.get("line", "")
+    if fn.getlength(name) > fmax or (line and fl.getlength(line) > fmax):
+        die(f"caption too wide for the safe zone: {name!r} / {line!r}")
+    d.text((x, 0), name, font=fn, fill=WHITE, anchor="lt")
+    if line:
+        d.text((x, 62), line, font=fl, fill=GREY, anchor="lt")
+    return np.asarray(im, np.float32)
+
+
+def hook_layer(text, lid_top):
+    """The hook: Helvetica Bold, white, left-aligned, as large as fits in three lines inside the
+    safe zone, its block ending HOOK_GAP above the lid. Returns an RGBA canvas layer."""
+    C = CANVAS
+    x = C["MARGIN"]
+    max_w = C["SAFE_RIGHT"] - x
+    for size in range(96, 40, -2):
+        f = font(HELVETICA, size, 1)
+        lines = wrap(text, f, max_w)
+        if len(lines) <= 3 and all(f.getlength(s) <= max_w for s in lines):
+            break
+    else:
+        die(f"hook too long for three lines: {text!r}")
+    lead = round(size * 1.08)
+    top = int(lid_top - C["HOOK_GAP"]) - (lead * (len(lines) - 1) + size)
+    if top < C["SAFE_TOP"]:
+        die(f"hook too tall for the safe zone: {text!r}")
+    im = Image.new("RGBA", (C["W"], C["H"]), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    for i, s in enumerate(lines):
+        d.text((x, top + i * lead), s, font=f, fill=WHITE + (255,), anchor="lt")
+    print(f"  hook {size} px in {len(lines)} lines", flush=True)
+    return im
+
+
+def end_card(zig, n, work, line1, line2):
+    """The end card: the eye glyph, the Argus wordmark, line1, and the URL in grey."""
+    C = CANVAS
+    im = Image.new("RGB", (C["W"], C["H"]), (0, 0, 0))
+    d = ImageDraw.Draw(im)
+    x = C["MARGIN"] + 20
+    g = eye_glyph(zig, 96, n, 0, work)
+    y = 640
+    im.paste(Image.new("RGB", g.size, WHITE), (x - 6, y), g)
+    y += 96 + 40
+    d.text((x - 6, y), "Argus", font=font(HELVETICA, 168, 1), fill=WHITE, anchor="lt")
+    y += 168 + 46
+    f1 = font(HELVETICA, 50, 1)
+    d.text((x, y), line1, font=f1, fill=WHITE, anchor="lt")
+    y += 50 + 26
+    f2 = font(HELVETICA, 42, 0)
+    d.text((x, y), line2, font=f2, fill=GREY, anchor="lt")
+    if x + max(f1.getlength(line1), f2.getlength(line2)) > C["SAFE_RIGHT"] or y + 42 > C["SAFE_BOTTOM"]:
+        die("end card outside the safe zone")
+    return np.asarray(im, np.float32)
+
+
+def guides(img):
+    """Red wash over the platforms' UI zones, for checking a still."""
+    C = CANVAS
+    a = np.asarray(img, np.float32).copy()
+    red = np.array([255, 0, 0], np.float32)
+    for x0, y0, x1, y1 in [(0, 0, C["W"], C["SAFE_TOP"]), (C["SAFE_RIGHT"], C["SAFE_TOP"], C["W"], C["SAFE_BOTTOM"]),
+                           (0, C["SAFE_BOTTOM"], C["W"], C["H"])]:
+        a[y0:y1, x0:x1] = a[y0:y1, x0:x1] * 0.65 + red * 0.35
+    return Image.fromarray(a.astype(np.uint8))
 
 
 # ---------------------------------------------------------------------------- theme renders
@@ -112,22 +410,26 @@ def theme_kind(theme):
     die(f"{theme}: no themes/{theme}.metal or themes/{theme}.zig")
 
 
-def render_segment(zig, theme, cfg, frames, fps, wall, out_path, log_path, dw, dh):
-    """Renders `frames` frames of `theme` at 1920x1080 after its warm-up, scaled to the display
-    size into a lossless FFV1 file. `wall` is the local time the first shown frame should carry."""
+def renderer_cmd(zig, theme, cfg, size, frames, fps, wall):
+    """The command that writes `frames` raw RGBA frames of `theme` at `size` after its warm-up.
+    `wall` is the local time its first shown frame should carry (theme clocks)."""
     kind, path = theme_kind(theme)
     skip = int(round(cfg["warmup"] * fps))
     rel = os.path.relpath(path, ROOT)
+    sz = f"{size[0]}x{size[1]}"
     if kind == "metal":
         start = wall - datetime.timedelta(seconds=skip / fps)
-        cmd = [zig, "run", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", "src/offline_render_metal.zig", "--",
-               rel, "--size", "1920x1080", "--fps", str(fps), "--skip", str(skip), "--frames", str(frames),
-               "--date", start.strftime("%Y-%m-%dT%H:%M:%SZ"), "--utc-offset", "0", "--seed", str(cfg.get("seed", "0x5EED"))]
-    else:
-        cmd = [zig, "run", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", "--dep", "theme",
-               "-Mroot=src/offline_render_bh.zig", "-O", "ReleaseFast", f"-Mtheme={rel}", "--",
-               "--size", "1920x1080", "--fps", str(fps), "--skip", str(skip), "--frames", str(frames)]
-    ff = [FFMPEG, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "1920x1080", "-r", str(fps), "-i", "-",
+        return [zig, "run", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", "src/offline_render_metal.zig", "--",
+                rel, "--size", sz, "--fps", str(fps), "--skip", str(skip), "--frames", str(frames),
+                "--date", start.strftime("%Y-%m-%dT%H:%M:%SZ"), "--utc-offset", "0", "--seed", str(cfg.get("seed", "0x5EED"))]
+    return [zig, "run", "-O", "ReleaseFast", "-target", "aarch64-macos", "-lc", "--dep", "theme",
+            "-Mroot=src/offline_render_bh.zig", "-O", "ReleaseFast", f"-Mtheme={rel}", "--",
+            "--size", sz, "--fps", str(fps), "--skip", str(skip), "--frames", str(frames)]
+
+
+def render_segment(cmd, size, fps, frames, out_path, log_path, dw, dh):
+    """Runs a renderer and scales its frames to the display size into a lossless FFV1 file."""
+    ff = [FFMPEG, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{size[0]}x{size[1]}", "-r", str(fps), "-i", "-",
           "-vf", f"scale={dw}:{dh}:flags=lanczos+accurate_rnd+full_chroma_int,format=gbrp", "-c:v", "ffv1", "-level", "3", out_path]
     with open(log_path, "ab") as log:
         p1 = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=log)
@@ -136,12 +438,12 @@ def render_segment(zig, theme, cfg, frames, fps, wall, out_path, log_path, dw, d
         r2 = p2.wait()
         r1 = p1.wait()
     if r1 != 0 or r2 != 0:
-        die(f"{theme}: render failed (renderer {r1}, ffmpeg {r2}); see {log_path}")
+        die(f"render failed (renderer {r1}, ffmpeg {r2}); see {log_path}")
     got = int(subprocess.run([shutil.which("ffprobe") or "ffprobe", "-v", "error", "-count_packets", "-select_streams", "v:0",
                               "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", out_path],
                              capture_output=True, text=True).stdout.strip() or 0)
     if got != frames:
-        die(f"{theme}: expected {frames} frames, the render has {got}")
+        die(f"{out_path}: expected {frames} frames, the render has {got}")
 
 
 class Segment:
@@ -167,239 +469,324 @@ class Segment:
             self.p = None
 
 
-# ---------------------------------------------------------------------------- drawing
+# ---------------------------------------------------------------------------- output
 
-def eye_glyph(zig, px, n, cur, work):
-    out = os.path.join(work, f"eye_{px}_{n}_{cur}.pgm")
-    if not os.path.exists(out):
-        with open(out, "wb") as fh:
-            run([zig, "run", "-O", "ReleaseFast", "--dep", "status_glyph", "-Mroot=tools/social/eye_glyph.zig",
-                 "-Mstatus_glyph=src/desktop/status_glyph.zig", "--", str(px), str(n), str(cur)], cwd=ROOT, stdout=fh)
-    return Image.open(out)
-
-
-def rrect_mask(size, box, r, ss=4, corners=(True, True, True, True)):
-    """Anti-aliased rounded-rectangle mask (L) of `size`, drawn at ss x and downsampled."""
-    w, h = size
-    m = Image.new("L", (w * ss, h * ss), 0)
-    ImageDraw.Draw(m).rounded_rectangle([c * ss for c in box], radius=r * ss, fill=255, corners=corners)
-    return m.resize((w, h), Image.LANCZOS)
-
-
-def wrap(text, fnt, max_w):
-    lines = []
-    for para in text.split("\n"):
-        cur = ""
-        for word in para.split():
-            trial = (cur + " " + word).strip()
-            if fnt.getlength(trial) <= max_w or not cur:
-                cur = trial
-            else:
-                lines.append(cur)
-                cur = word
-        lines.append(cur)
-    return lines
+def open_encoder(out_mp4, fps, F, sound, chapters, crf, work):
+    meta = os.path.join(work, "chapters.txt")
+    with open(meta, "w") as fh:
+        fh.write(";FFMETADATA1\ntitle=Argus\n")
+        for i, (f0, title) in enumerate(chapters):
+            f1 = chapters[i + 1][0] if i + 1 < len(chapters) else F
+            fh.write(f"[CHAPTER]\nTIMEBASE=1/{fps}\nSTART={f0}\nEND={f1}\ntitle={title}\n")
+    audio = (["-i", sound] if sound else ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"])
+    C = CANVAS
+    return subprocess.Popen(
+        [FFMPEG, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{C['W']}x{C['H']}", "-r", str(fps), "-i", "-",
+         *audio, "-i", meta, "-map", "0:v", "-map", "1:a", "-map_metadata", "2", "-map_chapters", "2",
+         "-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p,"
+                "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv",
+         "-c:v", "libx264", "-preset", "slow", "-profile:v", "high", "-level", "4.2", "-crf", str(crf),
+         "-maxrate", "24M", "-bufsize", "48M", "-g", str(fps), "-bf", "2",
+         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-af", "apad", "-t", f"{F / fps:.6f}",
+         "-movflags", "+faststart", out_mp4], stdin=subprocess.PIPE)
 
 
-def draw_device(L):
-    """The MacBook lid (glass bezel, aluminium edge) and the base's front lip, as an RGBA layer
-    of the whole canvas; the display area is left transparent."""
-    W, H = L["W"], L["H"]
-    bl, bt, br, bb = L["BEZEL"]
-    e = L["EDGE"]
-    lid_w = L["DW"] + bl + br + 2 * e
-    lid_h = L["DH"] + bt + bb + 2 * e
-    x0 = (W - lid_w) // 2
-    y0 = L["LID_Y"]
-    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    # Aluminium edge, then the glass inside it.
-    edge = Image.new("RGBA", (W, H), (84, 86, 91, 255))
-    layer.paste(edge, (0, 0), rrect_mask((W, H), (x0, y0, x0 + lid_w, y0 + lid_h), L["LID_R"]))
-    glass = Image.new("RGBA", (W, H), (8, 8, 9, 255))
-    layer.paste(glass, (0, 0), rrect_mask((W, H), (x0 + e, y0 + e, x0 + lid_w - e, y0 + lid_h - e), L["LID_R"] - e))
-    # Base lip: wider than the lid, a silver gradient, rounded below, with the opening scoop.
-    by0 = y0 + lid_h
-    bx0, bx1 = x0 - L["BASE_OVER"], x0 + lid_w + L["BASE_OVER"]
-    bh = L["BASE_H"]
-    grad = np.zeros((bh, bx1 - bx0, 4), np.uint8)
-    for yy in range(bh):
-        t = yy / max(bh - 1, 1)
-        c = (1 - t) * np.array([214, 215, 218]) + t * np.array([118, 120, 125])
-        grad[yy, :, :3] = c.astype(np.uint8)
-        grad[yy, :, 3] = 255
-    gimg = Image.fromarray(grad, "RGBA")
-    gmask = rrect_mask((bx1 - bx0, bh), (0, -bh, bx1 - bx0, bh), 9)
-    layer.paste(gimg, (bx0, by0), gmask)
-    hinge = Image.new("RGBA", (lid_w - 2 * L["LID_R"], 2), (24, 24, 26, 255))
-    layer.paste(hinge, (x0 + L["LID_R"], by0))
-    scoop_w = 150
-    sc = Image.new("RGBA", (scoop_w, 7), (70, 72, 76, 255))
-    sm = Image.new("L", (scoop_w * 4, 28), 0)
-    ImageDraw.Draw(sm).ellipse([0, -28, scoop_w * 4, 28], fill=255)
-    layer.paste(sc, ((W - scoop_w) // 2, by0), sm.resize((scoop_w, 7), Image.LANCZOS))
-    dx, dy = x0 + e + bl, y0 + e + bt
-    clear = Image.new("RGBA", (L["DW"], L["DH"]), (0, 0, 0, 0))
-    layer.paste(clear, (dx, dy))
-    return layer, (dx, dy), by0 + bh
+def finish(a, name, out_mp4, fps, F, hook, themes, beats, labels):
+    with open(os.path.join(a.out, name + ".beats.json"), "w") as fh:
+        json.dump(dict(video=name + ".mp4", format=a.format, fps=fps, duration=F / fps, hook=hook, themes=themes,
+                       sound=os.path.basename(a.sound) if a.sound else "silent (slot)", beats=beats), fh, indent=2)
+    with open(os.path.join(a.out, name + ".labels.txt"), "w") as fh:  # Audacity label track
+        for t0, t1, text in labels:
+            fh.write(f"{t0:.4f}\t{t1:.4f}\t{text}\n")
+    stills = [float(x) for x in a.stills.split(",") if x.strip()]
+    for s in stills:
+        png = os.path.join(a.out, f"{name}_{s:g}s.png")
+        run([FFMPEG, "-v", "error", "-y", "-i", out_mp4, "-vf", f"select=eq(n\\,{round(s * fps)})", "-frames:v", "1", png])
+    if a.guides and stills:
+        guides(Image.open(os.path.join(a.out, f"{name}_{stills[0]:g}s.png")).convert("RGB")).save(
+            os.path.join(a.out, f"{name}_safezones.png"))
+    print(f"wrote {out_mp4}", flush=True)
 
-
-def menu_overlays(L, zig, n, clock_text, work):
-    """Premultiplied RGBA overlays for the top MB_H rows of the display, one per active Space:
-    the translucent bar, Finder's menus, the eye glyph (iris on that Space), the clock, the notch
-    and the display's rounded top corners."""
-    DW, MB = L["DW"], L["MB_H"]
-    ss = 4
-    out = []
-    bold = font(SF, 14, variation="Bold")
-    reg = font(SF, 14, variation="Medium")
-    menus = ["File", "Edit", "View", "Go", "Window", "Help"]
-    for cur in range(n):
-        im = Image.new("RGBA", (DW, MB), (0, 0, 0, 0))
-        # The bar: a light dark tint so white type reads on any wallpaper.
-        tint = np.zeros((MB, DW, 4), np.uint8)
-        tint[..., 3] = 46
-        im = Image.alpha_composite(im, Image.fromarray(tint, "RGBA"))
-        d = ImageDraw.Draw(im)
-        cy = MB / 2
-        x = 18
-        d.text((x, cy), "Finder", font=bold, fill=(255, 255, 255, 245), anchor="lm")
-        x += bold.getlength("Finder") + 22
-        for m in menus:
-            d.text((x, cy), m, font=reg, fill=(255, 255, 255, 240), anchor="lm")
-            x += reg.getlength(m) + 20
-        notch_x0 = (DW - L["NOTCH_W"]) // 2
-        if x > notch_x0:
-            die("menu bar: the menus run under the notch")
-        cw = reg.getlength(clock_text)
-        cx = DW - 16 - cw
-        d.text((cx, cy), clock_text, font=reg, fill=(255, 255, 255, 245), anchor="lm")
-        g = eye_glyph(zig, 18, n, cur, work)
-        white = Image.new("RGBA", g.size, (255, 255, 255, 255))
-        gx = int(round(cx - 20 - g.size[0]))
-        im.paste(white, (gx, int(round(cy - g.size[1] / 2))), g)
-        # Notch (with a camera), in the bezel's black, square at the top, rounded below.
-        nm = rrect_mask((DW, MB), (notch_x0, -20, notch_x0 + L["NOTCH_W"], MB), L["NOTCH_R"])
-        im.paste(Image.new("RGBA", (DW, MB), (8, 8, 9, 255)), (0, 0), nm)
-        cam = Image.new("L", (40, 40), 0)
-        ImageDraw.Draw(cam).ellipse([8, 8, 32, 32], fill=255)
-        im.paste(Image.new("RGBA", (10, 10), (26, 28, 34, 255)), (DW // 2 - 5, MB // 2 - 5), cam.resize((10, 10), Image.LANCZOS))
-        # Rounded top corners of the panel.
-        corner = rrect_mask((DW, MB), (0, 0, DW, MB + 40), L["DISP_R"])
-        inv = Image.eval(corner, lambda v: 255 - v)
-        im.paste(Image.new("RGBA", (DW, MB), (8, 8, 9, 255)), (0, 0), inv)
-        a = np.asarray(im, np.float32)
-        alpha = a[..., 3:4] / 255.0
-        out.append((a[..., :3] * alpha, alpha))
-    return out
-
-
-def caption_layer(L, cfg, h):
-    """A caption (name, then one line in grey) as premultiplied float RGB of a full-width strip."""
-    im = Image.new("RGB", (L["W"], h), (0, 0, 0))
-    d = ImageDraw.Draw(im)
-    x = L["MARGIN"]
-    fmax = L["SAFE_RIGHT"] - x
-    fn = font(HELVETICA, 46, 1)
-    fl = font(HELVETICA, 34, 0)
-    name, line = cfg["name"], cfg.get("line", "")
-    if fn.getlength(name) > fmax or (line and fl.getlength(line) > fmax):
-        die(f"caption too wide for the safe zone: {name!r} / {line!r}")
-    d.text((x, 0), name, font=fn, fill=WHITE, anchor="lt")
-    if line:
-        d.text((x, 62), line, font=fl, fill=GREY, anchor="lt")
-    return np.asarray(im, np.float32)
-
-
-def hook_layer(L, text):
-    """The hook: Helvetica Bold, white, left-aligned, as large as fits in three lines inside the
-    safe zone, its block ending HOOK_GAP above the lid. Returns an RGBA image and the top y."""
-    x = L["MARGIN"]
-    max_w = L["SAFE_RIGHT"] - x
-    for size in range(96, 40, -2):
-        f = font(HELVETICA, size, 1)
-        lines = wrap(text, f, max_w)
-        if len(lines) <= 3 and all(f.getlength(s) <= max_w for s in lines):
-            break
-    else:
-        die(f"hook too long for three lines: {text!r}")
-    lead = round(size * 1.08)
-    block_h = lead * (len(lines) - 1) + size
-    bottom = L["LID_Y"] - L["HOOK_GAP"]
-    top = bottom - block_h
-    if top < L["SAFE_TOP"]:
-        die(f"hook too tall for the safe zone: {text!r}")
-    im = Image.new("RGBA", (L["W"], L["H"]), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    for i, s in enumerate(lines):
-        d.text((x, top + i * lead), s, font=f, fill=WHITE + (255,), anchor="lt")
-    return im, size, lines
-
-
-def end_card(L, zig, n, work, line1, line2):
-    """The end card: the eye glyph, the Argus wordmark, line1, and the URL in grey."""
-    im = Image.new("RGB", (L["W"], L["H"]), (0, 0, 0))
-    d = ImageDraw.Draw(im)
-    x = L["MARGIN"] + 20
-    g = eye_glyph(zig, 96, n, 0, work)
-    y = 640
-    im.paste(Image.new("RGB", g.size, WHITE), (x - 6, y), g)
-    y += 96 + 40
-    fw = font(HELVETICA, 168, 1)
-    d.text((x - 6, y), "Argus", font=fw, fill=WHITE, anchor="lt")
-    y += 168 + 46
-    f1 = font(HELVETICA, 50, 1)
-    d.text((x, y), line1, font=f1, fill=WHITE, anchor="lt")
-    y += 50 + 26
-    f2 = font(HELVETICA, 42, 0)
-    d.text((x, y), line2, font=f2, fill=GREY, anchor="lt")
-    if x + max(f1.getlength(line1), f2.getlength(line2)) > L["SAFE_RIGHT"] or y + 42 > L["SAFE_BOTTOM"]:
-        die("end card outside the safe zone")
-    return np.asarray(im, np.uint8)
-
-
-def guides(img, L):
-    """Red wash over the platforms' UI zones, for checking a still."""
-    a = np.asarray(img, np.float32).copy()
-    red = np.array([255, 0, 0], np.float32)
-    zones = [(0, 0, L["W"], L["SAFE_TOP"]), (L["SAFE_RIGHT"], L["SAFE_TOP"], L["W"], L["SAFE_BOTTOM"]),
-             (0, L["SAFE_BOTTOM"], L["W"], L["H"])]
-    for x0, y0, x1, y1 in zones:
-        a[y0:y1, x0:x1] = a[y0:y1, x0:x1] * 0.65 + red * 0.35
-    return Image.fromarray(a.astype(np.uint8))
-
-
-# ---------------------------------------------------------------------------- the video
 
 def slug(text):
     words = re.sub(r"[^a-z0-9 ]+", "", text.lower()).split()
     return "-".join(words[:7]) or "video"
 
 
+# ---------------------------------------------------------------------------- pov: Space swipes
+
+def make_pov(a, zig, dev, themes, cfgs, hooks, names, clock, clock_text, work):
+    fps, n = a.fps, len(themes)
+    total = n * a.seg
+    end_at = total - a.end
+    if total > 60:
+        die("platforms cap these at 60 s")
+    if a.swipe >= a.seg or end_at <= (n - 1) * a.seg + a.swipe:
+        die("timeline: each theme needs its slot to outlast the swipe and the end card")
+    F = round(total * fps)
+    start_f = [round(k * a.seg * fps) for k in range(n)]
+    swipe_f = round(a.swipe * fps)
+    fade_f0, end_f = round((end_at - 0.25) * fps), round(end_at * fps)
+    vis = [(start_f[k], (start_f[k + 1] + swipe_f) if k + 1 < n else end_f) for k in range(n)]  # [first, last)
+
+    g = geometry(dev)
+    DW, DH, dx, dy = g["DW"], g["DH"], g["dx"], g["dy"]
+    pw, ph = dev["pt"]
+    size = (1920, round(1920 * ph / pw))  # the theme at the Mac's aspect, scaled to the display
+
+    log = os.path.join(work, "render.log")
+    segs = []
+    for k, (t, c) in enumerate(zip(themes, cfgs)):
+        frames = vis[k][1] - vis[k][0]
+        p = os.path.join(work, f"seg{k}_{t}.mkv")
+        print(f"render {t}: {frames} frames at {size[0]}x{size[1]}, {fps} FPS, after {c['warmup']} s warm-up", flush=True)
+        cmd = renderer_cmd(zig, t, c, size, frames, fps, clock + datetime.timedelta(seconds=vis[k][0] / fps))
+        render_segment(cmd, size, fps, frames, p, log, DW, DH)
+        segs.append(p)
+
+    C = CANVAS
+    device = draw_device(dev, g, (0, 0, C["W"], C["H"]), 1, 4)
+    # Over the display: the menu bar (per active Space) under the glass's corners and notch.
+    dcrop = device.crop((dx, dy, dx + DW, dy + DH))
+    overlays = []
+    for cur in range(n):
+        ov = Image.alpha_composite(menu_bar(dev, g, 1, zig, n, cur, clock_text, work), dcrop)
+        arr = np.asarray(ov, np.float32)
+        al = arr[..., 3:4] / 255.0
+        rows = int(np.nonzero(al.max(axis=(1, 2)) > 0)[0].max()) + 1
+        overlays.append((rows, arr[:rows, :, :3] * al[:rows], al[:rows]))
+    cap_y0 = int(math.ceil(g["base"][3])) + C["CAP_GAP"]
+    cap_h = 120
+    if cap_y0 + cap_h > C["SAFE_BOTTOM"]:
+        die("caption below the safe zone")
+    caps = [caption_layer(c, cap_h) for c in cfgs]
+    endcard = end_card(zig, n, work, a.end_line1, a.end_line2)
+
+    beats = []
+    labels = []
+    for k in range(1, n):
+        s = start_f[k] / fps
+        beats.append(dict(kind="swipe", from_theme=themes[k - 1], to_theme=themes[k], start=round(s, 4),
+                          peak_velocity=round(s + 1 / SPRING_W, 4), settled=round(s + a.swipe, 4)))
+        labels.append((s, s + a.swipe, f"swipe {themes[k - 1]} -> {themes[k]}"))
+    beats.append(dict(kind="end_card", start=round(fade_f0 / fps, 4), full=round(end_at, 4)))
+    labels.append((fade_f0 / fps, end_at, "end card"))
+    chapters = [(start_f[k], cfgs[k]["name"]) for k in range(n)] + [(fade_f0, "End card")]
+
+    for hi, hook in enumerate(hooks):
+        name = names[hi] if names else f"pov-{slug(hook)}"
+        print(f"compose {name}", flush=True)
+        base = Image.new("RGBA", (C["W"], C["H"]), (0, 0, 0, 255))
+        base = Image.alpha_composite(base, hook_layer(hook, g["lid"][1]))
+        base = Image.alpha_composite(base, device)
+        static = np.asarray(base.convert("RGB"), np.uint8)
+        out_mp4 = os.path.join(a.out, name + ".mp4")
+        enc = open_encoder(out_mp4, fps, F, a.sound, chapters, a.crf, work)
+        readers = [Segment(p, DW, DH) for p in segs]
+        try:
+            for i in range(F):
+                frame = static.copy()
+                if i < end_f:
+                    live = [k for k in range(n) if vis[k][0] <= i < vis[k][1]]
+                    imgs = {k: readers[k].read() for k in live}
+                    for k in range(n):
+                        if readers[k].p and i >= vis[k][1] - 1:
+                            readers[k].close()
+                    k = max(live)
+                    if len(live) == 2:  # a swipe from k-1 to k
+                        p = spring((i - start_f[k]) / fps, a.swipe)
+                        off = int(round(p * (DW + GAP_PX)))
+                        disp = np.zeros((DH, DW, 3), np.uint8)
+                        if off < DW:
+                            disp[:, : DW - off] = imgs[k - 1][:, off:]
+                        x1 = DW + GAP_PX - off
+                        if x1 < DW:
+                            disp[:, max(x1, 0):] = imgs[k][:, max(-x1, 0): DW - x1]
+                        cur = k if p >= 0.5 else k - 1
+                        t_in = (i - start_f[k]) / fps
+                        wcap = {k - 1: 1 - smoothstep(0.0, 0.15, t_in), k: smoothstep(0.12, 0.35, t_in)}
+                    else:
+                        disp = imgs[k].copy()
+                        cur, wcap = k, {k: 1.0}
+                    rows, pm, al = overlays[cur]
+                    disp[:rows] = np.clip(disp[:rows].astype(np.float32) * (1 - al) + pm + 0.5, 0, 255).astype(np.uint8)
+                    frame[dy: dy + DH, dx: dx + DW] = disp
+                    strip = sum(w * caps[kk] for kk, w in wcap.items() if w > 0)
+                    if not np.isscalar(strip):
+                        frame[cap_y0: cap_y0 + cap_h] = np.clip(strip + 0.5, 0, 255).astype(np.uint8)
+                if i >= fade_f0:
+                    e = smoothstep(fade_f0, end_f, i)
+                    frame = np.clip(frame.astype(np.float32) * (1 - e) + endcard * e + 0.5, 0, 255).astype(np.uint8)
+                enc.stdin.write(frame.tobytes())
+        finally:
+            for r in readers:
+                r.close()
+            enc.stdin.close()
+        if enc.wait() != 0:
+            die(f"{name}: encode failed")
+        finish(a, name, out_mp4, fps, F, hook, themes, beats, labels)
+
+
+# ---------------------------------------------------------------------------- zoom: push in on one theme
+
+def make_zoom(a, zig, dev, themes, cfgs, hooks, names, clock, clock_text, work):
+    if len(themes) != 1:
+        die("zoom takes one theme")
+    theme, cfg = themes[0], cfgs[0]
+    fps = a.fps
+    total = a.duration
+    end_at = total - a.end
+    z0, z1 = a.zoom_start, a.zoom_end
+    if not (0 < z0 < z1 <= end_at - 0.25) or total > 60:
+        die("timeline: need 0 < zoom start < zoom end <= end card fade, and 60 s at most")
+    F = round(total * fps)
+    fade_f0, end_f = round((end_at - 0.25) * fps), round(end_at * fps)
+
+    C = CANVAS
+    g = geometry(dev)
+    DW, DH, dx, dy = g["DW"], g["DH"], g["dx"], g["dy"]
+    fx, fy = cfg.get("focus", [0.5, 0.5])
+    Fx, Fy = dx + fx * DW, dy + fy * DH                    # the zoom's target, canvas px
+    s_end = C["H"] / (a.fill * DH)                        # the frame's height = fill x the display's
+    half_w, half_h = C["W"] / 2 / s_end, C["H"] / 2 / s_end
+    if Fx - half_w < dx or Fx + half_w > dx + DW or Fy - half_h < dy or Fy + half_h > dy + DH:
+        die("zoom: the final view leaves the display; lower --fill or move the theme's focus")
+    pw, ph = dev["pt"]
+    rw = int(math.ceil(DW * s_end / 8) * 8)               # theme px >= output px at full zoom
+    size = (rw, round(rw * ph / pw))
+    dens = size[0] / DW / s_end
+    if dens < 1.0:
+        die("zoom: render too small for the final view")
+    print(f"render {theme}: {end_f} frames at {size[0]}x{size[1]}, {fps} FPS, after {cfg['warmup']} s warm-up; "
+          f"zoom 1 -> {s_end:.3f}x, {dens:.3f} theme px per output px at full zoom", flush=True)
+
+    K = s_end  # the Mac drawn at the full zoom's scale, so it is never upscaled either
+    region = (0, math.floor(g["lid"][1]) - 2, C["W"], math.ceil(g["base"][3]) + 2)
+    device = draw_device(dev, g, region, K, 2)
+    mbar = menu_bar(dev, g, K, zig, a.spaces, 0, clock_text, work)
+    layer = Image.new("RGBA", device.size, (0, 0, 0, 0))
+    layer.paste(mbar, (int(round((dx - region[0]) * K)), int(round((dy - region[1]) * K))))
+    device = Image.alpha_composite(layer, device)
+    endcard = end_card(zig, a.spaces, work, a.end_line1, a.end_line2)
+
+    def view(i):
+        t = i / fps
+        u = smootherstep((t - z0) / (z1 - z0))
+        s = math.exp(u * math.log(s_end))
+        qx, qy = Fx + (C["W"] / 2 - Fx) * u, Fy + (C["H"] / 2 - Fy) * u  # where the target sits on screen
+        return s, qx, qy
+
+    def place(out, img, wx0, wy0, wx1, wy1, s, qx, qy, mask):
+        """Pastes `img`, covering canvas rect (wx0..wx1, wy0..wy1), into the output at the view."""
+        X0, Y0 = (wx0 - Fx) * s + qx, (wy0 - Fy) * s + qy
+        X1, Y1 = (wx1 - Fx) * s + qx, (wy1 - Fy) * s + qy
+        ox0, oy0 = max(0, math.ceil(X0)), max(0, math.ceil(Y0))
+        ox1, oy1 = min(C["W"], math.floor(X1)), min(C["H"], math.floor(Y1))
+        if ox1 <= ox0 or oy1 <= oy0:
+            return
+        sx, sy = img.size[0] / (X1 - X0), img.size[1] / (Y1 - Y0)
+        box = ((ox0 - X0) * sx, (oy0 - Y0) * sy, (ox1 - X0) * sx, (oy1 - Y0) * sy)
+        piece = img.resize((ox1 - ox0, oy1 - oy0), Image.LANCZOS, box=box)
+        out.paste(piece, (ox0, oy0), piece if mask else None)
+
+    beats = [dict(kind="hook_out", start=round(z0 - 0.2, 4), end=round(z0 + 0.4, 4)),
+             dict(kind="zoom", start=z0, end=z1, scale=round(s_end, 4)),
+             dict(kind="end_card", start=round(fade_f0 / fps, 4), full=round(end_at, 4))]
+    labels = [(z0, z1, f"zoom 1x -> {s_end:.2f}x"), (fade_f0 / fps, end_at, "end card")]
+    chapters = [(0, cfg["name"]), (fade_f0, "End card")]
+
+    hook_imgs = []
+    outs = []
+    for hi, hook in enumerate(hooks):
+        name = names[hi] if names else f"zoom-{slug(hook)}"
+        print(f"compose {name}", flush=True)
+        hook_imgs.append(hook_layer(hook, g["lid"][1]))
+        out_mp4 = os.path.join(a.out, name + ".mp4")
+        hw = os.path.join(work, f"h{hi}")
+        os.makedirs(hw)
+        outs.append((name, out_mp4, open_encoder(out_mp4, fps, F, a.sound, chapters, a.crf, hw)))
+
+    # One render, streamed straight into every hook's encoder: no intermediate files.
+    cmd = renderer_cmd(zig, theme, cfg, size, end_f, fps, clock)
+    nbytes = size[0] * size[1] * 4
+    with open(os.path.join(work, "render.log"), "ab") as log:
+        r = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=log, bufsize=nbytes)
+        try:
+            for i in range(F):
+                if i < end_f:
+                    b = r.stdout.read(nbytes)
+                    if len(b) != nbytes:
+                        die(f"{theme}: the renderer stopped at frame {i}; see {os.path.join(work, 'render.log')}")
+                    th = Image.frombuffer("RGBA", size, b, "raw", "RGBA", 0, 1)
+                    s, qx, qy = view(i)
+                    base = Image.new("RGB", (C["W"], C["H"]), (0, 0, 0))
+                    place(base, th, dx, dy, dx + DW, dy + DH, s, qx, qy, False)
+                    place(base, device, region[0], region[1], region[0] + device.size[0] / K, region[1] + device.size[1] / K,
+                          s, qx, qy, True)
+                for hi, (name, out_mp4, enc) in enumerate(outs):
+                    if i < end_f:
+                        hv = 1 - smoothstep(z0 - 0.2, z0 + 0.4, i / fps)
+                        frame = base
+                        if hv > 0:
+                            h = hook_imgs[hi]
+                            if hv < 1:
+                                h = h.copy()
+                                h.putalpha(h.getchannel("A").point(lambda v: int(v * hv + 0.5)))
+                            frame = base.copy()
+                            frame.paste(h, (0, 0), h)
+                        arr = np.asarray(frame, np.uint8)
+                    else:
+                        arr = None
+                    if i >= fade_f0:
+                        e = smoothstep(fade_f0, end_f, i)
+                        src = arr.astype(np.float32) if arr is not None else 0.0
+                        arr = np.clip(src * (1 - e) + endcard * e + 0.5, 0, 255).astype(np.uint8)
+                    enc.stdin.write(arr.tobytes())
+        finally:
+            r.stdout.close()
+            rc = r.wait()
+            for _, _, enc in outs:
+                enc.stdin.close()
+    if rc != 0:
+        die(f"{theme}: renderer exited {rc}")
+    for (name, out_mp4, enc), hook in zip(outs, hooks):
+        if enc.wait() != 0:
+            die(f"{name}: encode failed")
+        finish(a, name, out_mp4, fps, F, hook, themes, beats, labels)
+
+
+# ---------------------------------------------------------------------------- main
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--format", default="pov", choices=["pov"])
+    ap.add_argument("--format", default="pov", choices=["pov", "zoom"])
+    ap.add_argument("--device", default="mbp14", choices=sorted(DEVICES))
     ap.add_argument("--themes", required=True, help="comma-separated theme names (themes/<name>.metal or .zig)")
     ap.add_argument("--hook", action="append", required=True, help="hook text above the screen; variants: repeat it or separate them with |; \\n breaks a line")
-    ap.add_argument("--name", action="append", help="output name per hook, same forms as --hook (default: pov-<slug of the hook>)")
-    ap.add_argument("--seg", type=float, default=3.0, help="seconds per theme; the swipes start at seg, 2 seg, ...")
-    ap.add_argument("--end", type=float, default=1.0, help="seconds of end card, taken from the last theme's slot")
-    ap.add_argument("--swipe", type=float, default=0.6, help="Space-swipe duration, s")
+    ap.add_argument("--name", action="append", help="output name per hook, same forms as --hook (default: <format>-<slug of the hook>)")
+    ap.add_argument("--seg", type=float, default=3.0, help="pov: seconds per theme; the swipes start at seg, 2 seg, ...")
+    ap.add_argument("--swipe", type=float, default=0.6, help="pov: Space-swipe duration, s")
+    ap.add_argument("--duration", type=float, default=12.0, help="zoom: length of the video, s")
+    ap.add_argument("--zoom-start", type=float, default=1.8, help="zoom: the push-in starts (the hook fades around it), s")
+    ap.add_argument("--zoom-end", type=float, default=9.0, help="zoom: full zoom reached, s")
+    ap.add_argument("--fill", type=float, default=0.92, help="zoom: the final frame's height as a fraction of the display's")
+    ap.add_argument("--spaces", type=int, default=4, help="zoom: Spaces shown in the eye glyph")
+    ap.add_argument("--end", type=float, default=1.0, help="seconds of end card at the end")
     ap.add_argument("--fps", type=int, default=60, choices=[30, 60])
     ap.add_argument("--clock", default="2026-10-23T21:41:00", help="local time on the menu bar (and on theme clocks), ISO")
     ap.add_argument("--end-line1", default="free & open source · macOS")
     ap.add_argument("--end-line2", default="github.com/gke0op/argus")
     ap.add_argument("--sound", help="audio file to lay under the video (default: a silent track, the slot)")
-    ap.add_argument("--stills", default="1,4,10", help="seconds to export as PNG stills")
+    ap.add_argument("--stills", default="1,6,11", help="seconds to export as PNG stills")
     ap.add_argument("--guides", action="store_true", help="also write a still with the UI safe zones washed red")
     ap.add_argument("--crf", type=int, default=16)
     ap.add_argument("--out", default=os.path.expanduser("~/Desktop/argus-clips/social"))
     ap.add_argument("--keep-work", action="store_true")
     a = ap.parse_args()
 
-    L = POV
     zig = zig_path()
     themes = [t.strip() for t in a.themes.split(",") if t.strip()]
-    if len(themes) < 1:
+    if not themes:
         die("no themes")
     hooks = [h.strip().replace("\\n", "\n") for v in a.hook for h in v.split("|") if h.strip()]
     names = [x.strip() for v in (a.name or []) for x in v.split("|") if x.strip()]
@@ -413,144 +800,15 @@ def main():
         c.update(table.get(t, {}))
         cfgs.append(c)
         theme_kind(t)  # fail early on a theme with no renderer
-
-    fps, n = a.fps, len(themes)
-    total = n * a.seg
-    end_at = total - a.end
-    if total > 60:
-        die("platforms cap these at 60 s")
-    if a.swipe >= a.seg or end_at <= (n - 1) * a.seg + a.swipe:
-        die("timeline: each theme needs its slot to outlast the swipe and the end card")
-    F = round(total * fps)
-    start_f = [round(k * a.seg * fps) for k in range(n)]
-    swipe_f = round(a.swipe * fps)
-    fade_f0, end_f = round((end_at - 0.25) * fps), round(end_at * fps)
-    vis = [(start_f[k], (start_f[k + 1] + swipe_f) if k + 1 < n else end_f) for k in range(n)]  # [first, last)
     clock = datetime.datetime.fromisoformat(a.clock)
     clock_text = clock.strftime("%a %b %-d  %-I:%M %p")
+    dev = DEVICES[a.device]
 
     os.makedirs(a.out, exist_ok=True)
     work = os.path.join(a.out, f".work-{os.getpid()}")
     os.makedirs(work)
-    log = os.path.join(work, "render.log")
     try:
-        # 1. The themes, once for all hooks.
-        segs = []
-        for k, (t, c) in enumerate(zip(themes, cfgs)):
-            frames = vis[k][1] - vis[k][0]
-            p = os.path.join(work, f"seg{k}_{t}.mkv")
-            print(f"render {t}: {frames} frames at {fps} FPS after {c['warmup']} s warm-up", flush=True)
-            render_segment(zig, t, c, frames, fps, clock + datetime.timedelta(seconds=vis[k][0] / fps), p, log, L["DW"], L["DH"])
-            segs.append(p)
-
-        # 2. Everything that does not move.
-        device, (dx, dy), base_bottom = draw_device(L)
-        bars = menu_overlays(L, zig, n, clock_text, work)
-        cap_y0 = base_bottom + L["CAP_GAP"]
-        cap_h = 120
-        if cap_y0 + cap_h > L["SAFE_BOTTOM"]:
-            die("caption below the safe zone")
-        caps = [caption_layer(L, c, cap_h) for c in cfgs]
-        endcard = end_card(L, zig, n, work, a.end_line1, a.end_line2).astype(np.float32)
-        DW, DH, MB = L["DW"], L["DH"], L["MB_H"]
-
-        # Swipe beats, for the sound pass.
-        beats = []
-        for k in range(1, n):
-            s = start_f[k] / fps
-            beats.append(dict(kind="swipe", from_theme=themes[k - 1], to_theme=themes[k], start=round(s, 4),
-                              peak_velocity=round(s + 1 / SPRING_W, 4), settled=round(s + a.swipe, 4)))
-        beats.append(dict(kind="end_card", start=round(fade_f0 / fps, 4), full=round(end_at, 4)))
-
-        for hi, hook in enumerate(hooks):
-            name = names[hi] if names else f"{a.format}-{slug(hook)}"
-            base = Image.new("RGBA", (L["W"], L["H"]), (0, 0, 0, 255))
-            hl, hsize, hlines = hook_layer(L, hook)
-            base = Image.alpha_composite(base, hl)
-            base = Image.alpha_composite(base, device)
-            static = np.asarray(base.convert("RGB"), np.uint8)
-            out_mp4 = os.path.join(a.out, name + ".mp4")
-            print(f"compose {name}: hook {hsize} px in {len(hlines)} lines", flush=True)
-
-            meta = os.path.join(work, "chapters.txt")
-            with open(meta, "w") as fh:
-                fh.write(";FFMETADATA1\ntitle=Argus\n")
-                marks = [(start_f[k], cfgs[k]["name"]) for k in range(n)] + [(fade_f0, "End card")]
-                for i, (f0, title) in enumerate(marks):
-                    f1 = marks[i + 1][0] if i + 1 < len(marks) else F
-                    fh.write(f"[CHAPTER]\nTIMEBASE=1/{fps}\nSTART={f0}\nEND={f1}\ntitle={title}\n")
-            audio = (["-i", a.sound] if a.sound else ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"])
-            enc = subprocess.Popen(
-                [FFMPEG, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{L['W']}x{L['H']}", "-r", str(fps), "-i", "-",
-                 *audio, "-i", meta, "-map", "0:v", "-map", "1:a", "-map_metadata", "2", "-map_chapters", "2",
-                 "-vf", "scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p,"
-                 "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv",
-                 "-c:v", "libx264", "-preset", "slow", "-profile:v", "high", "-level", "4.2", "-crf", str(a.crf),
-                 "-maxrate", "24M", "-bufsize", "48M", "-g", str(fps), "-bf", "2",
-                 "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv",
-                 "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-af", "apad", "-t", f"{F / fps:.6f}",
-                 "-movflags", "+faststart", out_mp4], stdin=subprocess.PIPE)
-            readers = [Segment(p, DW, DH) for p in segs]
-            try:
-                for i in range(F):
-                    frame = static.copy()
-                    if i < end_f:
-                        live = [k for k in range(n) if vis[k][0] <= i < vis[k][1]]
-                        imgs = {k: readers[k].read() for k in live}
-                        for k in range(n):
-                            if readers[k].p and i >= vis[k][1] - 1:
-                                readers[k].close()
-                        k = max(live)
-                        if len(live) == 2:  # a swipe from k-1 to k
-                            p = spring((i - start_f[k]) / fps, a.swipe)
-                            off = int(round(p * (DW + GAP_PX)))
-                            disp = np.zeros((DH, DW, 3), np.uint8)
-                            if off < DW:
-                                disp[:, : DW - off] = imgs[k - 1][:, off:]
-                            x1 = DW + GAP_PX - off
-                            if x1 < DW:
-                                disp[:, max(x1, 0):] = imgs[k][:, max(-x1, 0): DW - x1]
-                            cur = k if p >= 0.5 else k - 1
-                            t_in = (i - start_f[k]) / fps
-                            wcap = {k - 1: 1 - smoothstep(0.0, 0.15, t_in), k: smoothstep(0.12, 0.35, t_in)}
-                        else:
-                            disp = imgs[k].copy()
-                            cur, wcap = k, {k: 1.0}
-                        pm, al = bars[cur]
-                        top = disp[:MB].astype(np.float32) * (1 - al) + pm
-                        disp[:MB] = np.clip(top + 0.5, 0, 255).astype(np.uint8)
-                        frame[dy: dy + DH, dx: dx + DW] = disp
-                        strip = sum(w * caps[kk] for kk, w in wcap.items() if w > 0)
-                        if not np.isscalar(strip):
-                            frame[cap_y0: cap_y0 + cap_h] = np.clip(strip + 0.5, 0, 255).astype(np.uint8)
-                    if i >= fade_f0:
-                        e = smoothstep(fade_f0, end_f, i)
-                        frame = np.clip(frame.astype(np.float32) * (1 - e) + endcard * e + 0.5, 0, 255).astype(np.uint8)
-                    enc.stdin.write(frame.tobytes())
-            finally:
-                for r in readers:
-                    r.close()
-                enc.stdin.close()
-            if enc.wait() != 0:
-                die(f"{name}: encode failed")
-
-            with open(os.path.join(a.out, name + ".beats.json"), "w") as fh:
-                json.dump(dict(video=name + ".mp4", fps=fps, duration=F / fps, hook=hook, themes=themes,
-                               sound=os.path.basename(a.sound) if a.sound else "silent (slot)", beats=beats), fh, indent=2)
-            with open(os.path.join(a.out, name + ".labels.txt"), "w") as fh:  # Audacity label track
-                for b in beats:
-                    if b["kind"] == "swipe":
-                        fh.write(f"{b['start']:.4f}\t{b['settled']:.4f}\tswipe {b['from_theme']} -> {b['to_theme']}\n")
-                    else:
-                        fh.write(f"{b['start']:.4f}\t{b['full']:.4f}\tend card\n")
-            for s in [float(x) for x in a.stills.split(",") if x.strip()]:
-                png = os.path.join(a.out, f"{name}_{s:g}s.png")
-                run([FFMPEG, "-v", "error", "-y", "-i", out_mp4, "-vf", f"select=eq(n\\,{round(s * fps)})", "-frames:v", "1", png])
-            if a.guides:
-                g = os.path.join(a.out, f"{name}_safezones.png")
-                src = os.path.join(a.out, f"{name}_{float(a.stills.split(',')[0]):g}s.png")
-                guides(Image.open(src).convert("RGB"), L).save(g)
-            print(f"wrote {out_mp4}", flush=True)
+        (make_zoom if a.format == "zoom" else make_pov)(a, zig, dev, themes, cfgs, hooks, names, clock, clock_text, work)
     finally:
         if not a.keep_work:
             shutil.rmtree(work)
