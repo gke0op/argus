@@ -88,7 +88,12 @@ pub const TraceParams = extern struct {
     grid_w: u32, // exposure meter grid
     grid_h: u32,
     spot_rmax: f32, // hot spots orbit inside this radius: gas there is never baked static
-    _pad: u32 = 0, // Metal rounds the struct to 16 bytes (float4 members)
+    // Camera roll about the line of sight and azimuth (radians), for offline camera moves
+    // (src/offline_render_bh.zig). Read only by kernels compiled with bh_gpu.camera_moves; the
+    // app's ignore them (the projected spin axis stays vertical, the observer at phi = 0).
+    roll: f32 = 0,
+    phi0: f32 = 0,
+    _pad: [3]u32 = .{ 0, 0, 0 }, // Metal rounds the struct to 16 bytes (float4 members)
 };
 
 /// Per-frame view state the presenter adds to the theme's Frame (mirrors `struct View`).
@@ -179,7 +184,7 @@ pub fn fillTrace(st: anytype, w: u32, h: u32, out: *TraceParams) void {
         .grid_h = @max(1, METER_W * h / @max(w, 1)),
         .spot_rmax = @floatCast(st.spot_rmax),
     };
-    comptime std.debug.assert(@sizeOf(TraceParams) == 112);
+    comptime std.debug.assert(@sizeOf(TraceParams) == 128);
 }
 
 /// Exposure from the meter kernel's luminances (0 = not inner disk): the theme's rule,

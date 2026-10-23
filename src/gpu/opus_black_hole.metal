@@ -132,7 +132,8 @@ struct TraceParams {
     float a, sin_i, cos_i, incl, rh, r_in, r_out, lnr_in, lnr_span, lnt_span, mpp, pix_ang, exposure;
     uint width, height, row0, grid_w, grid_h;
     float spot_rmax; // hot spots orbit inside this: gas there is never baked static (the theme's)
-    uint pad1;
+    float roll, phi0; // camera roll and azimuth, radians: read only when compiled with BH_CAMERA_MOVES
+                      // (the offline renderer, bh_gpu.camera_moves); the app's kernels ignore them
 };
 
 // Mirrors bh_tables.View.
@@ -280,7 +281,12 @@ static Ray startRay(constant TraceParams& P, float alpha, float beta) {
     const float pth = -beta;
     const float X = Pp * Pp / del - pth * pth - f;
     const float pr = -sqrt(max(X, 0.0f) / del);
-    return Ray{V6{float3(r, P.incl, 0.0f), float3(T_REF, pr, pth)}, L, 0, 0, 0};
+#if BH_CAMERA_MOVES
+    const float phi_obs = P.phi0; // the camera's azimuth (offline camera moves)
+#else
+    const float phi_obs = 0.0f;
+#endif
+    return Ray{V6{float3(r, P.incl, phi_obs), float3(T_REF, pr, pth)}, L, 0, 0, 0};
 }
 
 static Hit traceNext(constant TraceParams& P, thread Ray& ray, bool with_disk) {
@@ -557,10 +563,24 @@ static float3 behind(constant TraceParams& P, constant Static& st, device const 
     return acc;
 }
 
+// Image-plane coordinates (alpha, beta) of a pixel position. With the camera rolled by P.roll
+// (offline camera moves only) the image turns by it, counter-clockwise.
+static float2 imagePlane(constant TraceParams& P, float fx, float fy) {
+    const float u = (fx - 0.5f * float(P.width)) * P.mpp;
+    const float v = (0.5f * float(P.height) - fy) * P.mpp;
+#if BH_CAMERA_MOVES
+    if (P.roll != 0.0f) {
+        const float c = cos(P.roll), s = sin(P.roll);
+        return float2(c * u + s * v, c * v - s * u);
+    }
+#endif
+    return float2(u, v);
+}
+
 static float2 alphaBeta(constant TraceParams& P, float fx, float fy) {
-    float alpha = (fx - 0.5f * float(P.width)) * P.mpp;
-    if (fabs(alpha) < 1e-6f) alpha = 1e-6f; // never aim a ray exactly through the spin axis
-    return float2(alpha, (0.5f * float(P.height) - fy) * P.mpp);
+    float2 ab = imagePlane(P, fx, fy);
+    if (fabs(ab.x) < 1e-6f) ab.x = 1e-6f; // never aim a ray exactly through the spin axis
+    return ab;
 }
 
 // One pixel's light, sorted by image order (disk crossings of the front hit: 1, 2, 3+).
@@ -932,7 +952,11 @@ static float3 shadePre(uint x, uint y, constant TraceParams& P, device const flo
     // Observed temperature, as the trace's shadeDisk had it: T(r) and the Kerr redshift for
     // this pixel's photon angular momentum.
     const float r = exp(P.lnr_in + P.lnr_span * rbf / float(R_BINS));
+#if BH_CAMERA_MOVES
+    const float L = -imagePlane(P, float(x) + 0.5f, float(y) + 0.5f).x * P.sin_i; // rolled: alpha needs y too
+#else
     const float L = -((float(x) + 0.5f - 0.5f * float(P.width)) * P.mpp) * P.sin_i;
+#endif
     const Orbit o = orbitAt(P.a, r);
     const float tobs = temperature(P, ttab, r) / (o.ut * (1.0f - o.om * L));
     // MRI turbulence (k^(-11/3), 2 octaves), each octave filtered by the pixel's footprint on the

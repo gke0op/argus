@@ -17,6 +17,11 @@ const mtl = @import("metal.zig");
 const bt = @import("bh_tables.zig");
 
 const MSL = @embedFile("opus_black_hole.metal");
+/// Set before the first Engine to compile the kernels with BH_CAMERA_MOVES: TraceParams.roll and
+/// .phi0 then turn and move the camera (src/offline_render_bh.zig). The app never sets it, so its
+/// kernels are compiled exactly as without these fields.
+pub var camera_moves = false;
+const MSL_CAMERA = "#define BH_CAMERA_MOVES 1\n" ++ MSL;
 const EXPO_TARGET: f64 = 7.0; // the theme's: 99th-percentile inner-disk luminance maps here
 const BUF_PRIVATE: usize = 2 << 4; // MTLResourceStorageModePrivate
 const MAX_TILES = 512;
@@ -61,7 +66,8 @@ fn getKernels() !*const Kernels {
     if (kernels == null) {
         const dev = try mtl.device();
         var err: mtl.Id = null;
-        const lib = mtl.msg(mtl.Id, dev, "newLibraryWithSource:options:error:", .{ mtl.nsString(MSL), @as(mtl.Id, null), &err }) orelse {
+        const src: [:0]const u8 = if (camera_moves) MSL_CAMERA else MSL;
+        const lib = mtl.msg(mtl.Id, dev, "newLibraryWithSource:options:error:", .{ mtl.nsString(src.ptr), @as(mtl.Id, null), &err }) orelse {
             std.debug.print("argus: opus_black_hole.metal: {s}\n", .{mtl.describe(err)});
             return error.MetalCompile;
         };
