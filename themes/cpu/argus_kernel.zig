@@ -12,7 +12,12 @@
 //   if (c) a else b, early returns -> sel(c, a, b)  (every lane runs both sides, as on a GPU)
 //   argus_noise(p) -> noise(p), argus_fbm -> fbm, argus_rand -> rand, argus_uv -> uv ...
 // sin, cos, exp, exp2, log2 are SIMD polynomials (|error| < 2e-7 on sin, ~1e-7 rel. on exp2),
-// in the spirit of Metal's fast math.
+// in the spirit of Metal's fast math. They run in @setFloatMode(.optimized); Zig does not carry
+// a float mode into inlined callees, so a port's own hot functions may add that line too
+// (~5% more on Tides, output unchanged to 1 level).
+//
+// Hosts: argus_theme_draw writes [R, G, B, A] bytes; argus_theme_draw_target writes any
+// 32-bit RGB layout (Target), so a display's own memory can be the render target.
 //
 // Time: one SDK step of 0.008 is one 30 Hz Metal tick (f.time += 1/30 s, f.frame += 1), so
 // the app's speed setting, which scales the step, scales f.time the same way.
@@ -124,6 +129,7 @@ pub inline fn smoothstep(e0: f32, e1: f32, x: F) F {
 
 /// sin on [-pi, pi] after a two-constant reduction, folded to [-pi/2, pi/2], odd degree 11.
 pub inline fn sin(x: F) F {
+    @setFloatMode(.optimized);
     const k = @round(x * f(1.0 / (2.0 * std.math.pi)));
     var r = x - k * f(6.28125) - k * f(2.0 * std.math.pi - 6.28125);
     const hi = f(std.math.pi / 2.0);
@@ -142,6 +148,7 @@ pub inline fn cos(x: F) F {
 
 /// 2^x: integer part into the exponent bits, fraction (in [-0.5, 0.5]) by a degree-6 polynomial.
 pub inline fn exp2(x0: F) F {
+    @setFloatMode(.optimized);
     const x = @min(@max(x0, f(-126)), f(127));
     const n = @round(x);
     const r = x - n;
@@ -160,6 +167,7 @@ pub inline fn exp(x: F) F {
 }
 /// log2 for x > 0: exponent bits plus a polynomial in the mantissa mapped to [sqrt(1/2), sqrt(2)).
 pub inline fn log2(x: F) F {
+    @setFloatMode(.optimized);
     const bits: U = @bitCast(x);
     var e: F = @floatFromInt(@as(I, @bitCast((bits >> @splat(23)) & u(0xFF))) - @as(I, @splat(127)));
     var m: F = @bitCast((bits & u(0x007F_FFFF)) | u(0x3F80_0000)); // [1, 2)
@@ -236,6 +244,7 @@ pub inline fn cell(p: V2, k: i32) Cell {
 }
 
 pub inline fn noise(p: V2) F {
+    @setFloatMode(.optimized);
     const i = p.floor();
     const fr = p.sub(i);
     const ux = fr.x * fr.x * (f(3) - f(2) * fr.x);
@@ -254,6 +263,7 @@ pub inline fn noise(p: V2) F {
 }
 
 pub inline fn fbm(p0: V2, comptime octaves: u32) F {
+    @setFloatMode(.optimized);
     var p = p0;
     var sum = f(0);
     var amp: f32 = 0.5;
@@ -269,6 +279,7 @@ pub inline fn fbm(p0: V2, comptime octaves: u32) F {
 }
 
 pub inline fn palette(t: F, a: V3, b: V3, c: V3, d: V3) V3 {
+    @setFloatMode(.optimized);
     const tau = f(6.2831853);
     return .{
         .x = a.x + b.x * cos(tau * (c.x * t + d.x)),
@@ -304,13 +315,26 @@ const ROWS_PER_GRAB = 4;
 const TICK_DT: f64 = 0.008; // the SDK step that equals one 30 Hz Metal tick
 const lane_ids: U = std.simd.iota(u32, N);
 
-/// round(saturate(c) * 255) per channel, packed as the GPU harness packs: [R, G, B, 255].
-inline fn pack(c: V3) U {
+const Shift = @Vector(N, u5);
+
+/// A pixel buffer in any 32-bit RGB layout: `shift` is each channel's bit offset (R, G, B).
+/// argus_theme_draw is draw_target with {0, 8, 16} (Argus's [R, G, B, A] bytes); a host can
+/// instead hand over its display memory in the display's own order (X11 BGRX: {16, 8, 0})
+/// and skip the copy-and-reorder pass.
+pub const Target = extern struct {
+    px: [*]u32,
+    len: usize,
+    stride: usize, // in pixels
+    shift: [3]u8,
+};
+
+/// round(saturate(c) * 255) per channel, as the GPU harness packs, at the target's bit offsets.
+inline fn pack(c: V3, sr: Shift, sg: Shift, sb: Shift) U {
     const s = f(255);
     const r: U = @intFromFloat(@round(k_sat(c.x) * s));
     const g: U = @intFromFloat(@round(k_sat(c.y) * s));
     const b: U = @intFromFloat(@round(k_sat(c.z) * s));
-    return u(0xFF00_0000) | (b << @splat(16)) | (g << @splat(8)) | r;
+    return u(0xFF00_0000) | (r << sr) | (g << sg) | (b << sb);
 }
 
 pub fn exportKernelTheme(comptime K: type) void {
@@ -326,12 +350,16 @@ pub fn exportKernelTheme(comptime K: type) void {
             th: *const Self,
             px: []u32,
             stride: usize,
+            shift: [3]u8,
             next_row: std.atomic.Value(u32) = .init(0),
 
             fn run(job: *Job) void {
                 @setFloatMode(.optimized);
                 const fr = &job.th.frame;
                 const w: usize = fr.width;
+                const sr: Shift = @splat(@intCast(job.shift[0]));
+                const sg: Shift = @splat(@intCast(job.shift[1]));
+                const sb: Shift = @splat(@intCast(job.shift[2]));
                 while (true) {
                     const y0 = job.next_row.fetchAdd(ROWS_PER_GRAB, .monotonic);
                     if (y0 >= fr.height) return;
@@ -340,7 +368,7 @@ pub fn exportKernelTheme(comptime K: type) void {
                         var x: usize = 0;
                         while (x < w) : (x += N) {
                             const gid = Gid{ .x = u(@intCast(x)) + lane_ids, .y = u(@intCast(y)) };
-                            const out: [N]u32 = pack(K.draw(fr, gid));
+                            const out: [N]u32 = pack(K.draw(fr, gid), sr, sg, sb);
                             const n = @min(N, w - x);
                             @memcpy(row[x..][0..n], out[0..n]);
                         }
@@ -373,9 +401,14 @@ pub fn exportKernelTheme(comptime K: type) void {
         }
 
         fn draw(raw: ?*anyopaque, px: [*]u32, len: usize, stride: usize) callconv(.c) void {
+            drawTarget(raw, &.{ .px = px, .len = len, .stride = stride, .shift = .{ 0, 8, 16 } });
+        }
+
+        fn drawTarget(raw: ?*anyopaque, target: *const Target) callconv(.c) void {
             const self: *const Self = @ptrCast(@alignCast(raw orelse return));
-            if (self.frame.height == 0 or len < (self.frame.height - 1) * stride + self.frame.width) return;
-            var job = Job{ .th = self, .px = px[0..len], .stride = stride };
+            if (self.frame.height == 0 or target.len < (self.frame.height - 1) * target.stride + self.frame.width) return;
+            for (target.shift) |s| if (s > 24) return;
+            var job = Job{ .th = self, .px = target.px[0..target.len], .stride = target.stride, .shift = target.shift };
             var pool: [MAX_THREADS]?std.Thread = @splat(null);
             for (1..self.threads) |t| pool[t] = std.Thread.spawn(.{}, Job.run, .{&job}) catch null;
             job.run();
@@ -399,6 +432,7 @@ pub fn exportKernelTheme(comptime K: type) void {
     @export(&Theme.deinit, .{ .name = "argus_theme_deinit" });
     @export(&Theme.step, .{ .name = "argus_theme_step" });
     @export(&Theme.draw, .{ .name = "argus_theme_draw" });
+    @export(&Theme.drawTarget, .{ .name = "argus_theme_draw_target" });
     @export(&Theme.allocsInit, .{ .name = "argus_theme_allocs_init" });
     @export(&Theme.allocsAfter, .{ .name = "argus_theme_allocs_after_init" });
     @export(&Theme.bytesLive, .{ .name = "argus_theme_bytes_live" });
