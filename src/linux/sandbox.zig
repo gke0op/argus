@@ -59,7 +59,7 @@ const allow = blk: {
         .futex,         .set_robust_list, .rseq,         .gettid,      .getpid,
         .sched_getaffinity, .sched_yield, .nanosleep,    .clock_nanosleep, .clock_gettime,
         .exit,          .exit_group,   .rt_sigreturn,    .rt_sigprocmask, .rt_sigaction,
-        .sigaltstack,   .getrandom,    .ppoll,
+        .sigaltstack,   .getrandom,    .ppoll,           .wait4,
     };
     break :blk if (builtin.cpu.arch == .x86_64) list ++ [_]SYS{.poll} else list;
 };
@@ -141,13 +141,26 @@ fn landlock() usize {
 
 /// Applies both layers to the calling process (all threads created afterwards inherit them).
 /// Call after every file, socket and shared-memory segment the host needs is open.
-pub fn lockdown(comptime mode: Mode) Report {
-    if (linux.errno(linux.prctl(38, 1, 0, 0, 0)) != .SUCCESS) return .{ .seccomp = false, .landlock_abi = 0 }; // PR_SET_NO_NEW_PRIVS
-    const abi = landlock();
+pub fn lockdown(mode: Mode) Report {
+    const abi = restrictLandlock();
+    return .{ .seccomp = restrictSeccomp(mode), .landlock_abi = abi };
+}
+
+/// The Landlock layer alone; returns the ABI applied (0: none). A process forking a caged child
+/// applies it before the fork, so the child's own layer nests inside the parent's domain: with
+/// signal scoping, sibling domains cannot signal each other, and that includes the kernel's
+/// parent-death signal (measured: a child locked down separately from its parent survived it).
+pub fn restrictLandlock() usize {
+    if (linux.errno(linux.prctl(38, 1, 0, 0, 0)) != .SUCCESS) return 0; // PR_SET_NO_NEW_PRIVS
+    return landlock();
+}
+
+/// The seccomp layer alone. A forking parent applies it after the fork (the filter forbids fork).
+pub fn restrictSeccomp(mode: Mode) bool {
+    if (linux.errno(linux.prctl(38, 1, 0, 0, 0)) != .SUCCESS) return false; // PR_SET_NO_NEW_PRIVS
     const insns = filter(mode, @intCast(linux.getpid()));
     const prog = Prog{ .len = insns.len, .filter = &insns };
-    const ok = linux.errno(linux.syscall3(.seccomp, 1, 0, @intFromPtr(&prog))) == .SUCCESS; // SET_MODE_FILTER
-    return .{ .seccomp = ok, .landlock_abi = abi };
+    return linux.errno(linux.syscall3(.seccomp, 1, 0, @intFromPtr(&prog))) == .SUCCESS; // SET_MODE_FILTER
 }
 
 // ---- Tests: run the generated program in a small BPF interpreter and check each decision.

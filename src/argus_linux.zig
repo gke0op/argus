@@ -12,6 +12,7 @@ const std = @import("std");
 const linux = std.os.linux;
 const x11 = @import("linux/x11.zig");
 const sandbox = @import("linux/sandbox.zig");
+const cage = @import("linux/cage.zig");
 const theme = @import("theme"); // compiled in; exports argus_theme_*
 comptime {
     _ = theme;
@@ -24,8 +25,7 @@ extern fn argus_theme_deinit(st: ?*anyopaque) callconv(.c) void;
 /// their `pub fn draw(frame, gid)`): draw straight into display memory in the display's channel
 /// order. Null for SDK themes. (A weak symbol would do this at link time, but LLVM folds
 /// `weak_sym != null` to true, so the choice is made here, where it is known for certain.)
-const Target = extern struct { px: [*]u32, len: usize, stride: usize, shift: [3]u8 };
-const DrawTarget = *const fn (?*anyopaque, *const Target) callconv(.c) void;
+const DrawTarget = *const fn (?*anyopaque, *const cage.Target) callconv(.c) void;
 const draw_target: ?DrawTarget = if (@hasDecl(theme, "draw")) @extern(DrawTarget, .{ .name = "argus_theme_draw_target" }) else null;
 extern fn argus_theme_step(st: ?*anyopaque, dt: f64) callconv(.c) void;
 extern fn argus_theme_draw(st: ?*anyopaque, px: [*]u32, len: usize, stride: usize) callconv(.c) void;
@@ -68,11 +68,10 @@ fn readFile(path: []const u8, buf: []u8) ?[]u8 {
     return buf[0..n];
 }
 
-fn initTheme(w: usize, h: usize, scale: f64) !?*anyopaque {
+fn initTheme(th: *cage.Theme, w: usize, h: usize, scale: f64) !void {
     const t0 = nowNs();
-    const st = argus_theme_init(@intCast(w), @intCast(h), scale) orelse return error.ThemeInitFailed;
+    try th.init(w, h, scale);
     std.debug.print("argus-linux: theme {d}x{d} ready in {d} ms\n", .{ w, h, (nowNs() - t0) / 1_000_000 });
-    return st;
 }
 
 /// Source column and weight for each output column, 8.8 fixed point, centres aligned.
@@ -185,19 +184,30 @@ pub fn main(init: std.process.Init) !void {
     var rh = h / div;
 
     const alloc = std.heap.page_allocator;
-    const px = try alloc.alloc(u32, w * h); // what the window shows
-    const small = try alloc.alloc(u32, w * h); // the theme's render when div > 1
+    const px = try cage.sharedAlloc(u32, w * h); // what the window shows (shared with a caged theme)
+    const small = try cage.sharedAlloc(u32, w * h); // the theme's render when div > 1
     const scratch = try alloc.alloc(u8, c.max_req_bytes);
     var shm = c.shmInit(w, h); // null: frames go through the socket (PutImage)
     std.debug.print("argus-linux: {d}x{d} depth {d}, {d} FPS, {s}\n", .{ w, h, c.depth, fps, if (shm != null) "MIT-SHM" else "PutImage" });
 
-    // Everything the host needs is open: cage the process before any theme code runs.
-    if (sandboxed) {
-        const rep = sandbox.lockdown(.errno);
-        std.debug.print("argus-linux: sandbox: seccomp {s}, landlock {s}\n", .{ if (rep.seccomp) "on" else "UNAVAILABLE", if (rep.landlock_abi > 0) "on" else "unavailable" });
-        if (!rep.seccomp) return error.SandboxUnavailable; // never run a theme uncaged by surprise
-    } else std.debug.print("argus-linux: sandbox OFF (--sandbox off): the theme runs with your full permissions\n", .{});
-    var st = try initTheme(rw, rh, scale);
+    // Everything the host needs is open. Caged: the theme runs in its own process with no X
+    // socket (cage.zig), both processes locked down (sandbox.zig) before any theme code runs.
+    const ops = cage.Ops{ .init = &argus_theme_init, .deinit = &argus_theme_deinit, .step = &argus_theme_step, .draw = &argus_theme_draw, .draw_target = draw_target };
+    var th = if (sandboxed) blk: {
+        // Landlock before the fork: the child's layer then nests in the parent's domain, which is
+        // what lets the parent-death signal reach it. Seccomp after: its filter forbids fork.
+        const abi = sandbox.restrictLandlock();
+        const t = try cage.Theme.caged(ops);
+        const ok = sandbox.restrictSeccomp(.errno); // the parent too: it reads child-written memory and X replies
+        std.debug.print("argus-linux: sandbox: theme in its own process (no X socket), seccomp {s}, landlock {s}\n", .{ if (ok) "on" else "UNAVAILABLE", if (abi > 0) "on" else "unavailable" });
+        if (!ok) return error.SandboxUnavailable; // never run a theme uncaged by surprise
+        break :blk t;
+    } else blk: {
+        std.debug.print("argus-linux: sandbox OFF (--sandbox off): the theme runs with your full permissions\n", .{});
+        break :blk cage.Theme.inProcess(ops);
+    };
+    defer th.quit();
+    try initTheme(&th, rw, rh, scale);
 
     const period = 1_000_000_000 / fps;
     var next = nowNs();
@@ -210,7 +220,7 @@ pub fn main(init: std.process.Init) !void {
     while (frames == 0 or f < frames) : (f += 1) {
         const t0 = nowNs();
         var mark = t0;
-        argus_theme_step(st, ZIG_TICK_DT);
+        try th.step(ZIG_TICK_DT);
         stage[0] += lap(&mark);
 
         // The display's own memory (MIT-SHM), once the server is done reading the last frame.
@@ -226,16 +236,16 @@ pub fn main(init: std.process.Init) !void {
         var direct = false;
         if (div == 1) {
             if (draw_target != null and dst != null) {
-                draw_target.?(st, &.{ .px = dst.?.ptr, .len = dst.?.len, .stride = w, .shift = .{ shift[0], shift[1], shift[2] } });
+                try th.drawTarget(.{ .px = dst.?.ptr, .len = dst.?.len, .stride = w, .shift = .{ shift[0], shift[1], shift[2] } });
                 direct = true;
             } else {
                 @memset(px, 0);
-                argus_theme_draw(st, px.ptr, px.len, w);
+                try th.draw(px, w);
             }
             stage[1] += lap(&mark);
         } else {
             if (draw_target == null) @memset(small[0 .. rw * rh], 0); // kernels write every pixel
-            argus_theme_draw(st, small.ptr, rw * rh, rw);
+            try th.draw(small[0 .. rw * rh], rw);
             stage[1] += lap(&mark);
             if (dst) |d| {
                 upscale(small[0 .. rw * rh], rw, rh, d, w, h, shift);
@@ -267,10 +277,10 @@ pub fn main(init: std.process.Init) !void {
         if (auto and f == 8) {
             const ratio = @as(f64, @floatFromInt(probe_ns / 8)) / (0.7 * @as(f64, @floatFromInt(period)));
             div = @min(4, @max(div + 1, @as(usize, @intFromFloat(@ceil(@as(f64, @floatFromInt(div)) * @sqrt(ratio))))));
-            argus_theme_deinit(st);
+            try th.deinit();
             rw = w / div;
             rh = h / div;
-            st = try initTheme(rw, rh, scale);
+            try initTheme(&th, rw, rh, scale);
             std.debug.print("argus-linux: {d:.1} ms/frame over budget, rendering at 1/{d} ({d}x{d}) and upscaling\n", .{ @as(f64, @floatFromInt(probe_ns / 8)) / 1e6, div, rw, rh });
             work_ns = 0;
             stage = @splat(0);
