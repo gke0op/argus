@@ -33,8 +33,11 @@ harness:
 	$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $(THEME) --frames $(FRAMES) --out $(OUT) $(if $(SEED),--seed $(SEED)) $(if $(FPS),--fps $(FPS)) $(if $(STATS),--stats $(STATS)) $(if $(DATE),--date $(DATE))
 
 # Linux X11 live wallpaper (pure Zig, no libc): THEME is compiled in. ./argus-linux to run.
+# -fstrip: debug info is most of the LLVM time (rebuild 20 s -> 6 s) and size (4.7 MB -> 324 KB).
+# CPU=x86_64_v3 for a binary to hand out (AVX2; plain x86_64 is ~8x slower on kernel themes).
+CPU ?= native
 linux:
-	$(ZIG) build-exe -O ReleaseFast --dep theme -Mroot=src/argus_linux.zig -Mtheme=$(THEME) -femit-bin=argus-linux
+	$(ZIG) build-exe -O ReleaseFast -fstrip -mcpu=$(CPU) --dep theme -Mroot=src/argus_linux.zig -Mtheme=$(THEME) -femit-bin=argus-linux
 
 # The harness on every tracked theme: CPU for each .zig, GPU for each .metal (skipped without a
 # Metal device). tools/check_themes.sh --all also checks untracked local themes.
