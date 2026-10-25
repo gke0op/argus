@@ -343,7 +343,7 @@ fn writePNGPortable(pixels: []const u32, width: usize, height: usize, out_path: 
     var o: usize = 2;
     var i: usize = 0;
     while (i < raw.len) {
-        const n = @min(raw.len - i, 65535);
+        const n: usize = @min(raw.len - i, 65535); // usize: @min narrows to u16 and 5 + n would wrap
         idat[o] = if (i + n == raw.len) 1 else 0;
         std.mem.writeInt(u16, idat[o + 1 ..][0..2], @intCast(n), .little);
         std.mem.writeInt(u16, idat[o + 3 ..][0..2], ~@as(u16, @intCast(n)), .little);
