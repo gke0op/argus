@@ -1,6 +1,7 @@
 # Zig 0.17.0: ./.toolchain/zig if present (gitignored; `make zig` installs it), otherwise zig on PATH.
 ZIG ?= $(shell if [ -x ./.toolchain/zig ]; then echo ./.toolchain/zig; else command -v zig; fi)
-ZFLAGS = -O ReleaseFast -target aarch64-macos -lc
+# Off macOS (a Linux VM) only `make harness` on .zig themes works: it builds for this machine.
+ZFLAGS = -O ReleaseFast -target $(if $(filter Darwin,$(shell uname -s)),aarch64-macos,native) -lc
 THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
