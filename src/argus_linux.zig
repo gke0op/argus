@@ -67,35 +67,54 @@ fn tap(o: usize, sn: usize, dn: usize) struct { lo: u32, hi: u32, w: u32 } {
 
 var x_taps: [8192]struct { lo: u32, hi: u32, w: u32 } = undefined;
 
-/// Bilinear upscale of a [R, G, B, A] frame (8.8 fixed point, pixel centres aligned).
+/// Bilinear upscale of a [R, G, B, A] frame (8.8 fixed point, pixel centres aligned), split
+/// over the cores. Separable: each output row first blends its two source rows (sw pixels),
+/// then expands that blended row horizontally (two taps per output pixel instead of four).
 fn upscale(src: []const u32, sw: usize, sh: usize, dst: []u32, dw: usize, dh: usize) void {
-    for (0..@min(dw, x_taps.len)) |x| {
+    if (sw > x_taps.len or dw > x_taps.len) return;
+    for (0..dw) |x| {
         const t = tap(x, sw, dw);
         x_taps[x] = .{ .lo = t.lo, .hi = t.hi, .w = t.w };
     }
-    for (0..dh) |y| {
-        const ty = tap(y, sh, dh);
-        const y0: usize = ty.lo;
-        const y1: usize = ty.hi;
-        const wy = ty.w;
-        for (0..dw) |x| {
-            const x0: usize = x_taps[x].lo;
-            const x1: usize = x_taps[x].hi;
-            const wx = x_taps[x].w;
-            const a = src[y0 * sw + x0];
-            const b = src[y0 * sw + x1];
-            const cc = src[y1 * sw + x0];
-            const d = src[y1 * sw + x1];
-            var out: u32 = 0xFF00_0000;
-            inline for (.{ 0, 8, 16 }) |sh_| {
-                const top = ((a >> sh_) & 0xFF) * (256 - wx) + ((b >> sh_) & 0xFF) * wx;
-                const bot = ((cc >> sh_) & 0xFF) * (256 - wx) + ((d >> sh_) & 0xFF) * wx;
-                out |= (((top * (256 - wy) + bot * wy) >> 16) & 0xFF) << sh_;
+    const job = UpJob{ .src = src, .sw = sw, .sh = sh, .dst = dst, .dw = dw, .dh = dh };
+    const n = @min(8, std.Thread.getCpuCount() catch 1);
+    var pool: [8]?std.Thread = @splat(null);
+    for (1..n) |t| pool[t] = std.Thread.spawn(.{}, UpJob.rows, .{ &job, dh * t / n, dh * (t + 1) / n }) catch null;
+    job.rows(0, dh / n);
+    for (1..n) |t| if (pool[t]) |th| th.join() else job.rows(dh * t / n, dh * (t + 1) / n);
+}
+
+const UpJob = struct {
+    src: []const u32,
+    sw: usize,
+    sh: usize,
+    dst: []u32,
+    dw: usize,
+    dh: usize,
+
+    fn rows(j: *const UpJob, y_begin: usize, y_end: usize) void {
+        var mid: [8192][3]u32 = undefined; // the vertically blended source row, x256 per channel
+        for (y_begin..y_end) |y| {
+            const ty = tap(y, j.sh, j.dh);
+            const r0 = j.src[ty.lo * j.sw ..][0..j.sw];
+            const r1 = j.src[ty.hi * j.sw ..][0..j.sw];
+            for (r0, r1, mid[0..j.sw]) |a, c, *m| {
+                inline for (0..3) |ch| {
+                    const s = 8 * ch;
+                    m[ch] = ((a >> s) & 0xFF) * (256 - ty.w) + ((c >> s) & 0xFF) * ty.w;
+                }
             }
-            dst[y * dw + x] = out;
+            const out = j.dst[y * j.dw ..][0..j.dw];
+            for (out, x_taps[0..j.dw]) |*o, t| {
+                const l = mid[t.lo];
+                const r = mid[t.hi];
+                var px: u32 = 0xFF00_0000;
+                inline for (0..3) |ch| px |= (((l[ch] * (256 - t.w) + r[ch] * t.w) >> 16) & 0xFF) << (8 * ch);
+                o.* = px;
+            }
         }
     }
-}
+};
 
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
@@ -150,12 +169,14 @@ pub fn main(init: std.process.Init) !void {
     const px = try alloc.alloc(u32, w * h); // what the window shows
     const small = try alloc.alloc(u32, w * h); // the theme's render when div > 1
     const scratch = try alloc.alloc(u8, c.max_req_bytes);
-    std.debug.print("argus-linux: {d}x{d} depth {d}, {d} FPS\n", .{ w, h, c.depth, fps });
+    var shm = c.shmInit(w, h); // null: frames go through the socket (PutImage)
+    std.debug.print("argus-linux: {d}x{d} depth {d}, {d} FPS, {s}\n", .{ w, h, c.depth, fps, if (shm != null) "MIT-SHM" else "PutImage" });
 
     const period = 1_000_000_000 / fps;
     var next = nowNs();
     var work_ns: u64 = 0;
     var probe_ns: u64 = 0;
+    var probe: [8]u64 = @splat(0);
     var f: u64 = 0;
     while (frames == 0 or f < frames) : (f += 1) {
         const t0 = nowNs();
@@ -168,14 +189,25 @@ pub fn main(init: std.process.Init) !void {
             argus_theme_draw(st, small.ptr, rw * rh, rw);
             upscale(small[0 .. rw * rh], rw, rh, px, w, h);
         }
-        try c.putFrame(win, gc, px, w, h, scratch);
-        c.drainErrors();
+        if (shm) |*s| { // the server reads the previous frame while this one was drawn
+            try c.shmWait(s); // also reports X errors (drainErrors would eat the completion)
+            c.shmFill(s, px);
+            try c.shmPut(s, win, gc);
+        } else {
+            try c.putFrame(win, gc, px, w, h, scratch);
+            c.drainErrors();
+        }
         const dt_ns = nowNs() - t0;
         work_ns += dt_ns;
-        // Auto render scale: frames 2..9 measure the cost (frame 1 pays first-touch); over 85%
-        // of the budget, drop to the 1/div that fits ~70% of it (cost ~ pixels ~ 1/div^2).
-        if (auto and f >= 1 and f < 9) probe_ns += dt_ns;
-        if (auto and f == 8) auto = probe_ns / 8 > period * 85 / 100 and div < 4; // one verdict per scale
+        // Auto render scale: frames 2..9 measure the cost (frame 1 pays first-touch); if their
+        // median (shared vCPUs spike) is over 85% of the budget, drop to the 1/div that fits ~70%
+        // of it (cost ~ pixels ~ 1/div^2).
+        if (auto and f >= 1 and f < 9) probe[f - 1] = dt_ns;
+        if (auto and f == 8) {
+            std.mem.sort(u64, &probe, {}, std.sort.asc(u64));
+            probe_ns = 8 * ((probe[3] + probe[4]) / 2); // 8 x median, as the code below expects a sum
+            auto = probe_ns / 8 > period * 85 / 100 and div < 4; // one verdict per scale
+        }
         if (auto and f == 8) {
             const ratio = @as(f64, @floatFromInt(probe_ns / 8)) / (0.7 * @as(f64, @floatFromInt(period)));
             div = @min(4, @max(div + 1, @as(usize, @intFromFloat(@ceil(@as(f64, @floatFromInt(div)) * @sqrt(ratio))))));
