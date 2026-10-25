@@ -24,10 +24,11 @@ done
 OUT_DIR="${TMPDIR:-/tmp}/argus_check_themes"
 mkdir -p "$OUT_DIR" .zig-cache
 HARNESS=.zig-cache/argus_theme_harness
-"$ZIG" build-exe -O ReleaseFast -target aarch64-macos -lc src/theme_harness.zig -femit-bin="$HARNESS" || exit 1
+TARGET=aarch64-macos; [ "$(uname -s)" = Darwin ] || TARGET=native # Linux: Zig and themes/cpu ports only
+"$ZIG" build-exe -O ReleaseFast -target "$TARGET" -lc src/theme_harness.zig -femit-bin="$HARNESS" || exit 1
 
-themes() { # themes/*.$1: tracked files, or everything with --all (minus the SDK)
-    if [ "$ALL" = 1 ]; then ls themes/*."$1" 2>/dev/null; else git ls-files "themes/*.$1"; fi | grep -v '/argus_theme_sdk\.zig$'
+themes() { # themes/*.$1 and themes/cpu/*.$1: tracked files, or everything with --all (minus the SDK and the CPU executor)
+    if [ "$ALL" = 1 ]; then ls themes/*."$1" themes/cpu/*."$1" 2>/dev/null; else git ls-files "themes/*.$1"; fi | grep -v -E '/(argus_theme_sdk|argus_kernel)\.zig$'
 }
 
 fail=0; passed=0; skipped=0

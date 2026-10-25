@@ -476,6 +476,7 @@ pub fn main(init: std.process.Init) !void {
             enforce_budget = false;
         } else if (std.mem.eql(u8, a, "--probe-metal")) {
             // CI: exit 0 when this machine has a Metal device for the GPU checks, 3 when not.
+            if (!is_mac) std.process.exit(3);
             mtl.load() catch std.process.exit(3);
             _ = mtl.device() catch std.process.exit(3);
             std.process.exit(0);

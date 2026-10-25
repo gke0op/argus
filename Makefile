@@ -42,7 +42,7 @@ linux:
 # The harness on every tracked theme: CPU for each .zig, GPU for each .metal (skipped without a
 # Metal device). tools/check_themes.sh --all also checks untracked local themes.
 check-themes:
-	ZIG=$(ZIG) tools/check_themes.sh --frames $(FRAMES)
+	ZIG=$(ZIG) tools/check_themes.sh --frames $(FRAMES) $(CHECK_ARGS)
 
 claims:
 	$(ZIG) run -lc -O ReleaseFast --dep theme -Mroot=src/claim_check.zig -O ReleaseFast -Mtheme=$(THEME)
@@ -77,8 +77,19 @@ social:
 
 test:
 	python3 -I tools/gen_quasars.py --check
+ifeq ($(shell uname -s),Darwin)
 	$(ZIG) test $(ZFLAGS) src/desktop_wallpaper.zig
 	$(ZIG) test $(ZFLAGS) src/kronos_tui.zig
+	$(ZIG) test $(ZFLAGS) themes/cpu/argus_kernel.zig
+else
+	# Linux: the app is macOS-only, so its tests are compiled for macOS (type-checked, not run);
+	# Kronos and the CPU kernel run here, the kernel also as aarch64 under qemu when installed
+	# (the 4-lane NEON path Apple silicon takes).
+	$(ZIG) test -target aarch64-macos -lc --test-no-exec -femit-bin=.zig-cache/test_app_macos src/desktop_wallpaper.zig
+	$(ZIG) test $(ZFLAGS) src/kronos_tui.zig
+	$(ZIG) test $(ZFLAGS) themes/cpu/argus_kernel.zig
+	if command -v qemu-aarch64-static >/dev/null; then $(ZIG) test -target aarch64-linux themes/cpu/argus_kernel.zig --test-cmd qemu-aarch64-static --test-cmd-bin; fi
+endif
 
 run: app
 	./Launch_Argus_Wallpaper.command

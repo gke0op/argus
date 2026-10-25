@@ -12,9 +12,11 @@
 //   if (c) a else b, early returns -> sel(c, a, b)  (every lane runs both sides, as on a GPU)
 //   argus_noise(p) -> noise(p), argus_fbm -> fbm, argus_rand -> rand, argus_uv -> uv ...
 // sin, cos, exp, exp2, log2 are SIMD polynomials (|error| < 2e-7 on sin, ~1e-7 rel. on exp2),
-// in the spirit of Metal's fast math. They run in @setFloatMode(.optimized); Zig does not carry
-// a float mode into inlined callees, so a port's own hot functions may add that line too
-// (~5% more on Tides, output unchanged to 1 level).
+// in the spirit of Metal's fast math. They run in @setFloatMode(.optimized), except where fused
+// or reordered math changed results (the sin/cos angle reduction, fbm: strict, so they are
+// bit-exact on x86 and ARM alike). Zig does not carry a float mode into inlined callees, so a
+// port's own hot functions may add that line too (~5% more on Tides, output unchanged to 1 level).
+// Tests: `zig test themes/cpu/argus_kernel.zig`.
 //
 // Hosts: argus_theme_draw writes [R, G, B, A] bytes; argus_theme_draw_target writes any
 // 32-bit RGB layout (Target), so a display's own memory can be the render target.
@@ -127,11 +129,19 @@ pub inline fn smoothstep(e0: f32, e1: f32, x: F) F {
     return t * t * (f(3) - f(2) * t);
 }
 
-/// sin on [-pi, pi] after a two-constant reduction, folded to [-pi/2, pi/2], odd degree 11.
-pub inline fn sin(x: F) F {
-    @setFloatMode(.optimized);
+/// x - 2 pi k, k = round(x / 2 pi): the two-constant (Cody-Waite) reduction to [-pi, pi]. Strict
+/// float mode on purpose: optimized mode lets LLVM merge the two constants, and the error then
+/// grows with |x| (measured: sin 2.1e-7 -> 2.7e-6 at |x| <= 100; f.time runs to 14400 s).
+inline fn reduce(x: F) F {
+    @setFloatMode(.strict);
     const k = @round(x * f(1.0 / (2.0 * std.math.pi)));
-    var r = x - k * f(6.28125) - k * f(2.0 * std.math.pi - 6.28125);
+    return x - k * f(6.28125) - k * f(2.0 * std.math.pi - 6.28125);
+}
+
+/// sin of a reduced angle in [-pi, pi]: folded to [-pi/2, pi/2], odd degree 11.
+inline fn sinReduced(r0: F) F {
+    @setFloatMode(.optimized);
+    var r = r0;
     const hi = f(std.math.pi / 2.0);
     r = sel(r > hi, f(std.math.pi) - r, sel(r < -hi, f(-std.math.pi) - r, r));
     const r2 = r * r;
@@ -142,8 +152,14 @@ pub inline fn sin(x: F) F {
     p = p * r2 + f(-1.6666667e-1);
     return r + r * r2 * p;
 }
+pub inline fn sin(x: F) F {
+    return sinReduced(reduce(x));
+}
+/// cos(x) = sin(x + pi/2), with pi/2 added after the reduction: added before, it rounds away
+/// low bits of a large x (measured 3.4e-6 at |x| <= 100, now ~2e-7).
 pub inline fn cos(x: F) F {
-    return sin(x + f(std.math.pi / 2.0));
+    const r = reduce(x) + f(std.math.pi / 2.0);
+    return sinReduced(sel(r > f(std.math.pi), r - f(2.0 * std.math.pi), r));
 }
 
 /// 2^x: integer part into the exponent bits, fraction (in [-0.5, 0.5]) by a degree-6 polynomial.
@@ -263,7 +279,10 @@ pub inline fn noise(p: V2) F {
 }
 
 pub inline fn fbm(p0: V2, comptime octaves: u32) F {
-    @setFloatMode(.optimized);
+    // Strict: fusing the octave rotation into FMAs moved large coordinates enough to pick other
+    // noise cells (1.1e-4 off the literal prelude at |p| ~ 500) and would differ between AVX and
+    // NEON. Strict, fbm is bit-exact everywhere; noise() inside keeps its own (exact) mode.
+    @setFloatMode(.strict);
     var p = p0;
     var sum = f(0);
     var amp: f32 = 0.5;
@@ -437,4 +456,113 @@ pub fn exportKernelTheme(comptime K: type) void {
     @export(&Theme.allocsAfter, .{ .name = "argus_theme_allocs_after_init" });
     @export(&Theme.bytesLive, .{ .name = "argus_theme_bytes_live" });
     @export(&Theme.hasNaN, .{ .name = "argus_theme_has_nan" });
+}
+
+// ---- Tests: `zig test themes/cpu/argus_kernel.zig` (make test also runs them as aarch64 under qemu)
+
+/// The prelude transcribed literally, one scalar at a time: the reference the lanes must match bit
+/// for bit (any lane-order or aliasing slip shows up as a mismatch).
+const Ref = struct {
+    fn rand(cx: u32, cy: u32, seed: u32) f32 {
+        return @as(f32, @floatFromInt(argus_hash1(cx ^ argus_hash1(cy ^ argus_hash1(seed))))) * (1.0 / 4294967295.0);
+    }
+    fn noise(px: f32, py: f32) f32 {
+        const ix = @floor(px);
+        const iy = @floor(py);
+        const fx = px - ix;
+        const fy = py - iy;
+        const ux = fx * fx * (3.0 - 2.0 * fx);
+        const uy = fy * fy * (3.0 - 2.0 * fy);
+        const cx: u32 = @bitCast(@as(i32, @intFromFloat(ix)) +% 32768);
+        const cy: u32 = @bitCast(@as(i32, @intFromFloat(iy)) +% 32768);
+        const a = Ref.rand(cx, cy, 0);
+        const b = Ref.rand(cx +% 1, cy, 0);
+        const d = Ref.rand(cx, cy +% 1, 0);
+        const e = Ref.rand(cx +% 1, cy +% 1, 0);
+        const top = a + (b - a) * ux;
+        const bot = d + (e - d) * ux;
+        return 2.0 * (top + (bot - top) * uy) - 1.0;
+    }
+    fn fbm(px0: f32, py0: f32, octaves: u32) f32 {
+        var px = px0;
+        var py = py0;
+        var sum: f32 = 0;
+        var amp: f32 = 0.5;
+        for (0..octaves) |_| {
+            sum += amp * Ref.noise(px, py);
+            const nx = 1.6 * px - 1.2 * py;
+            py = 1.2 * px + 1.6 * py;
+            px = nx;
+            amp *= 0.5;
+        }
+        return sum;
+    }
+};
+
+fn lanesFrom(xs: [N]f32) F {
+    return xs;
+}
+
+test "SIMD sin, cos, exp2, log2 stay within fast-math error of the scalar functions" {
+    var prng = std.Random.DefaultPrng.init(1);
+    const r = prng.random();
+    var worst = [4]f32{ 0, 0, 0, 0 };
+    for (0..4000) |_| {
+        var xs: [N]f32 = undefined;
+        for (&xs) |*x| x.* = (r.float(f32) - 0.5) * 200.0;
+        const s: [N]f32 = sin(lanesFrom(xs));
+        const c: [N]f32 = cos(lanesFrom(xs));
+        var es: [N]f32 = undefined;
+        for (&es, xs) |*e, x| e.* = x * 0.1; // 2^[-10, 10]
+        const e2: [N]f32 = exp2(lanesFrom(es));
+        var ls: [N]f32 = undefined;
+        for (&ls, xs) |*l, x| l.* = @abs(x) * 10.0 + 1e-3;
+        const l2: [N]f32 = log2(lanesFrom(ls));
+        for (0..N) |i| {
+            worst[0] = @max(worst[0], @abs(s[i] - @sin(xs[i])));
+            worst[1] = @max(worst[1], @abs(c[i] - @cos(xs[i])));
+            worst[2] = @max(worst[2], @abs(e2[i] - @exp2(es[i])) / @exp2(es[i]));
+            worst[3] = @max(worst[3], @abs(l2[i] - @log2(ls[i])));
+        }
+    }
+    // Measured in Debug and ReleaseFast alike: sin 2.1e-7, cos 2.7e-7, exp2 2.5e-7 (rel), log2 9.5e-7.
+    try std.testing.expect(worst[0] < 4e-7); // absolute, |x| <= 100
+    try std.testing.expect(worst[1] < 4e-7);
+    try std.testing.expect(worst[2] < 4e-7); // relative
+    try std.testing.expect(worst[3] < 2e-6);
+}
+
+// Bit-exact against the literal prelude in Debug and ReleaseFast, on x86 and ARM alike (noise is
+// exact under optimized mode as measured; fbm is strict). A mismatch means a lane or aliasing bug.
+test "rand, noise and fbm match the scalar prelude bit for bit in every lane" {
+    var prng = std.Random.DefaultPrng.init(2);
+    const r = prng.random();
+    for (0..2000) |_| {
+        var xs: [N]f32 = undefined;
+        var ys: [N]f32 = undefined;
+        for (&xs, &ys) |*x, *y| {
+            x.* = (r.float(f32) - 0.5) * 500.0;
+            y.* = (r.float(f32) - 0.5) * 500.0;
+        }
+        const p = V2{ .x = lanesFrom(xs), .y = lanesFrom(ys) };
+        const n: [N]f32 = noise(p);
+        const b: [N]f32 = fbm(p, 4);
+        const c = cell(p.floor(), 4096);
+        const rd: [N]f32 = rand(c, 7);
+        const cx: [N]u32 = c.x;
+        const cy: [N]u32 = c.y;
+        for (0..N) |i| {
+            try std.testing.expectEqual(Ref.noise(xs[i], ys[i]), n[i]);
+            try std.testing.expectEqual(Ref.fbm(xs[i], ys[i], 4), b[i]);
+            try std.testing.expectEqual(Ref.rand(cx[i], cy[i], 7), rd[i]);
+        }
+    }
+}
+
+test "pack honours the target's channel layout" {
+    const c = V3{ .x = f(1.0), .y = f(0.5), .z = f(0.0) }; // r 255, g 128, b 0
+    const rgba: [N]u32 = pack(c, @splat(0), @splat(8), @splat(16));
+    const bgrx: [N]u32 = pack(c, @splat(16), @splat(8), @splat(0));
+    try std.testing.expectEqual(@as(u32, 0xFF00_80FF), rgba[0]);
+    try std.testing.expectEqual(@as(u32, 0xFFFF_8000), bgrx[N - 1]);
 }
