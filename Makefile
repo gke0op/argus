@@ -1,11 +1,12 @@
 # Zig 0.17.0: ./.toolchain/zig if present (gitignored; `make zig` installs it), otherwise zig on PATH.
 ZIG ?= $(shell if [ -x ./.toolchain/zig ]; then echo ./.toolchain/zig; else command -v zig; fi)
-ZFLAGS = -O ReleaseFast -target aarch64-macos -lc
+# Off macOS (a Linux VM) only `make harness` on .zig themes works: it builds for this machine.
+ZFLAGS = -O ReleaseFast -target $(if $(filter Darwin,$(shell uname -s)),aarch64-macos,native) -lc
 THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: icon quasars all app desktop kronos harness check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
+.PHONY: icon quasars all app desktop kronos harness linux check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
 
 all: app kronos
 
@@ -31,10 +32,17 @@ kronos:
 harness:
 	$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $(THEME) --frames $(FRAMES) --out $(OUT) $(if $(SEED),--seed $(SEED)) $(if $(FPS),--fps $(FPS)) $(if $(STATS),--stats $(STATS)) $(if $(DATE),--date $(DATE))
 
+# Linux X11 live wallpaper (pure Zig, no libc): THEME is compiled in. ./argus-linux to run.
+# -fstrip: debug info is most of the LLVM time (rebuild 20 s -> 6 s) and size (4.7 MB -> 324 KB).
+# CPU=x86_64_v3 for a binary to hand out (AVX2; plain x86_64 is ~8x slower on kernel themes).
+CPU ?= native
+linux:
+	$(ZIG) build-exe -O ReleaseFast -fstrip -mcpu=$(CPU) --dep theme -Mroot=src/argus_linux.zig -Mtheme=$(THEME) -femit-bin=argus-linux
+
 # The harness on every tracked theme: CPU for each .zig, GPU for each .metal (skipped without a
 # Metal device). tools/check_themes.sh --all also checks untracked local themes.
 check-themes:
-	ZIG=$(ZIG) tools/check_themes.sh --frames $(FRAMES)
+	ZIG=$(ZIG) tools/check_themes.sh --frames $(FRAMES) $(CHECK_ARGS)
 
 claims:
 	$(ZIG) run -lc -O ReleaseFast --dep theme -Mroot=src/claim_check.zig -O ReleaseFast -Mtheme=$(THEME)
@@ -69,8 +77,19 @@ social:
 
 test:
 	python3 -I tools/gen_quasars.py --check
+ifeq ($(shell uname -s),Darwin)
 	$(ZIG) test $(ZFLAGS) src/desktop_wallpaper.zig
 	$(ZIG) test $(ZFLAGS) src/kronos_tui.zig
+	$(ZIG) test $(ZFLAGS) themes/cpu/argus_kernel.zig
+else
+	# Linux: the app is macOS-only, so its tests are compiled for macOS (type-checked, not run);
+	# Kronos and the CPU kernel run here, the kernel also as aarch64 under qemu when installed
+	# (the 4-lane NEON path Apple silicon takes).
+	$(ZIG) test -target aarch64-macos -lc --test-no-exec -femit-bin=.zig-cache/test_app_macos src/desktop_wallpaper.zig
+	$(ZIG) test $(ZFLAGS) src/kronos_tui.zig
+	$(ZIG) test $(ZFLAGS) themes/cpu/argus_kernel.zig
+	if command -v qemu-aarch64-static >/dev/null; then $(ZIG) test -target aarch64-linux themes/cpu/argus_kernel.zig --test-cmd qemu-aarch64-static --test-cmd-bin; fi
+endif
 
 run: app
 	./Launch_Argus_Wallpaper.command

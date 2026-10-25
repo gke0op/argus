@@ -19,6 +19,8 @@ note from the creator. If `NOTE.md` is empty, skip this.
 | `src/desktop_wallpaper.zig`, `src/desktop/` | The app: Spaces, menu-bar popover, settings, frame pacing |
 | `src/gpu/` | Metal: the theme runner (`metal_theme.zig`), the shared prelude, the Kerr-disk engine for Cygnus A |
 | `src/theme_harness.zig` | The headless harness: compiles a theme, runs the gates, times it, writes a PNG |
+| `themes/cpu/` | Metal themes ported to the CPU (`argus_kernel.zig` runs them N pixels per SIMD call) |
+| `src/argus_linux.zig`, `src/linux/` | Linux X11 live-wallpaper host (pure Zig, no libc, MIT-SHM) |
 | `tools/` | Theme checks, the contact sheet, the quasar generator, the pinned-Zig installer |
 | `.claude/skills/` | The theme-writing guides (readable by any agent, not only Claude) |
 | `docs/` | Install, the quasar model and its test ledger, how the media was made |
@@ -41,6 +43,11 @@ The release zip carries its own map for agents, [`docs/AGENTS_DOWNLOAD.md`](docs
   `tools/gen_quasars.py` (`make quasars`), so edits to `themes/Cygnus_A.zig` itself fail
   `make test`. For a variant (another inclination, `INCL`; spin; mass), copy it to a new name.
 - **Change the engine.** `make test`, then `make check-themes` (the harness on every theme).
+- **Work on Linux (a VM, CI, no Mac).** Zig themes and the CPU ports in `themes/cpu/` run in the
+  harness; `.metal` themes need a Mac. `make test` type-checks the macOS app by compiling its
+  tests for aarch64-macos, and runs Kronos and the CPU kernel here. `make linux THEME=...` builds
+  the X11 wallpaper host. Port a Metal theme to the CPU with
+  [`.claude/skills/argus-cpu-port/SKILL.md`](.claude/skills/argus-cpu-port/SKILL.md).
 
 ## Commands
 
@@ -51,6 +58,8 @@ tools/theme_sheet.sh themes/<Name>.metal   # contact sheet: several moments and 
 make check-themes                          # the harness on every tracked theme
 make test                                  # test suites
 make run / make stop                       # build Argus.app and start it / quit it
+make linux THEME=themes/cpu/<Name>.zig     # Linux: X11 wallpaper (CPU=x86_64_v3 for a binary to share)
+make check-themes CHECK_ARGS=--no-budget   # Linux VM / shared runner: gates without the frame budget
 ```
 
 ## Rules

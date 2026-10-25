@@ -4,6 +4,7 @@ zig-out/
 .DS_Store
 *.o
 argus-desktop
+argus-linux
 kronos-tui
 Argus.app/Contents/MacOS/
 Argus.app/Contents/_CodeSignature/
