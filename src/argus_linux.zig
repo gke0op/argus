@@ -11,12 +11,21 @@
 const std = @import("std");
 const linux = std.os.linux;
 const x11 = @import("linux/x11.zig");
+const theme = @import("theme"); // compiled in; exports argus_theme_*
 comptime {
-    _ = @import("theme"); // exports argus_theme_* (sdk.exportTheme)
+    _ = theme;
 }
 
 extern fn argus_theme_init(w: u32, h: u32, scale: f64) callconv(.c) ?*anyopaque;
 extern fn argus_theme_deinit(st: ?*anyopaque) callconv(.c) void;
+
+/// Direct path for CPU kernel themes (themes/cpu/argus_kernel.zig, recognised at compile time by
+/// their `pub fn draw(frame, gid)`): draw straight into display memory in the display's channel
+/// order. Null for SDK themes. (A weak symbol would do this at link time, but LLVM folds
+/// `weak_sym != null` to true, so the choice is made here, where it is known for certain.)
+const Target = extern struct { px: [*]u32, len: usize, stride: usize, shift: [3]u8 };
+const DrawTarget = *const fn (?*anyopaque, *const Target) callconv(.c) void;
+const draw_target: ?DrawTarget = if (@hasDecl(theme, "draw")) @extern(DrawTarget, .{ .name = "argus_theme_draw_target" }) else null;
 extern fn argus_theme_step(st: ?*anyopaque, dt: f64) callconv(.c) void;
 extern fn argus_theme_draw(st: ?*anyopaque, px: [*]u32, len: usize, stride: usize) callconv(.c) void;
 
@@ -26,6 +35,13 @@ fn nowNs() u64 {
     var ts: linux.timespec = undefined;
     _ = linux.clock_gettime(.MONOTONIC, &ts);
     return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
+}
+
+/// Nanoseconds since `mark`, moving `mark` to now.
+fn lap(mark: *u64) u64 {
+    const now = nowNs();
+    defer mark.* = now;
+    return now - mark.*;
 }
 
 fn sleepNs(ns: u64) void {
@@ -70,13 +86,13 @@ var x_taps: [8192]struct { lo: u32, hi: u32, w: u32 } = undefined;
 /// Bilinear upscale of a [R, G, B, A] frame (8.8 fixed point, pixel centres aligned), split
 /// over the cores. Separable: each output row first blends its two source rows (sw pixels),
 /// then expands that blended row horizontally (two taps per output pixel instead of four).
-fn upscale(src: []const u32, sw: usize, sh: usize, dst: []u32, dw: usize, dh: usize) void {
+fn upscale(src: []const u32, sw: usize, sh: usize, dst: []u32, dw: usize, dh: usize, shift: [3]u5) void {
     if (sw > x_taps.len or dw > x_taps.len) return;
     for (0..dw) |x| {
         const t = tap(x, sw, dw);
         x_taps[x] = .{ .lo = t.lo, .hi = t.hi, .w = t.w };
     }
-    const job = UpJob{ .src = src, .sw = sw, .sh = sh, .dst = dst, .dw = dw, .dh = dh };
+    const job = UpJob{ .src = src, .sw = sw, .sh = sh, .dst = dst, .dw = dw, .dh = dh, .shift = shift };
     const n = @min(8, std.Thread.getCpuCount() catch 1);
     var pool: [8]?std.Thread = @splat(null);
     for (1..n) |t| pool[t] = std.Thread.spawn(.{}, UpJob.rows, .{ &job, dh * t / n, dh * (t + 1) / n }) catch null;
@@ -91,6 +107,7 @@ const UpJob = struct {
     dst: []u32,
     dw: usize,
     dh: usize,
+    shift: [3]u5, // output bit offset of R, G, B (src is always [R, G, B, A] bytes)
 
     fn rows(j: *const UpJob, y_begin: usize, y_end: usize) void {
         var mid: [8192][3]u32 = undefined; // the vertically blended source row, x256 per channel
@@ -109,7 +126,7 @@ const UpJob = struct {
                 const l = mid[t.lo];
                 const r = mid[t.hi];
                 var px: u32 = 0xFF00_0000;
-                inline for (0..3) |ch| px |= (((l[ch] * (256 - t.w) + r[ch] * t.w) >> 16) & 0xFF) << (8 * ch);
+                inline for (0..3) |ch| px |= (((l[ch] * (256 - t.w) + r[ch] * t.w) >> 16) & 0xFF) << j.shift[ch];
                 o.* = px;
             }
         }
@@ -178,26 +195,55 @@ pub fn main(init: std.process.Init) !void {
     var probe_ns: u64 = 0;
     var probe: [8]u64 = @splat(0);
     var f: u64 = 0;
+    var stage: [6]u64 = @splat(0); // step, draw, upscale, wait, fill, send
+    const shift = [3]u5{ c.red_shift, c.green_shift, c.blue_shift };
     while (frames == 0 or f < frames) : (f += 1) {
         const t0 = nowNs();
+        var mark = t0;
         argus_theme_step(st, ZIG_TICK_DT);
+        stage[0] += lap(&mark);
+
+        // The display's own memory (MIT-SHM), once the server is done reading the last frame.
+        // shmWait also reports X errors (drainErrors would eat the completion event).
+        const dst: ?[]u32 = if (shm) |*s| blk: {
+            try c.shmWait(s);
+            break :blk s.mem;
+        } else null;
+        stage[3] += lap(&mark);
+
+        // Shortest route: a kernel theme draws, or the upscale writes, straight into display
+        // memory in display order. SDK themes draw [R, G, B, A] into px and get reordered below.
+        var direct = false;
         if (div == 1) {
-            @memset(px, 0);
-            argus_theme_draw(st, px.ptr, px.len, w);
+            if (draw_target != null and dst != null) {
+                draw_target.?(st, &.{ .px = dst.?.ptr, .len = dst.?.len, .stride = w, .shift = .{ shift[0], shift[1], shift[2] } });
+                direct = true;
+            } else {
+                @memset(px, 0);
+                argus_theme_draw(st, px.ptr, px.len, w);
+            }
+            stage[1] += lap(&mark);
         } else {
-            @memset(small[0 .. rw * rh], 0);
+            if (draw_target == null) @memset(small[0 .. rw * rh], 0); // kernels write every pixel
             argus_theme_draw(st, small.ptr, rw * rh, rw);
-            upscale(small[0 .. rw * rh], rw, rh, px, w, h);
+            stage[1] += lap(&mark);
+            if (dst) |d| {
+                upscale(small[0 .. rw * rh], rw, rh, d, w, h, shift);
+                direct = true;
+            } else upscale(small[0 .. rw * rh], rw, rh, px, w, h, .{ 0, 8, 16 });
+            stage[2] += lap(&mark);
         }
-        if (shm) |*s| { // the server reads the previous frame while this one was drawn
-            try c.shmWait(s); // also reports X errors (drainErrors would eat the completion)
-            c.shmFill(s, px);
+
+        if (shm) |*s| {
+            if (!direct) c.shmFill(s, px);
+            stage[4] += lap(&mark);
             try c.shmPut(s, win, gc);
         } else {
             try c.putFrame(win, gc, px, w, h, scratch);
             c.drainErrors();
         }
-        const dt_ns = nowNs() - t0;
+        stage[5] += lap(&mark);
+        const dt_ns = mark - t0;
         work_ns += dt_ns;
         // Auto render scale: frames 2..9 measure the cost (frame 1 pays first-touch); if their
         // median (shared vCPUs spike) is over 85% of the budget, drop to the 1/div that fits ~70%
@@ -217,6 +263,7 @@ pub fn main(init: std.process.Init) !void {
             st = try initTheme(rw, rh, scale);
             std.debug.print("argus-linux: {d:.1} ms/frame over budget, rendering at 1/{d} ({d}x{d}) and upscaling\n", .{ @as(f64, @floatFromInt(probe_ns / 8)) / 1e6, div, rw, rh });
             work_ns = 0;
+            stage = @splat(0);
             probe_ns = 0;
             f = 0; // stats restart at the new scale
             next = nowNs();
@@ -229,4 +276,8 @@ pub fn main(init: std.process.Init) !void {
         f, @as(f64, @floatFromInt(work_ns)) / @as(f64, @floatFromInt(@max(f, 1))) / 1e6,
         100.0 * @as(f64, @floatFromInt(work_ns)) / @as(f64, @floatFromInt(@max(f, 1) * period)), fps,
     });
+    const names = [_][]const u8{ "step", "draw", "upscale", "wait", "fill", "send" };
+    std.debug.print("argus-linux: ms/frame", .{});
+    for (names, stage) |n, s| std.debug.print("  {s} {d:.2}", .{ n, @as(f64, @floatFromInt(s)) / @as(f64, @floatFromInt(@max(f, 1))) / 1e6 });
+    std.debug.print("\n", .{});
 }
