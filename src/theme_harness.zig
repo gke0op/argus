@@ -10,6 +10,9 @@
 // ============================================================================
 
 const std = @import("std");
+/// Off macOS (a Linux VM, CI) the harness runs Zig themes only: Metal, CoreGraphics and the
+/// mach clock are pruned at comptime and the PNG is written by writePNGPortable.
+const is_mac = @import("builtin").os.tag.isDarwin();
 const mtl = @import("gpu/metal.zig");
 const metal_theme = @import("gpu/metal_theme.zig");
 const system_stats = @import("desktop/system_stats.zig");
@@ -163,7 +166,7 @@ fn profileMetal(theme: *metal_theme.Theme, frames: usize) Profile {
 
 fn nowNs() u64 {
     var ts: std.c.timespec = undefined;
-    _ = std.c.clock_gettime(std.c.CLOCK.UPTIME_RAW, &ts);
+    _ = std.c.clock_gettime(if (is_mac) std.c.CLOCK.UPTIME_RAW else std.c.CLOCK.MONOTONIC, &ts);
     return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
 }
 
@@ -312,6 +315,73 @@ const FnHasNaN = *const fn (state: ?*anyopaque) callconv(.c) bool;
 const FnStateless = *const fn (pixels: [*]u32, w: u32, h: u32, phase: f64, step_count: u64) callconv(.c) void;
 
 pub fn writePNG(pixels: []const u32, width: usize, height: usize, out_path: []const u8) !void {
+    return if (is_mac) writePNGCoreGraphics(pixels, width, height, out_path) else writePNGPortable(pixels, width, height, out_path);
+}
+
+/// RGB PNG with stored (uncompressed) deflate blocks: no system libraries, larger files.
+/// Pixels are Argus's native [R, G, B, A] bytes; the alpha byte is dropped (themes are opaque).
+fn writePNGPortable(pixels: []const u32, width: usize, height: usize, out_path: []const u8) !void {
+    const alloc = std.heap.c_allocator;
+    const row = 1 + width * 3;
+    const raw = try alloc.alloc(u8, row * height);
+    defer alloc.free(raw);
+    for (0..height) |y| {
+        raw[y * row] = 0; // filter: none
+        for (0..width) |x| {
+            const p = pixels[y * width + x];
+            const o = y * row + 1 + x * 3;
+            raw[o] = @truncate(p);
+            raw[o + 1] = @truncate(p >> 8);
+            raw[o + 2] = @truncate(p >> 16);
+        }
+    }
+    const nblk = (raw.len + 65534) / 65535;
+    const idat = try alloc.alloc(u8, 2 + raw.len + nblk * 5 + 4);
+    defer alloc.free(idat);
+    idat[0] = 0x78;
+    idat[1] = 0x01;
+    var o: usize = 2;
+    var i: usize = 0;
+    while (i < raw.len) {
+        const n = @min(raw.len - i, 65535);
+        idat[o] = if (i + n == raw.len) 1 else 0;
+        std.mem.writeInt(u16, idat[o + 1 ..][0..2], @intCast(n), .little);
+        std.mem.writeInt(u16, idat[o + 3 ..][0..2], ~@as(u16, @intCast(n)), .little);
+        @memcpy(idat[o + 5 ..][0..n], raw[i..][0..n]);
+        o += 5 + n;
+        i += n;
+    }
+    std.mem.writeInt(u32, idat[o..][0..4], std.hash.Adler32.hash(raw), .big);
+
+    var path_z: [std.fs.max_path_bytes:0]u8 = undefined;
+    if (out_path.len >= path_z.len) return error.PathTooLong;
+    @memcpy(path_z[0..out_path.len], out_path);
+    path_z[out_path.len] = 0;
+    const fp = std.c.fopen(&path_z, "wb") orelse return error.PNGOpenFailed;
+    defer _ = std.c.fclose(fp);
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], @intCast(width), .big);
+    std.mem.writeInt(u32, ihdr[4..8], @intCast(height), .big);
+    ihdr[8..13].* = .{ 8, 2, 0, 0, 0 }; // 8-bit RGB
+    if (std.c.fwrite("\x89PNG\r\n\x1a\n", 1, 8, fp) != 8) return error.PNGWriteFailed;
+    try pngChunk(fp, "IHDR", &ihdr);
+    try pngChunk(fp, "IDAT", idat);
+    try pngChunk(fp, "IEND", "");
+}
+
+fn pngChunk(fp: *std.c.FILE, kind: *const [4]u8, data: []const u8) !void {
+    var be: [4]u8 = undefined;
+    std.mem.writeInt(u32, &be, @intCast(data.len), .big);
+    var crc = std.hash.Crc32.init();
+    crc.update(kind);
+    crc.update(data);
+    var tail: [4]u8 = undefined;
+    std.mem.writeInt(u32, &tail, crc.final(), .big);
+    if (std.c.fwrite(&be, 1, 4, fp) != 4 or std.c.fwrite(kind, 1, 4, fp) != 4 or
+        std.c.fwrite(data.ptr, 1, data.len, fp) != data.len or std.c.fwrite(&tail, 1, 4, fp) != 4) return error.PNGWriteFailed;
+}
+
+fn writePNGCoreGraphics(pixels: []const u32, width: usize, height: usize, out_path: []const u8) !void {
     const libcg = std.c.dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", .{ .LAZY = true }) orelse return error.CGLoadFailed;
     const libcf = std.c.dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", .{ .LAZY = true }) orelse return error.CFLoadFailed;
     const libiio = std.c.dlopen("/System/Library/Frameworks/ImageIO.framework/ImageIO", .{ .LAZY = true }) orelse return error.ImageIOLoadFailed;
@@ -421,7 +491,7 @@ pub fn main(init: std.process.Init) !void {
         std.process.exit(1);
     };
 
-    if (std.mem.endsWith(u8, path, ".metal")) return metalHarness(io, alloc, path, n_frames, width, height, out_png);
+    if (std.mem.endsWith(u8, path, ".metal")) return if (is_mac) metalHarness(io, alloc, path, n_frames, width, height, out_png) else error.MetalThemesNeedMacOS;
 
     var dylib_buf: [256]u8 = undefined;
     var emit_buf: [280]u8 = undefined;
@@ -461,7 +531,7 @@ pub fn main(init: std.process.Init) !void {
             "-O",
             "ReleaseFast",
             "-target",
-            "aarch64-macos",
+            if (is_mac) "aarch64-macos" else "native",
             "-lc",
             emit_arg,
         },
