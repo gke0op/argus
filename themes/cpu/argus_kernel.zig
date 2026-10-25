@@ -1,61 +1,178 @@
 // ============================================================================
 // ARGUS CPU KERNELS // themes/cpu/argus_kernel.zig
 //
-// Runs Metal-style Argus kernels on the CPU, so a ported Metal theme is an ordinary Zig
-// theme: the harness, the Mac app and argus-linux load it unchanged. Pure Zig, no libc.
+// Runs Argus Metal kernels on the CPU the way a GPU runs them: SPMD. One call of a kernel
+// shades N neighbouring pixels at once, one per SIMD lane (N = 16 with AVX-512, 8 with AVX2,
+// 4 with SSE/NEON); rows are shared out to every core. A port is an ordinary Zig theme: the
+// harness, the Mac app and argus-linux load it unchanged. Pure Zig 0.17, no libc.
 //
-//   * Metal-flavoured math: F2/F3/F4 are @Vector types; floor, fract, mix, smoothstep,
-//     saturate, length... behave as in the Metal Shading Language.
-//   * The Argus prelude (src/gpu/argus_prelude.metal) ported 1:1: argus_uv, argus_hash,
-//     argus_rand, argus_noise, argus_fbm, argus_palette, argus_srgb, argus_aces.
-//   * exportKernelTheme(K): K.draw(f, gid) -> F4 runs once per pixel, spread over every core
-//     in row bands; output is packed exactly as the GPU harness packs (round(c * 255)).
+// Porting a Metal kernel:
+//   float        -> F (one value per lane)        f(0.5) splats a constant
+//   float2/3     -> V2 / V3 (one F per component) v2(...), v3(...) for constants
+//   if (c) a else b, early returns -> sel(c, a, b)  (every lane runs both sides, as on a GPU)
+//   argus_noise(p) -> noise(p), argus_fbm -> fbm, argus_rand -> rand, argus_uv -> uv ...
+// sin, cos, exp, exp2, log2 are SIMD polynomials (|error| < 2e-7 on sin, ~1e-7 rel. on exp2),
+// in the spirit of Metal's fast math.
 //
 // Time: one SDK step of 0.008 is one 30 Hz Metal tick (f.time += 1/30 s, f.frame += 1), so
 // the app's speed setting, which scales the step, scales f.time the same way.
 // ============================================================================
 
 const std = @import("std");
+const builtin = @import("builtin");
 
-pub const F2 = @Vector(2, f32);
-pub const F3 = @Vector(3, f32);
-pub const F4 = @Vector(4, f32);
+/// Lanes per call. Zig suggests 8 on many AVX-512 parts (it prefers 256-bit vectors); for this
+/// ALU-bound work 16 lanes measured 1.5x faster on a Xeon (22.9 vs 34.2 ms, 1920x1200 Tides).
+pub const N: comptime_int = if (builtin.cpu.arch == .x86_64 and std.Target.x86.featureSetHas(builtin.cpu.features, .avx512f))
+    16
+else
+    std.simd.suggestVectorLength(f32) orelse 4;
+pub const F = @Vector(N, f32);
+pub const U = @Vector(N, u32);
+pub const I = @Vector(N, i32);
+pub const M = @Vector(N, bool);
 
-pub inline fn f2(x: f32, y: f32) F2 {
-    return .{ x, y };
-}
-pub inline fn f3(x: f32, y: f32, z: f32) F3 {
-    return .{ x, y, z };
-}
-pub inline fn s2(x: f32) F2 {
+pub inline fn f(x: f32) F {
     return @splat(x);
 }
-pub inline fn s3(x: f32) F3 {
+pub inline fn u(x: u32) U {
     return @splat(x);
 }
-
-pub inline fn fract(x: anytype) @TypeOf(x) {
-    return x - @floor(x);
+pub inline fn sel(m: M, a: F, b: F) F {
+    return @select(f32, m, a, b);
 }
-pub inline fn mix(a: anytype, b: @TypeOf(a), t: @TypeOf(a)) @TypeOf(a) {
+
+// ---- float2 / float3 ---------------------------------------------------------------------
+
+pub const V2 = struct {
+    x: F,
+    y: F,
+
+    pub inline fn add(a: V2, b: V2) V2 {
+        return .{ .x = a.x + b.x, .y = a.y + b.y };
+    }
+    pub inline fn sub(a: V2, b: V2) V2 {
+        return .{ .x = a.x - b.x, .y = a.y - b.y };
+    }
+    pub inline fn scale(a: V2, s: F) V2 {
+        return .{ .x = a.x * s, .y = a.y * s };
+    }
+    pub inline fn floor(a: V2) V2 {
+        return .{ .x = @floor(a.x), .y = @floor(a.y) };
+    }
+    pub inline fn fract(a: V2) V2 {
+        return .{ .x = a.x - @floor(a.x), .y = a.y - @floor(a.y) };
+    }
+    pub inline fn length(a: V2) F {
+        return @sqrt(a.x * a.x + a.y * a.y);
+    }
+    pub inline fn select(m: M, a: V2, b: V2) V2 {
+        return .{ .x = sel(m, a.x, b.x), .y = sel(m, a.y, b.y) };
+    }
+};
+
+pub const V3 = struct {
+    x: F,
+    y: F,
+    z: F,
+
+    pub inline fn add(a: V3, b: V3) V3 {
+        return .{ .x = a.x + b.x, .y = a.y + b.y, .z = a.z + b.z };
+    }
+    pub inline fn mul(a: V3, b: V3) V3 {
+        return .{ .x = a.x * b.x, .y = a.y * b.y, .z = a.z * b.z };
+    }
+    pub inline fn scale(a: V3, s: F) V3 {
+        return .{ .x = a.x * s, .y = a.y * s, .z = a.z * s };
+    }
+    pub inline fn mix(a: V3, b: V3, t: F) V3 {
+        return .{ .x = k_mix(a.x, b.x, t), .y = k_mix(a.y, b.y, t), .z = k_mix(a.z, b.z, t) };
+    }
+    pub inline fn saturate(a: V3) V3 {
+        return .{ .x = k_sat(a.x), .y = k_sat(a.y), .z = k_sat(a.z) };
+    }
+    pub inline fn select(m: M, a: V3, b: V3) V3 {
+        return .{ .x = sel(m, a.x, b.x), .y = sel(m, a.y, b.y), .z = sel(m, a.z, b.z) };
+    }
+};
+
+pub inline fn v2(x: f32, y: f32) V2 {
+    return .{ .x = f(x), .y = f(y) };
+}
+pub inline fn v3(x: f32, y: f32, z: f32) V3 {
+    return .{ .x = f(x), .y = f(y), .z = f(z) };
+}
+
+// ---- Scalar-per-lane math (Metal names) --------------------------------------------------
+
+inline fn k_mix(a: F, b: F, t: F) F {
     return a + (b - a) * t;
 }
-pub inline fn saturate(x: anytype) @TypeOf(x) {
-    const T = @TypeOf(x);
-    return @min(@max(x, splatLike(T, 0.0)), splatLike(T, 1.0));
+inline fn k_sat(x: F) F {
+    return @min(@max(x, f(0)), f(1));
 }
-pub inline fn smoothstep(e0: f32, e1: f32, x: f32) f32 {
-    const t = saturate((x - e0) / (e1 - e0));
-    return t * t * (3.0 - 2.0 * t);
+pub const mix = k_mix;
+pub const saturate = k_sat;
+
+pub inline fn fract(x: F) F {
+    return x - @floor(x);
 }
-pub inline fn length(v: anytype) f32 {
-    return @sqrt(@reduce(.Add, v * v));
-}
-inline fn splatLike(comptime T: type, x: f32) T {
-    return if (@typeInfo(T) == .vector) @splat(x) else x;
+pub inline fn smoothstep(e0: f32, e1: f32, x: F) F {
+    const t = k_sat((x - f(e0)) * f(1.0 / (e1 - e0)));
+    return t * t * (f(3) - f(2) * t);
 }
 
-// ---- The Argus prelude -------------------------------------------------------------------
+/// sin on [-pi, pi] after a two-constant reduction, folded to [-pi/2, pi/2], odd degree 11.
+pub inline fn sin(x: F) F {
+    const k = @round(x * f(1.0 / (2.0 * std.math.pi)));
+    var r = x - k * f(6.28125) - k * f(2.0 * std.math.pi - 6.28125);
+    const hi = f(std.math.pi / 2.0);
+    r = sel(r > hi, f(std.math.pi) - r, sel(r < -hi, f(-std.math.pi) - r, r));
+    const r2 = r * r;
+    var p = f(-2.5052108e-8);
+    p = p * r2 + f(2.7557319e-6);
+    p = p * r2 + f(-1.9841270e-4);
+    p = p * r2 + f(8.3333333e-3);
+    p = p * r2 + f(-1.6666667e-1);
+    return r + r * r2 * p;
+}
+pub inline fn cos(x: F) F {
+    return sin(x + f(std.math.pi / 2.0));
+}
+
+/// 2^x: integer part into the exponent bits, fraction (in [-0.5, 0.5]) by a degree-6 polynomial.
+pub inline fn exp2(x0: F) F {
+    const x = @min(@max(x0, f(-126)), f(127));
+    const n = @round(x);
+    const r = x - n;
+    var p = f(1.5403530e-4);
+    p = p * r + f(1.3333558e-3);
+    p = p * r + f(9.6181291e-3);
+    p = p * r + f(5.5504109e-2);
+    p = p * r + f(2.4022651e-1);
+    p = p * r + f(6.9314718e-1);
+    p = p * r + f(1.0);
+    const bits: U = @bitCast((@as(I, @intFromFloat(n)) + @as(I, @splat(127))) << @splat(23));
+    return p * @as(F, @bitCast(bits));
+}
+pub inline fn exp(x: F) F {
+    return exp2(x * f(std.math.log2e));
+}
+/// log2 for x > 0: exponent bits plus a polynomial in the mantissa mapped to [sqrt(1/2), sqrt(2)).
+pub inline fn log2(x: F) F {
+    const bits: U = @bitCast(x);
+    var e: F = @floatFromInt(@as(I, @bitCast((bits >> @splat(23)) & u(0xFF))) - @as(I, @splat(127)));
+    var m: F = @bitCast((bits & u(0x007F_FFFF)) | u(0x3F80_0000)); // [1, 2)
+    const big = m > f(std.math.sqrt2);
+    m = sel(big, m * f(0.5), m);
+    e = sel(big, e + f(1), e);
+    const t = (m - f(1)) / (m + f(1)); // log(m) = 2 atanh(t)
+    const t2 = t * t;
+    const ln_m = f(2) * t * (f(1) + t2 * (f(1.0 / 3.0) + t2 * (f(1.0 / 5.0) + t2 * f(1.0 / 7.0))));
+    return e + ln_m * f(std.math.log2e);
+}
+
+// ---- The Argus prelude (src/gpu/argus_prelude.metal), lane for lane ----------------------
 
 pub const Frame = extern struct {
     time: f32,
@@ -71,13 +188,35 @@ pub const Frame = extern struct {
     utc_offset_s: i32 = 0,
 };
 
-pub inline fn argus_uv(gid: [2]u32, f: *const Frame) F2 {
-    const p = f2(@floatFromInt(gid[0]), @floatFromInt(gid[1])) + s2(0.5) -
-        s2(0.5) * f2(@floatFromInt(f.width), @floatFromInt(f.height));
-    return f2(p[0], -p[1]) / s2(0.5 * @as(f32, @floatFromInt(@min(f.width, f.height))));
+/// thread_position_in_grid for N neighbouring pixels of one row.
+pub const Gid = struct { x: U, y: U };
+pub const Cell = struct { x: U, y: U };
+
+/// argus_uv: (0,0) mid-screen, y up, the short side spans -1..1.
+pub inline fn uv(gid: Gid, fr: *const Frame) V2 {
+    const inv = f(1.0 / (0.5 * @as(f32, @floatFromInt(@min(fr.width, fr.height)))));
+    const px: F = @as(F, @floatFromInt(gid.x)) + f(0.5 - 0.5 * @as(f32, @floatFromInt(fr.width)));
+    const py: F = @as(F, @floatFromInt(gid.y)) + f(0.5 - 0.5 * @as(f32, @floatFromInt(fr.height)));
+    return .{ .x = px * inv, .y = -py * inv };
 }
 
-pub inline fn argus_hash(x0: u32) u32 {
+pub inline fn hash(x0: U) U {
+    var x = x0;
+    x ^= x >> @splat(16);
+    x *%= u(0x7feb352d);
+    x ^= x >> @splat(15);
+    x *%= u(0x846ca68b);
+    x ^= x >> @splat(16);
+    return x;
+}
+
+pub inline fn rand(c: Cell, seed: u32) F {
+    return unit(hash(c.x ^ hash(c.y ^ u(argus_hash1(seed)))));
+}
+inline fn unit(h: U) F {
+    return @as(F, @floatFromInt(h)) * f(1.0 / 4294967295.0);
+}
+fn argus_hash1(x0: u32) u32 {
     var x = x0;
     x ^= x >> 16;
     x *%= 0x7feb352d;
@@ -87,85 +226,132 @@ pub inline fn argus_hash(x0: u32) u32 {
     return x;
 }
 
-pub inline fn argus_rand(cell: [2]u32, seed: u32) f32 {
-    return @as(f32, @floatFromInt(argus_hash(cell[0] ^ argus_hash(cell[1] ^ argus_hash(seed))))) * (1.0 / 4294967295.0);
-}
-
-/// Metal's uint2(int2(v) + k): float -> int (toward zero) -> + k -> reinterpret as uint.
-pub inline fn cellOf(v: F2, k: i32) [2]u32 {
+/// Metal's uint2(int2(p) + k): toward zero to int, offset, reinterpret as uint.
+pub inline fn cell(p: V2, k: i32) Cell {
+    const ki: I = @splat(k);
     return .{
-        @bitCast(@as(i32, @intFromFloat(v[0])) +% k),
-        @bitCast(@as(i32, @intFromFloat(v[1])) +% k),
+        .x = @bitCast(@as(I, @intFromFloat(p.x)) +% ki),
+        .y = @bitCast(@as(I, @intFromFloat(p.y)) +% ki),
     };
 }
 
-pub inline fn argus_noise(p: F2) f32 {
-    const i = @floor(p);
-    const fr = p - i;
-    const u = fr * fr * (s2(3.0) - s2(2.0) * fr);
-    const c = cellOf(i, 32768);
-    const a = argus_rand(c, 0);
-    const b = argus_rand(.{ c[0] +% 1, c[1] }, 0);
-    const d = argus_rand(.{ c[0], c[1] +% 1 }, 0);
-    const e = argus_rand(.{ c[0] +% 1, c[1] +% 1 }, 0);
-    return 2.0 * mix(mix(a, b, u[0]), mix(d, e, u[0]), u[1]) - 1.0;
+pub inline fn noise(p: V2) F {
+    const i = p.floor();
+    const fr = p.sub(i);
+    const ux = fr.x * fr.x * (f(3) - f(2) * fr.x);
+    const uy = fr.y * fr.y * (f(3) - f(2) * fr.y);
+    const c = cell(i, 32768);
+    const one = u(1);
+    // rand(cell, 0) for the four corners, sharing each row's inner hash (bit-identical).
+    const h0 = u(argus_hash1(0));
+    const row0 = hash(c.y ^ h0);
+    const row1 = hash((c.y +% one) ^ h0);
+    const a = unit(hash(c.x ^ row0));
+    const b = unit(hash((c.x +% one) ^ row0));
+    const d = unit(hash(c.x ^ row1));
+    const e = unit(hash((c.x +% one) ^ row1));
+    return f(2) * k_mix(k_mix(a, b, ux), k_mix(d, e, ux), uy) - f(1);
 }
 
-pub inline fn argus_fbm(p0: F2, octaves: u32) f32 {
+pub inline fn fbm(p0: V2, comptime octaves: u32) F {
     var p = p0;
-    var sum: f32 = 0.0;
+    var sum = f(0);
     var amp: f32 = 0.5;
-    for (0..octaves) |_| {
-        sum += amp * argus_noise(p);
-        p = f2(1.6 * p[0] - 1.2 * p[1], 1.2 * p[0] + 1.6 * p[1]); // float2x2(1.6, 1.2, -1.2, 1.6) * p
+    inline for (0..octaves) |_| {
+        sum += f(amp) * noise(p);
+        // float2x2(1.6, 1.2, -1.2, 1.6) * p, through a temporary: `p = .{ .x = .., .y = ..p.x.. }`
+        // would write p.x before .y reads it (result location aliasing).
+        const rot = V2{ .x = f(1.6) * p.x - f(1.2) * p.y, .y = f(1.2) * p.x + f(1.6) * p.y };
+        p = rot;
         amp *= 0.5;
     }
     return sum;
 }
 
-pub inline fn argus_palette(t: f32, a: F3, b: F3, c: F3, d: F3) F3 {
-    return a + b * @cos(s3(6.2831853) * (c * s3(t) + d));
+pub inline fn palette(t: F, a: V3, b: V3, c: V3, d: V3) V3 {
+    const tau = f(6.2831853);
+    return .{
+        .x = a.x + b.x * cos(tau * (c.x * t + d.x)),
+        .y = a.y + b.y * cos(tau * (c.y * t + d.y)),
+        .z = a.z + b.z * cos(tau * (c.z * t + d.z)),
+    };
 }
 
-pub inline fn argus_srgb(lin0: F3) F3 {
-    const lin = saturate(lin0);
-    const hi = s3(1.055) * @exp2(@log2(lin) * s3(1.0 / 2.4)) - s3(0.055);
-    return @select(f32, lin <= s3(0.0031308), lin * s3(12.92), hi);
+pub inline fn srgb(lin0: V3) V3 {
+    const lin = lin0.saturate();
+    const one = struct {
+        inline fn ch(l: F) F {
+            const hi = f(1.055) * exp2(log2(@max(l, f(1e-30))) * f(1.0 / 2.4)) - f(0.055);
+            return sel(l <= f(0.0031308), l * f(12.92), hi);
+        }
+    };
+    return .{ .x = one.ch(lin.x), .y = one.ch(lin.y), .z = one.ch(lin.z) };
 }
 
-pub inline fn argus_aces(x: F3) F3 {
-    return saturate((x * (s3(2.51) * x + s3(0.03))) / (x * (s3(2.43) * x + s3(0.59)) + s3(0.14)));
+pub inline fn aces(x: V3) V3 {
+    const one = struct {
+        inline fn ch(c: F) F {
+            return k_sat((c * (f(2.51) * c + f(0.03))) / (c * (f(2.43) * c + f(0.59)) + f(0.14)));
+        }
+    };
+    return .{ .x = one.ch(x.x), .y = one.ch(x.y), .z = one.ch(x.z) };
 }
 
 // ---- Dispatch ----------------------------------------------------------------------------
 
 const MAX_THREADS = 64;
+const ROWS_PER_GRAB = 4;
 const TICK_DT: f64 = 0.008; // the SDK step that equals one 30 Hz Metal tick
+const lane_ids: U = std.simd.iota(u32, N);
 
-inline fn pack(c: F4) u32 {
-    const q = @round(saturate(c) * @as(F4, @splat(255.0)));
-    return 0xFF00_0000 | (@as(u32, @intFromFloat(q[2])) << 16) | (@as(u32, @intFromFloat(q[1])) << 8) | @as(u32, @intFromFloat(q[0]));
+/// round(saturate(c) * 255) per channel, packed as the GPU harness packs: [R, G, B, 255].
+inline fn pack(c: V3) U {
+    const s = f(255);
+    const r: U = @intFromFloat(@round(k_sat(c.x) * s));
+    const g: U = @intFromFloat(@round(k_sat(c.y) * s));
+    const b: U = @intFromFloat(@round(k_sat(c.z) * s));
+    return u(0xFF00_0000) | (b << @splat(16)) | (g << @splat(8)) | r;
 }
 
 pub fn exportKernelTheme(comptime K: type) void {
     const Theme = struct {
+        const Self = @This();
         frame: Frame,
         clock: f64,
         threads: usize,
 
         var allocs_init: usize = 0;
 
-        fn band(self: *const @This(), px: []u32, stride: usize, y0: usize, y1: usize) void {
-            @setFloatMode(.optimized);
-            for (y0..y1) |y| {
-                const row = px[y * stride ..];
-                for (0..self.frame.width) |x| row[x] = pack(K.draw(&self.frame, .{ @intCast(x), @intCast(y) }));
+        const Job = struct {
+            th: *const Self,
+            px: []u32,
+            stride: usize,
+            next_row: std.atomic.Value(u32) = .init(0),
+
+            fn run(job: *Job) void {
+                @setFloatMode(.optimized);
+                const fr = &job.th.frame;
+                const w: usize = fr.width;
+                while (true) {
+                    const y0 = job.next_row.fetchAdd(ROWS_PER_GRAB, .monotonic);
+                    if (y0 >= fr.height) return;
+                    for (y0..@min(y0 + ROWS_PER_GRAB, fr.height)) |y| {
+                        const row = job.px[y * job.stride ..][0..w];
+                        var x: usize = 0;
+                        while (x < w) : (x += N) {
+                            const gid = Gid{ .x = u(@intCast(x)) + lane_ids, .y = u(@intCast(y)) };
+                            const out: [N]u32 = pack(K.draw(fr, gid));
+                            const n = @min(N, w - x);
+                            @memcpy(row[x..][0..n], out[0..n]);
+                        }
+                    }
+                }
             }
-        }
+        };
 
         fn init(w: u32, h: u32, scale: f64) callconv(.c) ?*anyopaque {
             _ = scale;
-            const self = std.heap.page_allocator.create(@This()) catch return null;
+            const self = std.heap.page_allocator.create(Self) catch return null;
             allocs_init = 1;
             self.* = .{
                 .frame = .{ .time = 0, .dt = 1.0 / 30.0, .frame = 0, .width = w, .height = h, .seed = 0x5EED },
@@ -176,27 +362,24 @@ pub fn exportKernelTheme(comptime K: type) void {
         }
 
         fn deinit(raw: ?*anyopaque) callconv(.c) void {
-            std.heap.page_allocator.destroy(@as(*@This(), @ptrCast(@alignCast(raw orelse return))));
+            std.heap.page_allocator.destroy(@as(*Self, @ptrCast(@alignCast(raw orelse return))));
         }
 
         fn step(raw: ?*anyopaque, dt: f64) callconv(.c) void {
-            const self: *@This() = @ptrCast(@alignCast(raw orelse return));
+            const self: *Self = @ptrCast(@alignCast(raw orelse return));
             self.clock = @mod(self.clock + dt / TICK_DT / 30.0, 14400.0); // ARGUS_TIME_PERIOD
             self.frame.time = @floatCast(self.clock);
             self.frame.frame +%= 1;
         }
 
         fn draw(raw: ?*anyopaque, px: [*]u32, len: usize, stride: usize) callconv(.c) void {
-            const self: *const @This() = @ptrCast(@alignCast(raw orelse return));
-            const h: usize = self.frame.height;
-            if (len < (h - 1) * stride + self.frame.width) return;
-            const n = @min(self.threads, h);
+            const self: *const Self = @ptrCast(@alignCast(raw orelse return));
+            if (self.frame.height == 0 or len < (self.frame.height - 1) * stride + self.frame.width) return;
+            var job = Job{ .th = self, .px = px[0..len], .stride = stride };
             var pool: [MAX_THREADS]?std.Thread = @splat(null);
-            for (1..n) |t| pool[t] = std.Thread.spawn(.{}, band, .{ self, px[0..len], stride, h * t / n, h * (t + 1) / n }) catch null;
-            self.band(px[0..len], stride, 0, h / n);
-            for (1..n) |t| {
-                if (pool[t]) |th| th.join() else self.band(px[0..len], stride, h * t / n, h * (t + 1) / n);
-            }
+            for (1..self.threads) |t| pool[t] = std.Thread.spawn(.{}, Job.run, .{&job}) catch null;
+            job.run();
+            for (pool[1..self.threads]) |th| if (th) |t| t.join();
         }
 
         fn allocsInit() callconv(.c) usize {
@@ -206,7 +389,7 @@ pub fn exportKernelTheme(comptime K: type) void {
             return 0;
         }
         fn bytesLive() callconv(.c) usize {
-            return @sizeOf(@This());
+            return @sizeOf(Self);
         }
         fn hasNaN(raw: ?*anyopaque) callconv(.c) bool {
             return raw == null;

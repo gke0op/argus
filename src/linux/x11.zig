@@ -12,6 +12,16 @@ const linux = std.os.linux;
 
 pub const Error = error{ SocketFailed, ConnectFailed, WriteFailed, ReadFailed, SetupRefused, NoTrueColor, BadDisplay };
 
+pub const Shm = struct {
+    seg: u32,
+    opcode: u8,
+    completion: u8, // the extension's first event code: ShmCompletion
+    mem: []u32,
+    w: usize,
+    h: usize,
+    pending: bool = false,
+};
+
 pub const Conn = struct {
     fd: i32,
     id_base: u32,
@@ -232,6 +242,91 @@ pub const Conn = struct {
                 d.* = ((p & 0xFF) << self.red_shift) | (((p >> 8) & 0xFF) << self.green_shift) | (((p >> 16) & 0xFF) << self.blue_shift);
             }
             try self.send(r);
+        }
+    }
+
+    /// MIT-SHM: a w x h frame in System V shared memory that the server reads in place, so a
+    /// frame costs a 40-byte request instead of w*h*4 bytes through the socket. Null when the
+    /// server lacks the extension (or isn't local).
+    pub fn shmInit(self: *Conn, w: usize, h: usize) ?Shm {
+        var q: [20]u8 = @splat(0);
+        const name = "MIT-SHM";
+        q[0] = 98; // QueryExtension
+        std.mem.writeInt(u16, q[2..4], 2 + 2, .little);
+        std.mem.writeInt(u16, q[4..6], name.len, .little);
+        @memcpy(q[8..][0..name.len], name);
+        self.send(q[0..16]) catch return null;
+        var rep: [32]u8 = undefined;
+        while (true) {
+            self.recvExact(&rep) catch return null;
+            if (rep[0] == 1) break;
+            if (rep[0] == 0) return null;
+        }
+        if (rep[8] == 0) return null; // not present
+        const opcode = rep[9];
+        const first_event = rep[10];
+
+        const bytes = w * h * 4;
+        const id_rc = linux.syscall3(.shmget, 0, bytes, 0o1000 | 0o600); // IPC_PRIVATE, IPC_CREAT | rw owner
+        if (linux.errno(id_rc) != .SUCCESS) return null;
+        const shmid: u32 = @intCast(id_rc);
+        const addr = linux.syscall3(.shmat, shmid, 0, 0);
+        if (linux.errno(addr) != .SUCCESS) {
+            _ = linux.syscall3(.shmctl, shmid, 0, 0); // IPC_RMID
+            return null;
+        }
+        const seg = self.newId();
+        var a: [16]u8 = @splat(0);
+        a[0] = opcode;
+        a[1] = 1; // ShmAttach
+        std.mem.writeInt(u16, a[2..4], 4, .little);
+        std.mem.writeInt(u32, a[4..8], seg, .little);
+        std.mem.writeInt(u32, a[8..12], shmid, .little);
+        a[12] = 1; // read-only for the server
+        self.send(&a) catch return null;
+        // Round trip (InternAtom) so the server has attached before the segment is marked for
+        // removal; it then disappears by itself when both sides exit.
+        _ = self.internAtom("WM_NAME") catch return null;
+        _ = linux.syscall3(.shmctl, shmid, 0, 0); // IPC_RMID
+        const mem: [*]u32 = @ptrFromInt(addr);
+        return .{ .seg = seg, .opcode = opcode, .completion = first_event, .mem = mem[0 .. w * h], .w = w, .h = h };
+    }
+
+    /// Sends the shared frame (already in the server's pixel format) and asks for a completion
+    /// event; call shmWait before writing the next frame into `mem`.
+    pub fn shmPut(self: *Conn, s: *Shm, win: u32, gc: u32) Error!void {
+        var r: [40]u8 = @splat(0);
+        r[0] = s.opcode;
+        r[1] = 3; // ShmPutImage
+        std.mem.writeInt(u16, r[2..4], 10, .little);
+        std.mem.writeInt(u32, r[4..8], win, .little);
+        std.mem.writeInt(u32, r[8..12], gc, .little);
+        std.mem.writeInt(u16, r[12..14], @intCast(s.w), .little); // total size
+        std.mem.writeInt(u16, r[14..16], @intCast(s.h), .little);
+        std.mem.writeInt(u16, r[20..22], @intCast(s.w), .little); // source size
+        std.mem.writeInt(u16, r[22..24], @intCast(s.h), .little);
+        r[28] = self.depth;
+        r[29] = 2; // ZPixmap
+        r[30] = 1; // send ShmCompletion
+        std.mem.writeInt(u32, r[32..36], s.seg, .little);
+        try self.send(&r);
+        s.pending = true;
+    }
+
+    /// Blocks until the server has finished reading the last shmPut's frame.
+    pub fn shmWait(self: *Conn, s: *Shm) Error!void {
+        while (s.pending) {
+            var ev: [32]u8 = undefined;
+            try self.recvExact(&ev);
+            if ((ev[0] & 0x7F) == s.completion) s.pending = false;
+            if (ev[0] == 0) std.debug.print("x11 error code={d} major={d}\n", .{ ev[1], ev[10] });
+        }
+    }
+
+    /// Writes an Argus frame ([R, G, B, A] bytes) into the shared frame in server pixel order.
+    pub fn shmFill(self: *const Conn, s: *Shm, px: []const u32) void {
+        for (px[0..s.mem.len], s.mem) |p, *d| {
+            d.* = ((p & 0xFF) << self.red_shift) | (((p >> 8) & 0xFF) << self.green_shift) | (((p >> 16) & 0xFF) << self.blue_shift);
         }
     }
 
