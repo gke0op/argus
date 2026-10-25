@@ -103,6 +103,36 @@ not a sandbox and not a malware scanner:
 The headless harness (`make harness`) runs the same checks and more, but it also runs the
 theme's code on your machine.
 
+## On Linux: themes run caged
+
+The Linux host (`argus-linux`, `make linux`) does enforce what the theme contract asks. Before
+any theme code runs, the theme moves into a process of its own, and both processes are locked
+down (`src/linux/cage.zig`, `src/linux/sandbox.zig`):
+
+- **No files, no network, no programs.** A seccomp-bpf allowlist leaves the theme memory,
+  threads, clocks and the descriptors it already holds. Opening files, creating sockets,
+  `execve`, `fork` (threads are allowed, new processes are not), `ptrace`, signals to other
+  processes and changing their limits all fail with `EPERM`. Landlock, when the kernel has it,
+  independently denies all filesystem and TCP access.
+- **No X connection.** The theme process keeps no descriptor but stderr. That matters because
+  X11 lets any client read every window on the screen; a theme sharing a process with the X
+  connection could have asked the server for your other windows. The theme draws into memory it
+  shares with the host, and only the host talks to X.
+- **It dies with the host.** A theme that hangs is given up on after 5 s (60 s for `init`);
+  the host exits and the theme process is killed with it. A theme that crashes is reported with
+  the signal that ended it.
+- `tests/fixtures/Fixture_Hostile.zig` tries all of the above from `init`, `step` and a thread of
+  its own; caged, every attempt is blocked and it can reach no descriptor. Run it with
+  `make linux THEME=tests/fixtures/Fixture_Hostile.zig && ./argus-linux --frames 5`.
+- `--sandbox off` runs a theme uncaged, in the host process, with your full permissions. The
+  host refuses to start a theme if seccomp is unavailable rather than run it uncaged silently.
+
+What the cage does not cover: a theme can still use all the CPU it is given, draw anything on
+your wallpaper, and attack the kernel through the system calls it is allowed (memory, futexes,
+threads). The host trusts nothing it reads back from the theme but pixels and a done counter;
+a hostile theme can stall or blank the wallpaper, not reach past it. Argus on macOS does not
+sandbox themes yet: the sections above apply there.
+
 ## Supported versions
 
 Argus is distributed as source. Security fixes go to the `main` branch; there are no
