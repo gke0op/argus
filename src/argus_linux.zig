@@ -11,6 +11,7 @@
 const std = @import("std");
 const linux = std.os.linux;
 const x11 = @import("linux/x11.zig");
+const sandbox = @import("linux/sandbox.zig");
 const theme = @import("theme"); // compiled in; exports argus_theme_*
 comptime {
     _ = theme;
@@ -139,12 +140,14 @@ pub fn main(init: std.process.Init) !void {
     var frames: u64 = 0; // 0: run until killed
     var scale: f64 = 1.0;
     var div: usize = 0; // --render-scale: theme renders at 1/div size; 0 = auto (fit the budget)
+    var sandboxed = true; // --sandbox off: run the theme uncaged
     var i: usize = 1;
     while (i + 1 < args.len) : (i += 2) {
         if (std.mem.eql(u8, args[i], "--fps")) fps = try std.fmt.parseInt(u64, args[i + 1], 10)
         else if (std.mem.eql(u8, args[i], "--frames")) frames = try std.fmt.parseInt(u64, args[i + 1], 10)
         else if (std.mem.eql(u8, args[i], "--scale")) scale = try std.fmt.parseFloat(f64, args[i + 1])
         else if (std.mem.eql(u8, args[i], "--render-scale")) div = try std.fmt.parseInt(usize, args[i + 1], 10)
+        else if (std.mem.eql(u8, args[i], "--sandbox")) sandboxed = !std.mem.eql(u8, args[i + 1], "off")
         else return error.UnknownArgument;
     }
 
@@ -180,7 +183,6 @@ pub fn main(init: std.process.Init) !void {
     if (auto) div = 1;
     var rw = w / div;
     var rh = h / div;
-    var st = try initTheme(rw, rh, scale);
 
     const alloc = std.heap.page_allocator;
     const px = try alloc.alloc(u32, w * h); // what the window shows
@@ -188,6 +190,14 @@ pub fn main(init: std.process.Init) !void {
     const scratch = try alloc.alloc(u8, c.max_req_bytes);
     var shm = c.shmInit(w, h); // null: frames go through the socket (PutImage)
     std.debug.print("argus-linux: {d}x{d} depth {d}, {d} FPS, {s}\n", .{ w, h, c.depth, fps, if (shm != null) "MIT-SHM" else "PutImage" });
+
+    // Everything the host needs is open: cage the process before any theme code runs.
+    if (sandboxed) {
+        const rep = sandbox.lockdown(.errno);
+        std.debug.print("argus-linux: sandbox: seccomp {s}, landlock {s}\n", .{ if (rep.seccomp) "on" else "UNAVAILABLE", if (rep.landlock_abi > 0) "on" else "unavailable" });
+        if (!rep.seccomp) return error.SandboxUnavailable; // never run a theme uncaged by surprise
+    } else std.debug.print("argus-linux: sandbox OFF (--sandbox off): the theme runs with your full permissions\n", .{});
+    var st = try initTheme(rw, rh, scale);
 
     const period = 1_000_000_000 / fps;
     var next = nowNs();
