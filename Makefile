@@ -6,7 +6,7 @@ THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: icon quasars all app desktop kronos harness check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
+.PHONY: icon quasars all app desktop kronos harness linux check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
 
 all: app kronos
 
@@ -31,6 +31,10 @@ kronos:
 
 harness:
 	$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $(THEME) --frames $(FRAMES) --out $(OUT) $(if $(SEED),--seed $(SEED)) $(if $(FPS),--fps $(FPS)) $(if $(STATS),--stats $(STATS)) $(if $(DATE),--date $(DATE))
+
+# Linux X11 live wallpaper (pure Zig, no libc): THEME is compiled in. ./argus-linux to run.
+linux:
+	$(ZIG) build-exe -O ReleaseFast --dep theme -Mroot=src/argus_linux.zig -Mtheme=$(THEME) -femit-bin=argus-linux
 
 # The harness on every tracked theme: CPU for each .zig, GPU for each .metal (skipped without a
 # Metal device). tools/check_themes.sh --all also checks untracked local themes.
