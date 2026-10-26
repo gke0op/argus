@@ -21,7 +21,8 @@
 //     2 x 64 columns): int8 weights and state where the CPU has AMX-INT8, else bf16; elsewhere
 //     portable f32 SIMD (AVX-512 / AVX2 / NEON). Measured on a 2-vCPU Emerald Rapids VM, one
 //     full step (N = 1024, 64 states, tanh, inputs and display update included; median of 7):
-//     f32 ~1.2 ms, AMX bf16 688 us, AMX int8 626 us. In a separate study both compensated steps
+//     f32 1.07 ms, AMX bf16 658 us, AMX int8 385 us (the GEMM itself ~100 us, about half the
+//     AMX int8 tile peak; packing, finishing and the display update are vectorized around it). In a separate study both compensated steps
 //     forecast Mackey-Glass exactly as well as f32 (NRMSE ratio 1.00; uncompensated: bf16 state
 //     1.55x worse, int8 state 3.4x: the cost is in the state, not the low-precision weights).
 //   * Same picture everywhere: warm-up and the column order run on the f32 engine, which is
@@ -48,6 +49,16 @@ const amx_i8_built = amx_built and std.Target.x86.featureSetHas(builtin.cpu.feat
 /// A test driver (the root module) may set `pub const argus_reservoir_force_f32 = true;` to
 /// compare engines. (Read the value, not just @hasDecl: a driver declaring it false must not force.)
 const force_f32 = if (@hasDecl(@import("root"), "argus_reservoir_force_f32")) @import("root").argus_reservoir_force_f32 else false;
+/// Architecture (comptime; a driver may set `pub const argus_reservoir_arch = .leaky;`):
+///   dense        uniform random W, spectral radius 0.9 (the shipped picture)
+///   leaky        dense W, leak 0.2: x' = 0.8 x + 0.2 tanh(..), a slow integrator
+///   chaotic      dense W, spectral radius 1.3: past the edge of chaos
+///   cycle_jumps  a ring (x[i] drives x[i+1]) with bidirectional jumps every 7 neurons
+///                (Rodan & Tino's cycle reservoir with jumps)
+///   small_world  each neuron wired to its 6 nearest ring neighbours, 5% rewired at random
+pub const Arch = enum { dense, leaky, chaotic, cycle_jumps, small_world };
+const arch: Arch = if (@hasDecl(@import("root"), "argus_reservoir_arch")) @import("root").argus_reservoir_arch else .dense;
+const LEAK: f32 = if (arch == .leaky) 0.2 else 1.0;
 const force_bf16 = if (@hasDecl(@import("root"), "argus_reservoir_force_bf16")) @import("root").argus_reservoir_force_bf16 else false;
 
 fn bf16(x: f32) u16 { // round to nearest even
@@ -81,7 +92,7 @@ pub const State = struct {
 
     wf: [N * N]f32, // W, f32 (fallback engine)
     wb: [N * N]u16 align(64), // W, bf16 (AMX engine)
-    wq: [N * N]i8 align(64), // W, int8 with one scale per row (AMX int8 engine)
+    wq: [N * N]i8 align(64), // W, int8 with one scale per row, as 16 x 64-byte tiles (AMX int8)
     wscale: [N]f32,
     win: [N]f32,
     bias: [N]f32,
@@ -114,16 +125,38 @@ pub const State = struct {
 
         var prng = std.Random.DefaultPrng.init(0xA2605);
         const r = prng.random();
-        const a: f32 = 0.9 * @sqrt(3.0 / @as(f32, N)); // uniform entries: spectral radius ~0.9
-        for (&self.wf, &self.wb) |*x, *hb| {
-            x.* = (r.float(f32) * 2 - 1) * a;
-            hb.* = bf16(x.*);
+        const rho: f32 = if (arch == .chaotic) 1.3 else 0.9;
+        const a: f32 = rho * @sqrt(3.0 / @as(f32, N)); // uniform entries: spectral radius ~rho
+        switch (arch) {
+            .dense, .leaky, .chaotic => for (&self.wf) |*x| {
+                x.* = (r.float(f32) * 2 - 1) * a;
+            },
+            .cycle_jumps => {
+                @memset(&self.wf, 0);
+                for (0..N) |i| self.wf[((i + 1) % N) * N + i] = 1.0; // ring
+                var i: usize = 0;
+                while (i + 7 < N) : (i += 7) { // jumps, both ways
+                    self.wf[i * N + i + 7] = 0.5;
+                    self.wf[(i + 7) * N + i] = 0.5;
+                }
+                scaleToRadius(&self.wf, rho);
+            },
+            .small_world => {
+                @memset(&self.wf, 0);
+                for (0..N) |i| for ([_]usize{ 1, 2, 3, N - 1, N - 2, N - 3 }) |d| {
+                    const j = if (r.float(f32) < 0.05) r.uintLessThan(usize, N) else (i + d) % N;
+                    self.wf[i * N + j] = r.float(f32) * 2 - 1;
+                };
+                scaleToRadius(&self.wf, rho);
+            },
         }
+        for (&self.wf, &self.wb) |x, *hb| hb.* = bf16(x);
         for (0..N) |i| { // int8 rows: scale so the row's largest |w| maps to 127
             var m: f32 = 0;
             for (self.wf[i * N ..][0..N]) |x| m = @max(m, @abs(x));
             self.wscale[i] = m / 127.0;
-            for (self.wf[i * N ..][0..N], self.wq[i * N ..][0..N]) |x, *q| q.* = @intFromFloat(@round(x / self.wscale[i]));
+            for (self.wf[i * N ..][0..N], 0..) |x, k| // tile (i/16, k/64), row i%16, byte k%64
+                self.wq[((i / 16) * (N / 64) + k / 64) * 1024 + (i % 16) * 64 + k % 64] = @intFromFloat(@round(x / self.wscale[i]));
         }
         for (&self.win, &self.bias) |*x, *b| {
             x.* = (r.float(f32) * 2 - 1) * 0.5; // input scaling: keeps most units out of saturation
@@ -250,22 +283,44 @@ pub const State = struct {
         // dF/F) rather than the static offset its bias gives it.
         const a: f32 = 1.0 / 300.0;
         for (0..N) |i| {
-            const row = self.x[i * B ..][0..B];
+            // 4 x 16 elementwise partials, lanes summed in a fixed order: same on every ISA
+            var sm: V16 = @splat(0);
+            var sq: V16 = @splat(0);
+            const mv: V16 = @splat(self.mu[i]);
+            inline for (0..B / 16) |cc| {
+                const v: V16 = self.x[i * B + cc * 16 ..][0..16].*;
+                sm += v;
+                sq += (v - mv) * (v - mv);
+            }
             var m: f32 = 0;
-            for (row) |v| m += v;
-            m /= B;
             var vv: f32 = 0;
-            for (row) |v| vv += (v - self.mu[i]) * (v - self.mu[i]);
+            inline for (0..16) |l| {
+                m += sm[l];
+                vv += sq[l];
+            }
+            m /= B;
             self.mu[i] += a * (m - self.mu[i]);
             self.sd[i] = @sqrt(self.sd[i] * self.sd[i] + a * (vv / B - self.sd[i] * self.sd[i])) + 1e-6;
         }
-        // display field: smoothed z-scores, transposed to [instance][column]
-        for (0..B) |r| for (0..N) |k| {
-            const i = self.order[k];
-            const z = std.math.clamp((self.x[i * B + r] - self.mu[i]) / (2.5 * self.sd[i]), -1.0, 1.0);
-            const d = &self.disp[r * N + k];
-            d.* += 0.35 * (z - d.*);
-        };
+        // display field: smoothed z-scores, transposed to [instance][column] 16 columns at a
+        // time (z along each neuron's contiguous row, then across through an L1 tile)
+        var zt: [16][B]f32 align(64) = undefined;
+        var k: usize = 0;
+        while (k < N) : (k += 16) {
+            for (0..16) |l| {
+                const i = self.order[k + l];
+                inline for (0..B / 16) |cc| {
+                    const z = (@as(V16, self.x[i * B + cc * 16 ..][0..16].*) - @as(V16, @splat(self.mu[i]))) / @as(V16, @splat(2.5 * self.sd[i]));
+                    zt[l][cc * 16 ..][0..16].* = @min(@max(z, @as(V16, @splat(-1.0))), @as(V16, @splat(1.0)));
+                }
+            }
+            for (0..B) |r| {
+                var z: V16 = undefined;
+                inline for (0..16) |l| z[l] = zt[l][r];
+                const d: V16 = self.disp[r * N + k ..][0..16].*;
+                self.disp[r * N + k ..][0..16].* = d + @as(V16, @splat(0.35)) * (z - d);
+            }
+        }
         self.resample();
     }
 
@@ -296,15 +351,17 @@ pub const State = struct {
             .amx_bf16 => if (amx_built) self.productAmx() else unreachable,
             .amx_i8 => if (amx_i8_built) self.productAmxI8() else unreachable,
         }
-        for (0..N) |i| {
-            const row = self.y[i * B ..][0..B];
-            for (0..B) |c| {
-                const u = self.coarse[(self.coarse_head + self.coarse.len - c * ROW_DELAY) % self.coarse.len];
-                row[c] += self.win[i] * u + self.bias[i];
+        var us: [B]f32 align(64) = undefined; // row c's input sample
+        for (&us, 0..) |*u, c| u.* = self.coarse[(self.coarse_head + self.coarse.len - c * ROW_DELAY) % self.coarse.len];
+        for (0..N) |i| inline for (0..B / 16) |cc| {
+            const k = i * B + cc * 16;
+            const v = @as(V16, self.y[k..][0..16].*) + (@as(V16, @splat(self.win[i])) * @as(V16, us[cc * 16 ..][0..16].*) + @as(V16, @splat(self.bias[i])));
+            const t = tanhv(v);
+            if (LEAK == 1.0) self.x[k..][0..16].* = t else {
+                const x0: V16 = self.x[k..][0..16].*;
+                self.x[k..][0..16].* = x0 + @as(V16, @splat(LEAK)) * (t - x0);
             }
-        }
-        var k: usize = 0;
-        while (k < N * B) : (k += 16) self.x[k..][0..16].* = tanhv(self.y[k..][0..16].*);
+        };
     }
 
     /// y = W x, f32, 4 rows x 4 column vectors per register block (B = 64 = 4 vectors).
@@ -388,14 +445,31 @@ pub const State = struct {
         const b2 = 2 * B;
         const xq: []i8 = @as([*]i8, @ptrCast(&self.xp))[0 .. N * b2];
         const acc: []i32 = @as([*]i32, @ptrCast(&self.y2))[0 .. N * b2];
-        for (0..N) |k| for (0..B) |c| {
-            const v = self.x[k * B + c] * 127.0;
-            const hi = @round(v);
-            xq[((k / 4) * b2 + c) * 4 + (k % 4)] = @intFromFloat(hi);
-            xq[((k / 4) * b2 + B + c) * 4 + (k % 4)] = @intFromFloat(@round((v - hi) * 254.0));
+        const I16 = @Vector(16, i8);
+        const quads = comptime blk: { // byte 4c + q <- row q, column c (a 4 x 16 transpose)
+            var m: [64]i32 = undefined;
+            for (0..16) |c| for (0..4) |q| {
+                m[4 * c + q] = q * 16 + c;
+            };
+            break :blk m;
         };
+        var k4: usize = 0;
+        while (k4 < N) : (k4 += 4) {
+            inline for (0..B / 16) |cc| {
+                var hi: [4]I16 = undefined;
+                var lo: [4]I16 = undefined;
+                inline for (0..4) |q| {
+                    const v = @as(V16, self.x[(k4 + q) * B + cc * 16 ..][0..16].*) * @as(V16, @splat(127.0));
+                    const h = @round(v);
+                    hi[q] = @intFromFloat(h);
+                    lo[q] = @intFromFloat(@round((v - h) * @as(V16, @splat(254.0))));
+                }
+                xq[((k4 / 4) * b2 + cc * 16) * 4 ..][0..64].* = @shuffle(i8, @as(@Vector(64, i8), @bitCast(hi)), undefined, quads);
+                xq[((k4 / 4) * b2 + B + cc * 16) * 4 ..][0..64].* = @shuffle(i8, @as(@Vector(64, i8), @bitCast(lo)), undefined, quads);
+            }
+        }
         amxConfig();
-        const sa: usize = N;
+        const sa: usize = 64; // contiguous 1 KB weight tiles
         const sb: usize = b2 * 4;
         var i: usize = 0;
         while (i < N) : (i += 32) {
@@ -414,7 +488,7 @@ pub const State = struct {
                         \\tdpbssd %%tmm6, %%tmm5, %%tmm2
                         \\tdpbssd %%tmm7, %%tmm5, %%tmm3
                         :
-                        : [a0] "r" (&self.wq[i * N + k]), [a1] "r" (&self.wq[(i + 16) * N + k]),
+                        : [a0] "r" (&self.wq[((i / 16) * (N / 64) + k / 64) * 1024]), [a1] "r" (&self.wq[((i / 16 + 1) * (N / 64) + k / 64) * 1024]),
                           [b0] "r" (&xq[((k / 4) * b2 + j) * 4]), [b1] "r" (&xq[((k / 4) * b2 + j + 16) * 4]),
                           [sa] "r" (sa), [sb] "r" (sb),
                         : .{ .memory = true });
@@ -432,9 +506,12 @@ pub const State = struct {
         }
         asm volatile ("tilerelease" ::: .{ .memory = true });
         for (0..N) |r| {
-            const s = self.wscale[r] / 127.0;
-            for (self.y[r * B ..][0..B], acc[r * b2 ..][0..B], acc[r * b2 + B ..][0..B]) |*o, hi, lo|
-                o.* = s * (@as(f32, @floatFromInt(hi)) + @as(f32, @floatFromInt(lo)) / 254.0);
+            const s: V16 = @splat(self.wscale[r] / 127.0);
+            inline for (0..B / 16) |cc| {
+                const hi: V16 = @floatFromInt(@as(@Vector(16, i32), acc[r * b2 + cc * 16 ..][0..16].*));
+                const lo: V16 = @floatFromInt(@as(@Vector(16, i32), acc[r * b2 + B + cc * 16 ..][0..16].*));
+                self.y[r * B + cc * 16 ..][0..16].* = s * (hi + lo / @as(V16, @splat(254.0)));
+            }
         }
     }
 
@@ -496,6 +573,30 @@ pub export fn argus_theme_draw_target(raw: ?*anyopaque, t: *const Target) callco
         inline for (0..3) |ch| o.* |= ((c >> (8 * ch)) & 0xFF) << @intCast(t.shift[ch]);
     }
     self.drawLut(t.px[0..t.len], t.stride, &lut);
+}
+
+/// Scale W to spectral radius `rho`, estimated by Gelfand's formula (geometric mean growth of
+/// ||W^k v|| over 200 steps after 100 of burn-in); deterministic f32, the same on every machine.
+fn scaleToRadius(w: *[N * N]f32, rho: f32) void {
+    var v: [N]f32 = undefined;
+    var u: [N]f32 = undefined;
+    for (&v, 0..) |*e, i| e.* = @floatFromInt((i * 2654435761) % 1000 + 1);
+    var log_sum: f64 = 0;
+    for (0..300) |it| {
+        for (&u, 0..) |*o, i| {
+            var acc: f32 = 0;
+            for (w[i * N ..][0..N], v) |a, b| acc += a * b;
+            o.* = acc;
+        }
+        var nrm: f32 = 0;
+        for (u) |e| nrm += e * e;
+        nrm = @sqrt(nrm);
+        if (nrm == 0) return;
+        if (it >= 100) log_sum += @log(@as(f64, nrm));
+        for (&v, u) |*e, o| e.* = o / nrm;
+    }
+    const est: f32 = @floatCast(@exp(log_sum / 200));
+    for (w) |*e| e.* *= rho / est;
 }
 
 fn amxEnable() bool {
