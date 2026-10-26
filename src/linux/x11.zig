@@ -36,6 +36,9 @@ pub const Conn = struct {
     red_shift: u5,
     green_shift: u5,
     blue_shift: u5,
+    /// The screen's size from the last ConfigureNotify on the root (xrandr, a monitor plugged
+    /// in), until the caller takes it; may equal width x height. Needs selectScreenChanges.
+    resized: ?[2]u16 = null,
 
     pub fn newId(self: *Conn) u32 {
         self.next_id += 1;
@@ -78,6 +81,7 @@ pub const Conn = struct {
         var c: Conn = undefined;
         c.fd = fd;
         c.next_id = 0;
+        c.resized = null;
 
         // Setup request: little-endian ('l'), protocol 11.0, optional auth.
         var req: [12 + 20 + 16]u8 = @splat(0);
@@ -146,10 +150,11 @@ pub const Conn = struct {
         @memcpy(r[8..][0..name.len], name);
         try self.send(r[0 .. 8 + padded]);
         var rep: [32]u8 = undefined;
-        while (true) { // skip any queued events/errors until the reply
+        while (true) { // handle any queued events until the reply
             try self.recvExact(&rep);
             if (rep[0] == 1) break;
             if (rep[0] == 0) return error.ReadFailed;
+            self.handle(&rep);
         }
         return std.mem.readInt(u32, rep[8..12], .little);
     }
@@ -197,6 +202,28 @@ pub const Conn = struct {
         std.mem.writeInt(u32, r[20..24], @intCast(s.len), .little);
         @memcpy(r[24..][0..s.len], s);
         try self.send(r[0 .. 24 + padded]);
+    }
+
+    /// Asks for a ConfigureNotify when the root window (the screen) changes size; see `resized`.
+    pub fn selectScreenChanges(self: *Conn) Error!void {
+        var r: [16]u8 = @splat(0);
+        r[0] = 2; // ChangeWindowAttributes
+        std.mem.writeInt(u16, r[2..4], 4, .little);
+        std.mem.writeInt(u32, r[4..8], self.root, .little);
+        std.mem.writeInt(u32, r[8..12], 0x800, .little); // CWEventMask
+        std.mem.writeInt(u32, r[12..16], 0x20000, .little); // StructureNotifyMask
+        try self.send(&r);
+    }
+
+    pub fn resizeWindow(self: *Conn, win: u32, w: u16, h: u16) Error!void {
+        var r: [20]u8 = @splat(0);
+        r[0] = 12; // ConfigureWindow
+        std.mem.writeInt(u16, r[2..4], 5, .little);
+        std.mem.writeInt(u32, r[4..8], win, .little);
+        std.mem.writeInt(u16, r[8..10], 0x4 | 0x8, .little); // width, height
+        std.mem.writeInt(u32, r[12..16], w, .little);
+        std.mem.writeInt(u32, r[16..20], h, .little);
+        try self.send(&r);
     }
 
     pub fn mapWindow(self: *Conn, win: u32) Error!void {
@@ -261,6 +288,7 @@ pub const Conn = struct {
             self.recvExact(&rep) catch return null;
             if (rep[0] == 1) break;
             if (rep[0] == 0) return null;
+            self.handle(&rep);
         }
         if (rep[8] == 0) return null; // not present
         const opcode = rep[9];
@@ -318,9 +346,20 @@ pub const Conn = struct {
         while (s.pending) {
             var ev: [32]u8 = undefined;
             try self.recvExact(&ev);
-            if ((ev[0] & 0x7F) == s.completion) s.pending = false;
-            if (ev[0] == 0) std.debug.print("x11 error code={d} major={d}\n", .{ ev[1], ev[10] });
+            if ((ev[0] & 0x7F) == s.completion) s.pending = false else self.handle(&ev);
         }
+    }
+
+    /// Detaches the shared frame from the server and this process (after shmWait); the segment
+    /// then goes away.
+    pub fn shmDeinit(self: *Conn, s: *Shm) Error!void {
+        var r: [8]u8 = @splat(0);
+        r[0] = s.opcode;
+        r[1] = 2; // ShmDetach
+        std.mem.writeInt(u16, r[2..4], 2, .little);
+        std.mem.writeInt(u32, r[4..8], s.seg, .little);
+        try self.send(&r);
+        _ = linux.syscall1(.shmdt, @intFromPtr(s.mem.ptr));
     }
 
     /// Writes an Argus frame ([R, G, B, A] bytes) into the shared frame in server pixel order.
@@ -330,13 +369,21 @@ pub const Conn = struct {
         }
     }
 
-    /// Reads and reports any queued X errors without blocking (events are not selected).
-    pub fn drainErrors(self: *Conn) void {
+    /// Handles any queued X errors and events without blocking.
+    pub fn drainEvents(self: *Conn) void {
         var pfd = [1]linux.pollfd{.{ .fd = self.fd, .events = linux.POLL.IN, .revents = 0 }};
         while (linux.poll(&pfd, 1, 0) == 1) {
             var ev: [32]u8 = undefined;
             self.recvExact(&ev) catch return;
-            if (ev[0] == 0) std.debug.print("x11 error code={d} major={d}\n", .{ ev[1], ev[10] });
+            self.handle(&ev);
+        }
+    }
+
+    /// One error or event off the wire: errors are reported, a new screen size is kept.
+    fn handle(self: *Conn, ev: *const [32]u8) void {
+        if (ev[0] == 0) std.debug.print("x11 error code={d} major={d}\n", .{ ev[1], ev[10] });
+        if ((ev[0] & 0x7F) == 22 and std.mem.readInt(u32, ev[8..12], .little) == self.root) { // ConfigureNotify
+            self.resized = .{ std.mem.readInt(u16, ev[20..22], .little), std.mem.readInt(u16, ev[22..24], .little) };
         }
     }
 };

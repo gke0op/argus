@@ -27,6 +27,8 @@ HARNESS=.zig-cache/argus_theme_harness
 TARGET=aarch64-macos; [ "$(uname -s)" = Darwin ] || TARGET=native # Linux: Zig and themes/cpu ports only
 "$ZIG" build-exe -O ReleaseFast -target "$TARGET" -lc src/theme_harness.zig -femit-bin="$HARNESS" || exit 1
 
+# Outside a git checkout (a source zip or tarball) every file counts as tracked.
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || ALL=1
 themes() { # themes/*.$1 and themes/cpu/*.$1: tracked files, or everything with --all (minus the SDK and the CPU executor)
     if [ "$ALL" = 1 ]; then ls themes/*."$1" themes/cpu/*."$1" 2>/dev/null; else git ls-files "themes/*.$1"; fi | grep -v -E '/(argus_theme_sdk|argus_kernel)\.zig$'
 }

@@ -163,8 +163,8 @@ pub fn main(init: std.process.Init) !void {
     const cookie = if (xauth_path) |p| (if (readFile(p, &xauth_buf)) |b| x11.findCookie(b, display) else null) else null;
 
     var c = try x11.Conn.open(display, cookie);
-    const w: usize = c.width;
-    const h: usize = c.height;
+    var w: usize = c.width;
+    var h: usize = c.height;
 
     const win = try c.createWindow();
     const wm_type = try c.internAtom("_NET_WM_WINDOW_TYPE");
@@ -176,17 +176,19 @@ pub fn main(init: std.process.Init) !void {
     try c.mapWindow(win);
     const gc = try c.createGC(win);
 
-    var auto = div == 0;
+    const auto_scale = div == 0;
+    var auto = auto_scale;
     if (auto) div = 1;
     var rw = w / div;
     var rh = h / div;
     var st = try initTheme(rw, rh, scale);
 
     const alloc = std.heap.page_allocator;
-    const px = try alloc.alloc(u32, w * h); // what the window shows
-    const small = try alloc.alloc(u32, w * h); // the theme's render when div > 1
+    var px = try alloc.alloc(u32, w * h); // what the window shows
+    var small = try alloc.alloc(u32, w * h); // the theme's render when div > 1
     const scratch = try alloc.alloc(u8, c.max_req_bytes);
     var shm = c.shmInit(w, h); // null: frames go through the socket (PutImage)
+    try c.selectScreenChanges();
     std.debug.print("argus-linux: {d}x{d} depth {d}, {d} FPS, {s}\n", .{ w, h, c.depth, fps, if (shm != null) "MIT-SHM" else "PutImage" });
 
     const period = 1_000_000_000 / fps;
@@ -198,13 +200,44 @@ pub fn main(init: std.process.Init) !void {
     var stage: [6]u64 = @splat(0); // step, draw, upscale, wait, fill, send
     const shift = [3]u5{ c.red_shift, c.green_shift, c.blue_shift };
     while (frames == 0 or f < frames) : (f += 1) {
+        // The screen changed size (xrandr, a monitor plugged in): start over at the new size.
+        if (c.resized) |size| resize: {
+            c.resized = null;
+            if (size[0] == w and size[1] == h) break :resize;
+            if (shm) |*s| {
+                try c.shmWait(s);
+                try c.shmDeinit(s);
+            }
+            c.width = size[0];
+            c.height = size[1];
+            w = size[0];
+            h = size[1];
+            try c.resizeWindow(win, size[0], size[1]);
+            alloc.free(px);
+            alloc.free(small);
+            px = try alloc.alloc(u32, w * h);
+            small = try alloc.alloc(u32, w * h);
+            shm = c.shmInit(w, h);
+            auto = auto_scale;
+            if (auto) div = 1;
+            argus_theme_deinit(st);
+            rw = w / div;
+            rh = h / div;
+            st = try initTheme(rw, rh, scale);
+            std.debug.print("argus-linux: screen resized to {d}x{d}\n", .{ w, h });
+            work_ns = 0;
+            stage = @splat(0);
+            f = 0;
+            next = nowNs();
+        }
+
         const t0 = nowNs();
         var mark = t0;
         argus_theme_step(st, ZIG_TICK_DT);
         stage[0] += lap(&mark);
 
         // The display's own memory (MIT-SHM), once the server is done reading the last frame.
-        // shmWait also reports X errors (drainErrors would eat the completion event).
+        // shmWait also handles X errors and events (drainEvents would eat the completion event).
         const dst: ?[]u32 = if (shm) |*s| blk: {
             try c.shmWait(s);
             break :blk s.mem;
@@ -240,7 +273,7 @@ pub fn main(init: std.process.Init) !void {
             try c.shmPut(s, win, gc);
         } else {
             try c.putFrame(win, gc, px, w, h, scratch);
-            c.drainErrors();
+            c.drainEvents();
         }
         stage[5] += lap(&mark);
         const dt_ns = mark - t0;

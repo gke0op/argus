@@ -74,5 +74,7 @@ read side by side. End the file with `comptime { k.exportKernelTheme(@This()); }
 no libX11), maps a desktop-type window on every workspace and presents through MIT-SHM. Kernel
 themes draw straight into the shared frame in X's channel order (`argus_theme_draw_target`); SDK
 themes draw [R, G, B, A] and are reordered. Test it headless: `Xvfb :99 &`, `openbox &`,
-`DISPLAY=:99 ./argus-linux --frames 300`, screenshot with `xwd -root`. Wayland and GNOME's default
-session are not supported yet.
+`DISPLAY=:99 ./argus-linux --frames 300`, screenshot with `xwd -root`. It follows xrandr resizes.
+On Xfce it sits under every window but over xfdesktop's icons. GNOME on Wayland (Ubuntu's
+default) shows it through Xwayland, under windows, top bar and dock (seen on GNOME 46 headless);
+a compositor without Xwayland can't run it.
