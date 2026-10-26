@@ -2,7 +2,7 @@
 // ============================================================================
 // themes/Reservoir_Field.zig: 64 echo state networks, one shared reservoir
 //
-// What you see: the live activations of a real echo state network. One 512-neuron reservoir
+// What you see: the live activations of a real echo state network. One 1024-neuron reservoir
 // (random W, spectral radius ~0.9, tanh units) runs 64 instances at once, one per screen row;
 // instance r is driven by a Mackey-Glass chaotic series (tau = 17) delayed by 4r samples, so the
 // rows show the reservoir's response to the same signal at 64 moments of its past. Columns are
@@ -17,15 +17,18 @@
 //     exactly; nothing is faked for the picture. The Mackey-Glass series is integrated online
 //     (Euler, dt = 0.1, sampled every 0.5), so it never loops.
 //   * Engine (chosen at runtime): on x86 CPUs with AMX, where the kernel grants tile access,
-//     W x runs on AMX tiles in bf16 with the state compensated (x = hi + lo, both bf16, one
-//     fused product); else portable f32 SIMD (AVX-512 / AVX2 / NEON). Measured on a 2-vCPU
-//     Emerald Rapids VM, one full step (N = 512, 64 states, tanh and inputs included): f32
-//     346 us, AMX compensated 220 us. In a separate study the compensated bf16 step forecast
-//     Mackey-Glass exactly as well as f32 (NRMSE ratio 1.00; uncompensated bf16 1.55x worse:
-//     the cost is in the state, not the bf16 weights).
+//     W x runs on AMX tiles with the state compensated (x = hi + lo, one fused product over
+//     2 x 64 columns): int8 weights and state where the CPU has AMX-INT8, else bf16; elsewhere
+//     portable f32 SIMD (AVX-512 / AVX2 / NEON). Measured on a 2-vCPU Emerald Rapids VM, one
+//     full step (N = 1024, 64 states, tanh, inputs and display update included; median of 7):
+//     f32 ~1.2 ms, AMX bf16 688 us, AMX int8 626 us. In a separate study both compensated steps
+//     forecast Mackey-Glass exactly as well as f32 (NRMSE ratio 1.00; uncompensated: bf16 state
+//     1.55x worse, int8 state 3.4x: the cost is in the state, not the low-precision weights).
 //   * Same picture everywhere: warm-up and the column order run on the f32 engine, which is
-//     bit-identical on x86 and ARM (checked under qemu); after 600 frames the AMX engine's
-//     frame is within 4 levels of the f32 one (mean 0.07).
+//     bit-identical on x86 and ARM (checked under qemu). The AMX engines round W (bf16, or
+//     int8 per row), so they run a very slightly different reservoir: after 600 frames the
+//     column order is unchanged and the frame differs from the f32 one by 0.13 levels on
+//     average (bf16, max 23) or 0.33 (int8, max 34).
 //   * Chosen: palette, display smoothing, the 4-sample row delay, one reservoir step per frame.
 // ============================================================================
 
@@ -33,7 +36,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const sdk = @import("argus_theme_sdk.zig");
 
-const N = 512; // neurons
+const N = 1024; // neurons
 const B = 64; // parallel instances (screen rows)
 const ROW_DELAY = 4; // input samples between neighbouring rows
 const V16 = @Vector(16, f32);
@@ -41,9 +44,11 @@ const V16 = @Vector(16, f32);
 /// AMX code exists only where it can run: Linux, x86-64, built for a CPU with AMX-BF16.
 const amx_built = builtin.os.tag == .linux and builtin.cpu.arch == .x86_64 and
     std.Target.x86.featureSetHas(builtin.cpu.features, .amx_bf16);
+const amx_i8_built = amx_built and std.Target.x86.featureSetHas(builtin.cpu.features, .amx_int8);
 /// A test driver (the root module) may set `pub const argus_reservoir_force_f32 = true;` to
 /// compare engines. (Read the value, not just @hasDecl: a driver declaring it false must not force.)
 const force_f32 = if (@hasDecl(@import("root"), "argus_reservoir_force_f32")) @import("root").argus_reservoir_force_f32 else false;
+const force_bf16 = if (@hasDecl(@import("root"), "argus_reservoir_force_bf16")) @import("root").argus_reservoir_force_bf16 else false;
 
 fn bf16(x: f32) u16 { // round to nearest even
     const b: u32 = @bitCast(x);
@@ -70,11 +75,13 @@ const Tap = struct { lo: u16, hi: u16, w: f32 };
 pub const State = struct {
     w: usize,
     h: usize,
-    use_amx: bool,
+    engine: enum { f32, amx_bf16, amx_i8 },
     frame: u64 = 0,
 
     wf: [N * N]f32, // W, f32 (fallback engine)
     wb: [N * N]u16 align(64), // W, bf16 (AMX engine)
+    wq: [N * N]i8 align(64), // W, int8 with one scale per row (AMX int8 engine)
+    wscale: [N]f32,
     win: [N]f32,
     bias: [N]f32,
     x: [N * B]f32 align(64), // state, row-major [neuron][instance]
@@ -109,6 +116,12 @@ pub const State = struct {
             x.* = (r.float(f32) * 2 - 1) * a;
             hb.* = bf16(x.*);
         }
+        for (0..N) |i| { // int8 rows: scale so the row's largest |w| maps to 127
+            var m: f32 = 0;
+            for (self.wf[i * N ..][0..N]) |x| m = @max(m, @abs(x));
+            self.wscale[i] = m / 127.0;
+            for (self.wf[i * N ..][0..N], self.wq[i * N ..][0..N]) |x, *q| q.* = @intFromFloat(@round(x / self.wscale[i]));
+        }
         for (&self.win, &self.bias) |*x, *b| {
             x.* = (r.float(f32) * 2 - 1) * 0.5; // input scaling: keeps most units out of saturation
             b.* = (r.float(f32) * 2 - 1) * 0.2;
@@ -135,7 +148,7 @@ pub const State = struct {
         for (&self.fine) |*v| v.* = 1.2;
         // Warm-up and column order on the f32 engine (bit-identical on x86 and ARM), so every
         // machine shows the same layout; the faster engine takes over afterwards.
-        self.use_amx = false;
+        self.engine = .f32;
         // fill the input history, then let the reservoir forget its zero start
         for (0..self.coarse.len) |_| self.advanceInput();
         for (0..200) |_| {
@@ -143,7 +156,8 @@ pub const State = struct {
             self.reservoirStep();
         }
         self.orderByResponse();
-        self.use_amx = amx_built and !force_f32 and amxEnable();
+        if (amx_built and !force_f32 and amxEnable())
+            self.engine = if (amx_i8_built and !force_bf16) .amx_i8 else .amx_bf16;
         return self;
     }
 
@@ -263,7 +277,11 @@ pub const State = struct {
     }
 
     fn reservoirStep(self: *State) void {
-        if (amx_built and self.use_amx) self.productAmx() else self.productF32();
+        switch (self.engine) {
+            .f32 => self.productF32(),
+            .amx_bf16 => if (amx_built) self.productAmx() else unreachable,
+            .amx_i8 => if (amx_i8_built) self.productAmxI8() else unreachable,
+        }
         for (0..N) |i| {
             const row = self.y[i * B ..][0..B];
             for (0..B) |c| {
@@ -346,6 +364,63 @@ pub const State = struct {
             const hi = self.y2[r * b2 ..][0..B];
             const lo = self.y2[r * b2 + B ..][0..B];
             for (self.y[r * B ..][0..B], hi, lo) |*o, a, b| o.* = a + b;
+        }
+    }
+
+    /// y = diag(s) W_q (x_hi + x_lo / 254), with x * 127 = x_hi + x_lo / 254 (both int8; |x| <= 1
+    /// after tanh), as one AMX int8 product over 2B columns. Exact integer sums; reuses xp and y2.
+    fn productAmxI8(self: *State) void {
+        if (!amx_i8_built) unreachable;
+        const b2 = 2 * B;
+        const xq: []i8 = @as([*]i8, @ptrCast(&self.xp))[0 .. N * b2];
+        const acc: []i32 = @as([*]i32, @ptrCast(&self.y2))[0 .. N * b2];
+        for (0..N) |k| for (0..B) |c| {
+            const v = self.x[k * B + c] * 127.0;
+            const hi = @round(v);
+            xq[((k / 4) * b2 + c) * 4 + (k % 4)] = @intFromFloat(hi);
+            xq[((k / 4) * b2 + B + c) * 4 + (k % 4)] = @intFromFloat(@round((v - hi) * 254.0));
+        };
+        amxConfig();
+        const sa: usize = N;
+        const sb: usize = b2 * 4;
+        var i: usize = 0;
+        while (i < N) : (i += 32) {
+            var j: usize = 0;
+            while (j < b2) : (j += 32) {
+                asm volatile ("tilezero %%tmm0\ntilezero %%tmm1\ntilezero %%tmm2\ntilezero %%tmm3" ::: .{ .memory = true });
+                var k: usize = 0;
+                while (k < N) : (k += 64) {
+                    asm volatile (
+                        \\tileloadd (%[a0], %[sa]), %%tmm4
+                        \\tileloadd (%[a1], %[sa]), %%tmm5
+                        \\tileloadd (%[b0], %[sb]), %%tmm6
+                        \\tileloadd (%[b1], %[sb]), %%tmm7
+                        \\tdpbssd %%tmm6, %%tmm4, %%tmm0
+                        \\tdpbssd %%tmm7, %%tmm4, %%tmm1
+                        \\tdpbssd %%tmm6, %%tmm5, %%tmm2
+                        \\tdpbssd %%tmm7, %%tmm5, %%tmm3
+                        :
+                        : [a0] "r" (&self.wq[i * N + k]), [a1] "r" (&self.wq[(i + 16) * N + k]),
+                          [b0] "r" (&xq[((k / 4) * b2 + j) * 4]), [b1] "r" (&xq[((k / 4) * b2 + j + 16) * 4]),
+                          [sa] "r" (sa), [sb] "r" (sb),
+                        : .{ .memory = true });
+                }
+                asm volatile (
+                    \\tilestored %%tmm0, (%[c0], %[s])
+                    \\tilestored %%tmm1, (%[c1], %[s])
+                    \\tilestored %%tmm2, (%[c2], %[s])
+                    \\tilestored %%tmm3, (%[c3], %[s])
+                    :
+                    : [c0] "r" (&acc[i * b2 + j]), [c1] "r" (&acc[i * b2 + j + 16]),
+                      [c2] "r" (&acc[(i + 16) * b2 + j]), [c3] "r" (&acc[(i + 16) * b2 + j + 16]), [s] "r" (sb),
+                    : .{ .memory = true });
+            }
+        }
+        asm volatile ("tilerelease" ::: .{ .memory = true });
+        for (0..N) |r| {
+            const s = self.wscale[r] / 127.0;
+            for (self.y[r * B ..][0..B], acc[r * b2 ..][0..B], acc[r * b2 + B ..][0..B]) |*o, hi, lo|
+                o.* = s * (@as(f32, @floatFromInt(hi)) + @as(f32, @floatFromInt(lo)) / 254.0);
         }
     }
 
