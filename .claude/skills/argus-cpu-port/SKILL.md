@@ -73,6 +73,15 @@ read side by side. End the file with `comptime { k.exportKernelTheme(@This()); }
 `src/argus_linux.zig` compiles one theme in, opens the X11 socket itself (`src/linux/x11.zig`,
 no libX11), maps a desktop-type window on every workspace and presents through MIT-SHM. Kernel
 themes draw straight into the shared frame in X's channel order (`argus_theme_draw_target`); SDK
-themes draw [R, G, B, A] and are reordered. Test it headless: `Xvfb :99 &`, `openbox &`,
+themes draw [R, G, B, A] and are reordered (2.4 ms per 1080p frame), unless they also
+export `pub export fn argus_theme_draw_target` (Reservoir_Field does: it repacks its colour table
+to the target's channel offsets). Test it headless: `Xvfb :99 &`, `openbox &`,
 `DISPLAY=:99 ./argus-linux --frames 300`, screenshot with `xwd -root`. Wayland and GNOME's default
 session are not supported yet.
+
+The theme runs caged (`src/linux/cage.zig`): in its own process with no X socket, under a
+seccomp allowlist and Landlock (`src/linux/sandbox.zig`), talking to the host through shared
+memory and a futex. A port therefore must not open files or sockets, fork or exec, not even in
+`init` (all fail with EPERM); threads are fine. AMX permission (`arch_prctl` XCOMP_PERM) is
+allowed. A caged call costs ~0.1-0.3 ms per frame (an idle vCPU takes ~100 us to wake).
+`tests/fixtures/Fixture_Hostile.zig` must stay at 0 escapes and 0 reachable descriptors.

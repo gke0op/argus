@@ -89,6 +89,8 @@ else
 	$(ZIG) test $(ZFLAGS) src/kronos_tui.zig
 	$(ZIG) test $(ZFLAGS) themes/cpu/argus_kernel.zig
 	if command -v qemu-aarch64-static >/dev/null; then $(ZIG) test -target aarch64-linux themes/cpu/argus_kernel.zig --test-cmd qemu-aarch64-static --test-cmd-bin; fi
+	$(ZIG) test $(ZFLAGS) src/linux/sandbox.zig
+	if command -v qemu-aarch64-static >/dev/null; then $(ZIG) test -target aarch64-linux src/linux/sandbox.zig --test-cmd qemu-aarch64-static --test-cmd-bin; fi
 endif
 
 run: app

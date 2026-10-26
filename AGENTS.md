@@ -65,7 +65,9 @@ make check-themes CHECK_ARGS=--no-budget   # Linux VM / shared runner: gates wit
 ## Rules
 
 - **Themes are native code** with the user's permissions. Don't run themes from sources the
-  user hasn't chosen to trust (see [`SECURITY.md`](SECURITY.md)).
+  user hasn't chosen to trust (see [`SECURITY.md`](SECURITY.md)). On Linux, `argus-linux` cages
+  the theme in its own sandboxed process; keep it that way (`--sandbox off` only to debug), and
+  re-run `tests/fixtures/Fixture_Hostile.zig` after touching `src/linux/`.
 - **The user's running Argus is theirs.** To measure, run your own instance
   (`Argus --offscreen ...`) and stop it by its PID, never by name.
 - **Don't commit** `.argus_spaces.conf` or `.argus_settings.conf` (per-user, gitignored).
