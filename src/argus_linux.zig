@@ -21,12 +21,12 @@ comptime {
 extern fn argus_theme_init(w: u32, h: u32, scale: f64) callconv(.c) ?*anyopaque;
 extern fn argus_theme_deinit(st: ?*anyopaque) callconv(.c) void;
 
-/// Direct path for CPU kernel themes (themes/cpu/argus_kernel.zig, recognised at compile time by
-/// their `pub fn draw(frame, gid)`): draw straight into display memory in the display's channel
-/// order. Null for SDK themes. (A weak symbol would do this at link time, but LLVM folds
+/// Direct path: draw straight into display memory in the display's channel order. CPU kernel
+/// themes (themes/cpu/argus_kernel.zig, recognised by their `pub fn draw(frame, gid)`) all have
+/// it; an SDK theme opts in with `pub export fn argus_theme_draw_target`. Null otherwise. (A weak symbol would do this at link time, but LLVM folds
 /// `weak_sym != null` to true, so the choice is made here, where it is known for certain.)
 const DrawTarget = *const fn (?*anyopaque, *const cage.Target) callconv(.c) void;
-const draw_target: ?DrawTarget = if (@hasDecl(theme, "draw")) @extern(DrawTarget, .{ .name = "argus_theme_draw_target" }) else null;
+const draw_target: ?DrawTarget = if (@hasDecl(theme, "draw") or @hasDecl(theme, "argus_theme_draw_target")) @extern(DrawTarget, .{ .name = "argus_theme_draw_target" }) else null;
 extern fn argus_theme_step(st: ?*anyopaque, dt: f64) callconv(.c) void;
 extern fn argus_theme_draw(st: ?*anyopaque, px: [*]u32, len: usize, stride: usize) callconv(.c) void;
 

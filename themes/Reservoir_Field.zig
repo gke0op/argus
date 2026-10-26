@@ -76,6 +76,7 @@ pub const State = struct {
     w: usize,
     h: usize,
     engine: enum { f32, amx_bf16, amx_i8 },
+    threads: usize, // draw splits rows over this many threads
     frame: u64 = 0,
 
     wf: [N * N]f32, // W, f32 (fallback engine)
@@ -90,6 +91,7 @@ pub const State = struct {
     xp: [N * 2 * B]u16 align(64), // VNNI-packed [x_hi | x_lo]
     disp: [B * N]f32, // display field, [instance][screen column order]
     order: [N]u16, // neuron shown in column k
+    rs: [B * 8192]f32 align(64), // disp resampled to screen columns, [instance][screen x]
     mu: [N]f32, // each neuron's running mean and spread (display baseline, ~10 s)
     sd: [N]f32,
     // Mackey-Glass: fine Euler history (lag 170 steps) and the sampled series rows read from
@@ -106,6 +108,7 @@ pub const State = struct {
         self.w = @min(w, self.xtap.len);
         self.h = h;
         self.frame = 0;
+        self.threads = std.math.clamp(std.Thread.getCpuCount() catch 1, 1, 8);
         self.fine_head = 0;
         self.coarse_head = 0;
 
@@ -158,6 +161,7 @@ pub const State = struct {
         self.orderByResponse();
         if (amx_built and !force_f32 and amxEnable())
             self.engine = if (amx_i8_built and !force_bf16) .amx_i8 else .amx_bf16;
+        self.resample();
         return self;
     }
 
@@ -262,6 +266,16 @@ pub const State = struct {
             const d = &self.disp[r * N + k];
             d.* += 0.35 * (z - d.*);
         };
+        self.resample();
+    }
+
+    /// Horizontal half of the bilinear upscale, once per frame (64 rows): draw then only blends
+    /// two contiguous rows per screen row and looks up the colour.
+    fn resample(self: *State) void {
+        for (0..B) |r| {
+            const d = self.disp[r * N ..][0..N];
+            for (self.rs[r * self.w ..][0..self.w], self.xtap[0..self.w]) |*o, t| o.* = d[t.lo] + (d[t.hi] - d[t.lo]) * t.w;
+        }
     }
 
     fn advanceInput(self: *State) void {
@@ -425,19 +439,41 @@ pub const State = struct {
     }
 
     pub fn draw(self: *const State, buf: []u32, stride: usize) void {
+        self.drawLut(buf, stride, &self.lut);
+    }
+
+    /// Rows split over `threads` (spawned per call, as argus_kernel.zig does: ~0.1 ms each).
+    fn drawLut(self: *const State, buf: []u32, stride: usize, lut: *const [256]u32) void {
         if (self.w == 0 or self.h == 0 or stride < self.w) return;
         const h: usize = @min(self.h, buf.len / stride);
-        var mid: [N]f32 = undefined;
-        for (0..h) |sy| {
+        var pool: [8]?std.Thread = @splat(null);
+        for (1..self.threads) |t| pool[t] = std.Thread.spawn(.{}, drawRows, .{ self, buf, stride, lut, h, h * t / self.threads, h * (t + 1) / self.threads }) catch null;
+        drawRows(self, buf, stride, lut, h, 0, h / self.threads);
+        for (pool[1..self.threads], 1..) |th, t| if (th) |x| x.join() else drawRows(self, buf, stride, lut, h, h * t / self.threads, h * (t + 1) / self.threads);
+    }
+
+    fn drawRows(self: *const State, buf: []u32, stride: usize, lut: *const [256]u32, h: usize, y0: usize, y1: usize) void {
+        for (y0..y1) |sy| {
             const f = (@as(f32, @floatFromInt(sy)) + 0.5) * B / @as(f32, @floatFromInt(h)) - 0.5;
             const r0: usize = @intFromFloat(std.math.clamp(@floor(f), 0, B - 1));
             const r1: usize = @min(r0 + 1, B - 1); // usize: @min would narrow to u6
             const wy = std.math.clamp(f - @floor(f), 0, 1);
-            for (&mid, self.disp[r0 * N ..][0..N], self.disp[r1 * N ..][0..N]) |*m, a, b| m.* = a + (b - a) * wy;
             const row = buf[sy * stride ..][0..self.w];
-            for (row, self.xtap[0..self.w]) |*px, t| {
-                const v = mid[t.lo] + (mid[t.hi] - mid[t.lo]) * t.w;
-                px.* = self.lut[@intFromFloat(std.math.clamp((v + 1.0) * 127.5, 0.0, 255.0))];
+            const ra = self.rs[r0 * self.w ..][0..self.w];
+            const rb = self.rs[r1 * self.w ..][0..self.w];
+            var x: usize = 0;
+            while (x + 16 <= self.w) : (x += 16) { // 16 pixels: blend and index as vectors
+                const va: V16 = ra[x..][0..16].*;
+                const v = va + (@as(V16, rb[x..][0..16].*) - va) * @as(V16, @splat(wy));
+                const fi = @min(@max((v + @as(V16, @splat(1.0))) * @as(V16, @splat(127.5)), @as(V16, @splat(0))), @as(V16, @splat(255)));
+                const idx: @Vector(16, u32) = @intFromFloat(fi);
+                var out: @Vector(16, u32) = undefined;
+                inline for (0..16) |l| out[l] = lut[idx[l]];
+                row[x..][0..16].* = out;
+            }
+            for (row[x..], ra[x..], rb[x..]) |*px, a, b| {
+                const v = a + (b - a) * wy;
+                px.* = lut[@intFromFloat(std.math.clamp((v + 1.0) * 127.5, 0.0, 255.0))];
             }
         }
     }
@@ -447,6 +483,20 @@ pub const State = struct {
         return false;
     }
 };
+
+/// Draw straight into a host's display memory in its channel order (the Linux host hands over
+/// X11's BGRX), skipping its reorder pass; same layout as cage.Target / argus_kernel.Target.
+const Target = extern struct { px: [*]u32, len: usize, stride: usize, shift: [3]u8 };
+pub export fn argus_theme_draw_target(raw: ?*anyopaque, t: *const Target) callconv(.c) void {
+    const self: *const State = @ptrCast(@alignCast(raw orelse return));
+    for (t.shift) |sh| if (sh > 24) return;
+    var lut: [256]u32 = undefined;
+    for (&lut, self.lut) |*o, c| { // [R, G, B, A] bytes -> the target's bit offsets
+        o.* = 0;
+        inline for (0..3) |ch| o.* |= ((c >> (8 * ch)) & 0xFF) << @intCast(t.shift[ch]);
+    }
+    self.drawLut(t.px[0..t.len], t.stride, &lut);
+}
 
 fn amxEnable() bool {
     if (!amx_built) return false;
