@@ -21,7 +21,8 @@
 //     2 x 64 columns): int8 weights and state where the CPU has AMX-INT8, else bf16; elsewhere
 //     portable f32 SIMD (AVX-512 / AVX2 / NEON). Measured on a 2-vCPU Emerald Rapids VM, one
 //     full step (N = 1024, 64 states, tanh, inputs and display update included; median of 7):
-//     f32 ~1.2 ms, AMX bf16 688 us, AMX int8 626 us. In a separate study both compensated steps
+//     f32 1.07 ms, AMX bf16 658 us, AMX int8 385 us (the GEMM itself ~100 us, about half the
+//     AMX int8 tile peak; packing, finishing and the display update are vectorized around it). In a separate study both compensated steps
 //     forecast Mackey-Glass exactly as well as f32 (NRMSE ratio 1.00; uncompensated: bf16 state
 //     1.55x worse, int8 state 3.4x: the cost is in the state, not the low-precision weights).
 //   * Same picture everywhere: warm-up and the column order run on the f32 engine, which is
@@ -91,7 +92,7 @@ pub const State = struct {
 
     wf: [N * N]f32, // W, f32 (fallback engine)
     wb: [N * N]u16 align(64), // W, bf16 (AMX engine)
-    wq: [N * N]i8 align(64), // W, int8 with one scale per row (AMX int8 engine)
+    wq: [N * N]i8 align(64), // W, int8 with one scale per row, as 16 x 64-byte tiles (AMX int8)
     wscale: [N]f32,
     win: [N]f32,
     bias: [N]f32,
@@ -154,7 +155,8 @@ pub const State = struct {
             var m: f32 = 0;
             for (self.wf[i * N ..][0..N]) |x| m = @max(m, @abs(x));
             self.wscale[i] = m / 127.0;
-            for (self.wf[i * N ..][0..N], self.wq[i * N ..][0..N]) |x, *q| q.* = @intFromFloat(@round(x / self.wscale[i]));
+            for (self.wf[i * N ..][0..N], 0..) |x, k| // tile (i/16, k/64), row i%16, byte k%64
+                self.wq[((i / 16) * (N / 64) + k / 64) * 1024 + (i % 16) * 64 + k % 64] = @intFromFloat(@round(x / self.wscale[i]));
         }
         for (&self.win, &self.bias) |*x, *b| {
             x.* = (r.float(f32) * 2 - 1) * 0.5; // input scaling: keeps most units out of saturation
@@ -281,22 +283,44 @@ pub const State = struct {
         // dF/F) rather than the static offset its bias gives it.
         const a: f32 = 1.0 / 300.0;
         for (0..N) |i| {
-            const row = self.x[i * B ..][0..B];
+            // 4 x 16 elementwise partials, lanes summed in a fixed order: same on every ISA
+            var sm: V16 = @splat(0);
+            var sq: V16 = @splat(0);
+            const mv: V16 = @splat(self.mu[i]);
+            inline for (0..B / 16) |cc| {
+                const v: V16 = self.x[i * B + cc * 16 ..][0..16].*;
+                sm += v;
+                sq += (v - mv) * (v - mv);
+            }
             var m: f32 = 0;
-            for (row) |v| m += v;
-            m /= B;
             var vv: f32 = 0;
-            for (row) |v| vv += (v - self.mu[i]) * (v - self.mu[i]);
+            inline for (0..16) |l| {
+                m += sm[l];
+                vv += sq[l];
+            }
+            m /= B;
             self.mu[i] += a * (m - self.mu[i]);
             self.sd[i] = @sqrt(self.sd[i] * self.sd[i] + a * (vv / B - self.sd[i] * self.sd[i])) + 1e-6;
         }
-        // display field: smoothed z-scores, transposed to [instance][column]
-        for (0..B) |r| for (0..N) |k| {
-            const i = self.order[k];
-            const z = std.math.clamp((self.x[i * B + r] - self.mu[i]) / (2.5 * self.sd[i]), -1.0, 1.0);
-            const d = &self.disp[r * N + k];
-            d.* += 0.35 * (z - d.*);
-        };
+        // display field: smoothed z-scores, transposed to [instance][column] 16 columns at a
+        // time (z along each neuron's contiguous row, then across through an L1 tile)
+        var zt: [16][B]f32 align(64) = undefined;
+        var k: usize = 0;
+        while (k < N) : (k += 16) {
+            for (0..16) |l| {
+                const i = self.order[k + l];
+                inline for (0..B / 16) |cc| {
+                    const z = (@as(V16, self.x[i * B + cc * 16 ..][0..16].*) - @as(V16, @splat(self.mu[i]))) / @as(V16, @splat(2.5 * self.sd[i]));
+                    zt[l][cc * 16 ..][0..16].* = @min(@max(z, @as(V16, @splat(-1.0))), @as(V16, @splat(1.0)));
+                }
+            }
+            for (0..B) |r| {
+                var z: V16 = undefined;
+                inline for (0..16) |l| z[l] = zt[l][r];
+                const d: V16 = self.disp[r * N + k ..][0..16].*;
+                self.disp[r * N + k ..][0..16].* = d + @as(V16, @splat(0.35)) * (z - d);
+            }
+        }
         self.resample();
     }
 
@@ -327,21 +351,17 @@ pub const State = struct {
             .amx_bf16 => if (amx_built) self.productAmx() else unreachable,
             .amx_i8 => if (amx_i8_built) self.productAmxI8() else unreachable,
         }
-        for (0..N) |i| {
-            const row = self.y[i * B ..][0..B];
-            for (0..B) |c| {
-                const u = self.coarse[(self.coarse_head + self.coarse.len - c * ROW_DELAY) % self.coarse.len];
-                row[c] += self.win[i] * u + self.bias[i];
-            }
-        }
-        var k: usize = 0;
-        while (k < N * B) : (k += 16) {
-            const t = tanhv(self.y[k..][0..16].*);
+        var us: [B]f32 align(64) = undefined; // row c's input sample
+        for (&us, 0..) |*u, c| u.* = self.coarse[(self.coarse_head + self.coarse.len - c * ROW_DELAY) % self.coarse.len];
+        for (0..N) |i| inline for (0..B / 16) |cc| {
+            const k = i * B + cc * 16;
+            const v = @as(V16, self.y[k..][0..16].*) + (@as(V16, @splat(self.win[i])) * @as(V16, us[cc * 16 ..][0..16].*) + @as(V16, @splat(self.bias[i])));
+            const t = tanhv(v);
             if (LEAK == 1.0) self.x[k..][0..16].* = t else {
                 const x0: V16 = self.x[k..][0..16].*;
                 self.x[k..][0..16].* = x0 + @as(V16, @splat(LEAK)) * (t - x0);
             }
-        }
+        };
     }
 
     /// y = W x, f32, 4 rows x 4 column vectors per register block (B = 64 = 4 vectors).
@@ -425,14 +445,31 @@ pub const State = struct {
         const b2 = 2 * B;
         const xq: []i8 = @as([*]i8, @ptrCast(&self.xp))[0 .. N * b2];
         const acc: []i32 = @as([*]i32, @ptrCast(&self.y2))[0 .. N * b2];
-        for (0..N) |k| for (0..B) |c| {
-            const v = self.x[k * B + c] * 127.0;
-            const hi = @round(v);
-            xq[((k / 4) * b2 + c) * 4 + (k % 4)] = @intFromFloat(hi);
-            xq[((k / 4) * b2 + B + c) * 4 + (k % 4)] = @intFromFloat(@round((v - hi) * 254.0));
+        const I16 = @Vector(16, i8);
+        const quads = comptime blk: { // byte 4c + q <- row q, column c (a 4 x 16 transpose)
+            var m: [64]i32 = undefined;
+            for (0..16) |c| for (0..4) |q| {
+                m[4 * c + q] = q * 16 + c;
+            };
+            break :blk m;
         };
+        var k4: usize = 0;
+        while (k4 < N) : (k4 += 4) {
+            inline for (0..B / 16) |cc| {
+                var hi: [4]I16 = undefined;
+                var lo: [4]I16 = undefined;
+                inline for (0..4) |q| {
+                    const v = @as(V16, self.x[(k4 + q) * B + cc * 16 ..][0..16].*) * @as(V16, @splat(127.0));
+                    const h = @round(v);
+                    hi[q] = @intFromFloat(h);
+                    lo[q] = @intFromFloat(@round((v - h) * @as(V16, @splat(254.0))));
+                }
+                xq[((k4 / 4) * b2 + cc * 16) * 4 ..][0..64].* = @shuffle(i8, @as(@Vector(64, i8), @bitCast(hi)), undefined, quads);
+                xq[((k4 / 4) * b2 + B + cc * 16) * 4 ..][0..64].* = @shuffle(i8, @as(@Vector(64, i8), @bitCast(lo)), undefined, quads);
+            }
+        }
         amxConfig();
-        const sa: usize = N;
+        const sa: usize = 64; // contiguous 1 KB weight tiles
         const sb: usize = b2 * 4;
         var i: usize = 0;
         while (i < N) : (i += 32) {
@@ -451,7 +488,7 @@ pub const State = struct {
                         \\tdpbssd %%tmm6, %%tmm5, %%tmm2
                         \\tdpbssd %%tmm7, %%tmm5, %%tmm3
                         :
-                        : [a0] "r" (&self.wq[i * N + k]), [a1] "r" (&self.wq[(i + 16) * N + k]),
+                        : [a0] "r" (&self.wq[((i / 16) * (N / 64) + k / 64) * 1024]), [a1] "r" (&self.wq[((i / 16 + 1) * (N / 64) + k / 64) * 1024]),
                           [b0] "r" (&xq[((k / 4) * b2 + j) * 4]), [b1] "r" (&xq[((k / 4) * b2 + j + 16) * 4]),
                           [sa] "r" (sa), [sb] "r" (sb),
                         : .{ .memory = true });
@@ -469,9 +506,12 @@ pub const State = struct {
         }
         asm volatile ("tilerelease" ::: .{ .memory = true });
         for (0..N) |r| {
-            const s = self.wscale[r] / 127.0;
-            for (self.y[r * B ..][0..B], acc[r * b2 ..][0..B], acc[r * b2 + B ..][0..B]) |*o, hi, lo|
-                o.* = s * (@as(f32, @floatFromInt(hi)) + @as(f32, @floatFromInt(lo)) / 254.0);
+            const s: V16 = @splat(self.wscale[r] / 127.0);
+            inline for (0..B / 16) |cc| {
+                const hi: V16 = @floatFromInt(@as(@Vector(16, i32), acc[r * b2 + cc * 16 ..][0..16].*));
+                const lo: V16 = @floatFromInt(@as(@Vector(16, i32), acc[r * b2 + B + cc * 16 ..][0..16].*));
+                self.y[r * B + cc * 16 ..][0..16].* = s * (hi + lo / @as(V16, @splat(254.0)));
+            }
         }
     }
 
