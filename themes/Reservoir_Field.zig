@@ -48,6 +48,16 @@ const amx_i8_built = amx_built and std.Target.x86.featureSetHas(builtin.cpu.feat
 /// A test driver (the root module) may set `pub const argus_reservoir_force_f32 = true;` to
 /// compare engines. (Read the value, not just @hasDecl: a driver declaring it false must not force.)
 const force_f32 = if (@hasDecl(@import("root"), "argus_reservoir_force_f32")) @import("root").argus_reservoir_force_f32 else false;
+/// Architecture (comptime; a driver may set `pub const argus_reservoir_arch = .leaky;`):
+///   dense        uniform random W, spectral radius 0.9 (the shipped picture)
+///   leaky        dense W, leak 0.2: x' = 0.8 x + 0.2 tanh(..), a slow integrator
+///   chaotic      dense W, spectral radius 1.3: past the edge of chaos
+///   cycle_jumps  a ring (x[i] drives x[i+1]) with bidirectional jumps every 7 neurons
+///                (Rodan & Tino's cycle reservoir with jumps)
+///   small_world  each neuron wired to its 6 nearest ring neighbours, 5% rewired at random
+pub const Arch = enum { dense, leaky, chaotic, cycle_jumps, small_world };
+const arch: Arch = if (@hasDecl(@import("root"), "argus_reservoir_arch")) @import("root").argus_reservoir_arch else .dense;
+const LEAK: f32 = if (arch == .leaky) 0.2 else 1.0;
 const force_bf16 = if (@hasDecl(@import("root"), "argus_reservoir_force_bf16")) @import("root").argus_reservoir_force_bf16 else false;
 
 fn bf16(x: f32) u16 { // round to nearest even
@@ -114,11 +124,32 @@ pub const State = struct {
 
         var prng = std.Random.DefaultPrng.init(0xA2605);
         const r = prng.random();
-        const a: f32 = 0.9 * @sqrt(3.0 / @as(f32, N)); // uniform entries: spectral radius ~0.9
-        for (&self.wf, &self.wb) |*x, *hb| {
-            x.* = (r.float(f32) * 2 - 1) * a;
-            hb.* = bf16(x.*);
+        const rho: f32 = if (arch == .chaotic) 1.3 else 0.9;
+        const a: f32 = rho * @sqrt(3.0 / @as(f32, N)); // uniform entries: spectral radius ~rho
+        switch (arch) {
+            .dense, .leaky, .chaotic => for (&self.wf) |*x| {
+                x.* = (r.float(f32) * 2 - 1) * a;
+            },
+            .cycle_jumps => {
+                @memset(&self.wf, 0);
+                for (0..N) |i| self.wf[((i + 1) % N) * N + i] = 1.0; // ring
+                var i: usize = 0;
+                while (i + 7 < N) : (i += 7) { // jumps, both ways
+                    self.wf[i * N + i + 7] = 0.5;
+                    self.wf[(i + 7) * N + i] = 0.5;
+                }
+                scaleToRadius(&self.wf, rho);
+            },
+            .small_world => {
+                @memset(&self.wf, 0);
+                for (0..N) |i| for ([_]usize{ 1, 2, 3, N - 1, N - 2, N - 3 }) |d| {
+                    const j = if (r.float(f32) < 0.05) r.uintLessThan(usize, N) else (i + d) % N;
+                    self.wf[i * N + j] = r.float(f32) * 2 - 1;
+                };
+                scaleToRadius(&self.wf, rho);
+            },
         }
+        for (&self.wf, &self.wb) |x, *hb| hb.* = bf16(x);
         for (0..N) |i| { // int8 rows: scale so the row's largest |w| maps to 127
             var m: f32 = 0;
             for (self.wf[i * N ..][0..N]) |x| m = @max(m, @abs(x));
@@ -304,7 +335,13 @@ pub const State = struct {
             }
         }
         var k: usize = 0;
-        while (k < N * B) : (k += 16) self.x[k..][0..16].* = tanhv(self.y[k..][0..16].*);
+        while (k < N * B) : (k += 16) {
+            const t = tanhv(self.y[k..][0..16].*);
+            if (LEAK == 1.0) self.x[k..][0..16].* = t else {
+                const x0: V16 = self.x[k..][0..16].*;
+                self.x[k..][0..16].* = x0 + @as(V16, @splat(LEAK)) * (t - x0);
+            }
+        }
     }
 
     /// y = W x, f32, 4 rows x 4 column vectors per register block (B = 64 = 4 vectors).
@@ -496,6 +533,30 @@ pub export fn argus_theme_draw_target(raw: ?*anyopaque, t: *const Target) callco
         inline for (0..3) |ch| o.* |= ((c >> (8 * ch)) & 0xFF) << @intCast(t.shift[ch]);
     }
     self.drawLut(t.px[0..t.len], t.stride, &lut);
+}
+
+/// Scale W to spectral radius `rho`, estimated by Gelfand's formula (geometric mean growth of
+/// ||W^k v|| over 200 steps after 100 of burn-in); deterministic f32, the same on every machine.
+fn scaleToRadius(w: *[N * N]f32, rho: f32) void {
+    var v: [N]f32 = undefined;
+    var u: [N]f32 = undefined;
+    for (&v, 0..) |*e, i| e.* = @floatFromInt((i * 2654435761) % 1000 + 1);
+    var log_sum: f64 = 0;
+    for (0..300) |it| {
+        for (&u, 0..) |*o, i| {
+            var acc: f32 = 0;
+            for (w[i * N ..][0..N], v) |a, b| acc += a * b;
+            o.* = acc;
+        }
+        var nrm: f32 = 0;
+        for (u) |e| nrm += e * e;
+        nrm = @sqrt(nrm);
+        if (nrm == 0) return;
+        if (it >= 100) log_sum += @log(@as(f64, nrm));
+        for (&v, u) |*e, o| e.* = o / nrm;
+    }
+    const est: f32 = @floatCast(@exp(log_sum / 200));
+    for (w) |*e| e.* *= rho / est;
 }
 
 fn amxEnable() bool {
