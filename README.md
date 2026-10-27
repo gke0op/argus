@@ -85,9 +85,9 @@ theme runs on your GPU. Only run themes you trust. See [SECURITY.md](SECURITY.md
 ### Linux (experimental)
 
 On Linux, Argus is a single static binary that draws a theme as your X11 desktop background. It
-is pure Zig, with no libc and no X libraries. Tested on Ubuntu 24.04 (arm64): Xorg with Xfce, and
-stock GNOME on Wayland through Xwayland. There's no menu-bar app or per-Space themes on Linux:
-you pick one theme when you build. Zig themes run as they are; Metal themes need a CPU port
+is pure Zig, with no libc and no X libraries. Tested on Ubuntu 24.04: on arm64, Xorg with Xfce
+and stock GNOME on Wayland through Xwayland; on x86_64 (emulated), Xorg with Xfce. There's no
+menu-bar app or per-Space themes on Linux: you pick one theme when you build. Zig themes run as they are; Metal themes need a CPU port
 first, and so far one exists, `themes/cpu/Tutorial_Tides.zig`.
 
 ```sh
@@ -98,8 +98,11 @@ make linux THEME=themes/Cygnus_A.zig             # or THEME=themes/cpu/Tutorial_
 ./argus-linux                                    # Ctrl+C or kill to stop
 ```
 
-`make linux` builds for your own CPU. To build a binary to hand to someone else on an x86_64 PC,
-add `CPU=x86_64_v3`.
+`make linux` builds for your own CPU, so the binary may not run on an older one. To build a binary
+to hand to someone else on an x86_64 PC, add `CPU=x86_64_v3`: it needs AVX2 (Intel since 2013,
+AMD since 2015, but not some Pentium, Celeron and Atom chips). Without it the binary stops at
+once with `Illegal instruction`. `CPU=x86_64` runs on any x86_64 PC, but kernel themes run
+several times slower.
 
 ## Build and run
 
