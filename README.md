@@ -82,6 +82,25 @@ theme (it finds the skills in `.claude/skills/` on its own).
 **Themes are native code.** A Zig theme becomes a dynamic library inside Argus, and a Metal
 theme runs on your GPU. Only run themes you trust. See [SECURITY.md](SECURITY.md).
 
+### Linux (experimental)
+
+On Linux, Argus is a single static binary that draws a theme as your X11 desktop background. It
+is pure Zig, with no libc and no X libraries. Tested on Ubuntu 24.04 (arm64): Xorg with Xfce, and
+stock GNOME on Wayland through Xwayland. There's no menu-bar app or per-Space themes on Linux:
+you pick one theme when you build. Zig themes run as they are; Metal themes need a CPU port
+first, and so far one exists, `themes/cpu/Tutorial_Tides.zig`.
+
+```sh
+sudo apt install git make curl
+git clone https://github.com/gke0op/argus.git && cd argus
+make zig                                         # the pinned Zig 0.17.0, into .toolchain/
+make linux THEME=themes/Cygnus_A.zig             # or THEME=themes/cpu/Tutorial_Tides.zig
+./argus-linux                                    # Ctrl+C or kill to stop
+```
+
+`make linux` builds for your own CPU. To build a binary to hand to someone else on an x86_64 PC,
+add `CPU=x86_64_v3`.
+
 ## Build and run
 
 Requires macOS on Apple Silicon and Zig 0.17.0 (`make zig` installs it into `.toolchain/`,
