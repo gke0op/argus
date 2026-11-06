@@ -38,10 +38,10 @@
 }
 </script>
 </head>
-<body class="solid">
+<body class="solid benchpage">
 <a class="skip" href="#main">Skip to content</a>
 <header class="top">
-  <a class="brand" href="../">ARGUS</a>
+  <a class="brand" href="../" aria-label="Argus, home">Argus</a>
   <nav aria-label="Site">
     <a href="../">Themes</a>
     <a class="opt" href="../#bench">Leaderboard</a>
@@ -52,8 +52,8 @@
 <main id="main" class="page">
   <div class="wrap">
     <div class="eyebrow">ARGUS-BENCH</div>
-    <h1 style="font-size:clamp(1.9rem,1.4rem + 2vw,2.8rem);margin:0 0 0.4em">Run it in your browser</h1>
-    <p class="narrow">A model writes one theme file; the harness says whether it runs. Here the harness runs in this page: you see the theme move and the gates’ verdict, worded as the native harness words it, in seconds.</p>
+    <h1 class="page-title">Run it in your browser</h1>
+    <p class="page-lede">A model writes one theme file; the harness says whether it runs. Here the harness runs in this page: you see the theme move and the gates’ verdict, worded as the native harness words it, in seconds.</p>
     <ol class="steps">
       <li>Copy the prompt (and the contract it refers to) into any model.</li>
       <li>The model answers with one file: a Zig theme or a WGSL kernel.</li>
@@ -69,20 +69,23 @@
 
     <!-- ================================================================ Zig ============== -->
     <section id="pane-zig" role="tabpanel" aria-labelledby="tab-zig">
-      <h2 style="font-size:1.35rem">1 · The prompt</h2>
+      <h2 class="step-h"><span class="n" aria-hidden="true">1</span>The prompt</h2>
       <p class="small mute">The zero-shot prompt from BENCHMARK.md. The benchmark gives the model this sentence and the whole of BENCHMARK.md.</p>
+      <div class="doc">
+      <div class="doc-k">Zero-shot prompt · BENCHMARK.md</div>
       <div class="prompt" id="zigPrompt"><!-- @PROMPT --></div>
-      <div class="row-btns">
+      <div class="row-btns doc-foot">
         <button class="primary" type="button" id="copyZigFull">Copy prompt + BENCHMARK.md</button>
         <button type="button" id="copyZigPrompt">Copy the prompt only</button>
         <a class="small" href="https://github.com/gke0op/argus/blob/main/BENCHMARK.md">Read BENCHMARK.md</a>
       </div>
+      </div>
 
-      <h2 style="font-size:1.35rem;margin-top:2rem">2 · Grade a Zig theme</h2>
-      <div class="note small"><b>Zig is compiled ahead of time, not in this page.</b> Compiling Zig 0.17 here would need the compiler itself built to WebAssembly; without LLVM in it, it cannot produce the ReleaseFast code the harness times. So a pasted <code>.zig</code> is graded natively (a pull request runs the harness on GitHub Actions and posts the verdict, or run it yourself), and a <code>.wasm</code> built from it runs through all 8 gates right here. One difference to know: on wasm32 a <code>usize</code> is 32 bits, so the leaderboard’s most common compile error (<code>expected type 'u32', found 'usize'</code>) does not fire in a wasm build. The native harness’s Gate 1 is the verdict.</div>
+      <h2 class="step-h"><span class="n" aria-hidden="true">2</span>Grade a Zig theme</h2>
+      <div class="note info small"><b>Zig is compiled ahead of time, not in this page.</b> Compiling Zig 0.17 here would need the compiler itself built to WebAssembly; without LLVM in it, it cannot produce the ReleaseFast code the harness times. So a pasted <code>.zig</code> is graded natively (a pull request runs the harness on GitHub Actions and posts the verdict, or run it yourself), and a <code>.wasm</code> built from it runs through all 8 gates right here. One difference to know: on wasm32 a <code>usize</code> is 32 bits, so the leaderboard’s most common compile error (<code>expected type 'u32', found 'usize'</code>) does not fire in a wasm build. The native harness’s Gate 1 is the verdict.</div>
 
-      <h3>Try the gates on a prebuilt theme</h3>
-      <div class="row-btns">
+      <h3 class="sub-h">Try the gates on a prebuilt theme</h3>
+      <div class="row-btns toolbar">
         <select id="zigBuild" aria-label="Prebuilt theme">
           <option value="Bench_Skeleton">BENCHMARK.md §3 skeleton (passes)</option>
           <option value="Gate0_Control">Gate0_Control (passes)</option>
@@ -101,10 +104,10 @@
         <a class="small" id="buildSrc" href="zig/Bench_Skeleton.zig">its source</a>
       </div>
 
-      <h3>Your theme</h3>
-      <div class="row-btns" style="margin:0 0 0.6rem">
+      <h3 class="sub-h">Your theme</h3>
+      <div class="row-btns namerow">
         <label class="small mute" for="zigName">File name</label>
-        <input id="zigName" value="Model_Theme" spellcheck="false" style="font:13px var(--mono);background:#08090c;color:var(--fg);border:1px solid var(--line2);border-radius:8px;padding:0.5em 0.6em;width:15rem">
+        <input id="zigName" class="field" value="Model_Theme" spellcheck="false">
         <span class="small mute">.zig, saved as <code>bench/submissions/<span id="zigNameEcho">Model_Theme</span>.zig</code></span>
       </div>
       <textarea id="zigSrc" spellcheck="false" placeholder="Paste the model's .zig answer here." aria-label="Zig theme source"></textarea>
@@ -113,20 +116,20 @@
         <button type="button" id="zigCmd">Copy the local commands</button>
         <span class="small mute" id="zigHint">Opens GitHub’s new-file page with the name filled in and the source on your clipboard; the bench workflow runs the native harness on the pull request and comments the verdict.</span>
       </div>
-      <div class="drop" id="drop" style="margin-top:1rem">
+      <div class="drop" id="drop">
         Built it already? <code>make web-wasm THEME=themes/<span class="nameEcho">Model_Theme</span>.zig</code> writes <code>web/wasm/build/<span class="nameEcho">Model_Theme</span>.st.wasm</code> (one thread) and <code>.mt.wasm</code> (threads).
-        <div class="row-btns" style="justify-content:center"><label class="btn" for="wasmFile">Upload the .wasm</label><input type="file" id="wasmFile" accept=".wasm,application/wasm" hidden></div>
+        <div class="row-btns drop-btns"><label class="btn" for="wasmFile">Upload the .wasm</label><input type="file" id="wasmFile" accept=".wasm,application/wasm" hidden></div>
         <div class="small">or drop it here; it runs through the 8 gates in this page.</div>
       </div>
 
       <div class="result" id="zigResult">
         <div class="verdict"><span class="badge run" id="zigBadge">RUNNING</span><span id="zigTitle"></span><span class="progress" id="zigPhase"></span></div>
-        <div class="tablewrap"><table class="gates" id="zigGates"><tbody></tbody></table></div>
+        <div class="gatewrap"><table class="gates" id="zigGates"><tbody></tbody></table></div>
         <div class="views">
           <figure><canvas id="zigFinal" width="1920" height="1200"></canvas><figcaption>Frame 120 at 1920×1200, as the gates saw it.</figcaption></figure>
-          <figure><div class="stage" id="zigLive" style="position:relative;aspect-ratio:16/10;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#000"></div><figcaption id="zigLiveCap">Live, after the gates.</figcaption></figure>
+          <figure><div class="stage live" id="zigLive"></div><figcaption id="zigLiveCap">Live, after the gates.</figcaption></figure>
         </div>
-        <h3>Harness report</h3>
+        <h3 class="sub-h">Harness report</h3>
         <pre class="report" id="zigReport"></pre>
         <p class="small mute">Gate 8 here times this browser’s wasm on this machine; leaderboard times come from the native harness on an M3. Near the 16.7 ms line, judge on a quiet machine.</p>
       </div>
@@ -134,17 +137,20 @@
 
     <!-- ================================================================ WGSL ============= -->
     <section id="pane-wgsl" role="tabpanel" aria-labelledby="tab-wgsl" hidden>
-      <h2 style="font-size:1.35rem">1 · The prompt</h2>
+      <h2 class="step-h"><span class="n" aria-hidden="true">1</span>The prompt</h2>
       <p class="small mute">The GPU track, written for this page (BENCHMARK.md’s own prompt is the Zig one). The copy includes the WGSL contract from web/README.md, the prelude, and Tutorial_Tides.wgsl as a worked example.</p>
+      <div class="doc">
+      <div class="doc-k">GPU track prompt · written for this page</div>
       <div class="prompt" id="wgslPrompt">Write a single WGSL theme for Argus’s WebGPU runtime, following the contract below (the prelude is prepended to your file). The entry point is `@compute @workgroup_size(8, 8) fn argus_draw(@builtin(global_invocation_id) id: vec3u)`, writing every pixel with `textureStore(argus_out, gid, vec4f(colour, 1.0))`; add `argus_init` / `argus_step` and a `// @argus state WxH` line if your simulation needs persistent state. It must pass the Argus Metal harness’s checks, as run in the browser: compiles, runs at 320x200, no NaN or Inf, more than 100 distinct pixels, at least 2,000 pixels visibly animated between frame 1 and frame 120 (dt = 1/30 s), and under 8,333 µs average GPU time per frame at 1920x1200. Simulate a real physical or mathematical system. Output ONLY the complete .wgsl source file.</div>
-      <div class="row-btns">
+      <div class="row-btns doc-foot">
         <button class="primary" type="button" id="copyWgslFull">Copy prompt + contract + prelude</button>
         <button type="button" id="copyWgslPrompt">Copy the prompt only</button>
         <a class="small" href="../web/prelude.wgsl">prelude.wgsl</a>
       </div>
+      </div>
 
-      <h2 style="font-size:1.35rem;margin-top:2rem">2 · Paste and run</h2>
-      <div class="row-btns" style="margin:0 0 0.6rem">
+      <h2 class="step-h"><span class="n" aria-hidden="true">2</span>Paste and run</h2>
+      <div class="row-btns namerow">
         <select id="wgslExample" aria-label="Load an example">
           <option value="">Load an example…</option>
           <option value="../web/themes/Tutorial_Tides.wgsl">Tutorial_Tides.wgsl (passes)</option>
@@ -155,7 +161,7 @@
           <option value="fixtures/Fixture_Budget.wgsl">Fixture_Budget (fails the GPU budget)</option>
         </select>
         <label class="small mute" for="wgslName">Name</label>
-        <input id="wgslName" value="Model_Theme" spellcheck="false" style="font:13px var(--mono);background:#08090c;color:var(--fg);border:1px solid var(--line2);border-radius:8px;padding:0.5em 0.6em;width:13rem">
+        <input id="wgslName" class="field" value="Model_Theme" spellcheck="false">
       </div>
       <textarea id="wgslSrc" spellcheck="false" placeholder="Paste the model's .wgsl answer here." aria-label="WGSL theme source"></textarea>
       <div class="row-btns">
@@ -165,12 +171,12 @@
 
       <div class="result" id="wgslResult">
         <div class="verdict"><span class="badge run" id="wgslBadge">RUNNING</span><span id="wgslTitle"></span><span class="progress" id="wgslPhase"></span></div>
-        <div class="tablewrap"><table class="gates" id="wgslGates"><tbody></tbody></table></div>
+        <div class="gatewrap"><table class="gates" id="wgslGates"><tbody></tbody></table></div>
         <div class="views">
           <figure><canvas id="wgslFinal" width="1920" height="1200"></canvas><figcaption>Frame 120 at 1920×1200, as the checks saw it.</figcaption></figure>
-          <figure><div class="stage" id="wgslLive" style="position:relative;aspect-ratio:16/10;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#000"></div><figcaption id="wgslLiveCap">Live, after the checks.</figcaption></figure>
+          <figure><div class="stage live" id="wgslLive"></div><figcaption id="wgslLiveCap">Live, after the checks.</figcaption></figure>
         </div>
-        <h3>Harness report</h3>
+        <h3 class="sub-h">Harness report</h3>
         <pre class="report" id="wgslReport"></pre>
         <p class="small mute">These are the Metal harness’s checks (<code>make harness THEME=themes/X.metal</code>), run on WebGPU: compilation, the 320×200 watchdog, NaN/Inf, pixel variance, temporal motion and the 8,333 µs GPU budget. The Metal harness does not gate alpha, so the alpha range is shown, not gated. Chrome rounds GPU timestamps to 100 µs.</p>
       </div>
@@ -178,12 +184,14 @@
   </div>
 </main>
 
-<footer>
+<footer class="foot">
   <div class="wrap">
-    <span>Argus · MIT licence</span>
+    <div class="foot-brand"><span class="brand">Argus</span><span>MIT licence</span></div>
+    <nav aria-label="Footer">
     <a href="../">Themes</a>
     <a href="https://github.com/gke0op/argus">GitHub</a>
     <a href="https://github.com/gke0op/argus/blob/main/CONTRIBUTING.md">Contributing</a>
+    </nav>
   </div>
 </footer>
 <script type="module" src="../assets/bench.js"></script>

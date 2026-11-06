@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-dir="a">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -76,14 +76,15 @@
 }
 </script>
 </head>
-<body>
+<body class="home">
 <a class="skip" href="#main">Skip to content</a>
 <header class="top">
-  <a class="brand" href="./">ARGUS</a>
+  <a class="brand" href="./" aria-label="Argus, home">Argus</a>
   <nav aria-label="Site">
-    <a href="bench/">Run the bench</a>
     <a class="opt" href="#install">Install</a>
+    <a class="opt" href="#bench">Leaderboard</a>
     <a class="opt" href="#how">How it works</a>
+    <a href="bench/">Run the bench</a>
     <a href="https://github.com/gke0op/argus">GitHub</a>
   </nav>
 </header>
@@ -92,25 +93,30 @@
   <div class="stage" id="stage">
     <img class="poster" id="poster" src="assets/cygnus-a.jpg" alt="" width="1280" height="720" fetchpriority="high">
   </div>
-  <div class="shade"></div>
-  <div class="copy">
-    <h1>Argus</h1>
-    <p class="lede">Live wallpapers for macOS that you write yourself: one Zig or Metal file per Desktop Space, running on the bare metal. What you see here is the theme’s own code, live in this page.</p>
+  <div class="scrim" aria-hidden="true"></div>
+  <div class="frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
+  <div class="hero-copy">
+    <h1 class="wordmark">Argus</h1>
+    <p class="lede">Live wallpapers for macOS that you write yourself: one Zig or Metal file per Desktop Space, running on the bare metal.</p>
+    <p class="lede-2">What you see here is the theme’s own code, live in this page.</p>
     <div class="ctas">
       <a class="btn primary" href="#install">Install on macOS</a>
-      <a class="btn" href="bench/">Run ARGUS-BENCH</a>
+      <a class="btn quiet" href="bench/">Run ARGUS-BENCH <span aria-hidden="true">→</span></a>
     </div>
   </div>
+
   <aside class="tele" id="tele" aria-label="Telemetry" aria-live="off">
-    <div class="sum" id="teleSum"></div>
+    <div class="tele-head"><span class="dot" aria-hidden="true"></span><span class="sum" id="teleSum"></span><span class="tele-title">This machine</span></div>
     <div class="body" id="teleBody"><div class="row"><span class="k">engine</span><span class="v">starting…</span></div></div>
     <div class="tools">
       <button type="button" id="bareBtn" title="Hide the page over the theme (h)">hide UI</button>
       <button type="button" id="resBtn" title="Render at native resolution or half">native res</button>
-      <button type="button" id="teleBtn" title="Fold the readout">–</button>
+      <button type="button" id="teleBtn" title="Fold the readout" aria-label="Fold the readout">–</button>
     </div>
   </aside>
-  <div class="picker-wrap">
+
+  <div class="dock">
     <p class="caption" id="caption" aria-live="polite"></p>
     <div class="picker" id="picker" role="group" aria-label="Choose a theme"></div>
   </div>
@@ -118,17 +124,17 @@
 
 <main id="main">
   <section class="band" id="what">
-    <div class="wrap grid two">
-      <div>
+    <div class="wrap split">
+      <div class="prose">
         <div class="eyebrow">What it is</div>
         <h2>Every Desktop Space gets its own live theme</h2>
         <p>Swipe from one Space to the next and you swipe from a quasar to a night beach to a marbling bath. A theme is a single source file: a <b>Metal kernel</b> that answers “what colour is this pixel?” on the GPU, or a <b>Zig file</b> that runs on the CPU through a tiny SDK.</p>
         <p>Drop a file on a Space from the menu bar and Argus compiles it on the spot; save an edit and it reloads within a second. There is no engine to learn and no asset pipeline: you get a pixel grid, a clock and a frame budget. Argus runs at 30 FPS by default, draws only the Spaces you can see, and draws nothing while a full-screen app, the lock screen or a sleeping display covers them.</p>
-        <p class="mute small">Themes are native code: a Zig theme becomes a dynamic library inside Argus. Only run themes you trust.</p>
+        <p class="aside">Themes are native code: a Zig theme becomes a dynamic library inside Argus. Only run themes you trust.</p>
       </div>
       <a class="video" href="https://youtu.be/ib9DmonvtZE" rel="noopener">
         <img src="assets/cygnus-a.jpg" alt="Cygnus A: a black hole's shadow with its lensed accretion disk" width="1280" height="720" loading="lazy">
-        <span class="play">▶ Cygnus A in 4K at 60 FPS on YouTube</span>
+        <span class="play"><span class="tri" aria-hidden="true"></span><span>Cygnus A in 4K at 60 FPS <span class="on">on YouTube</span></span></span>
       </a>
     </div>
   </section>
@@ -137,24 +143,24 @@
     <div class="wrap">
       <div class="eyebrow">Install</div>
       <h2>One line on macOS, from source on Linux</h2>
-      <div class="grid two">
-        <div class="card">
-          <h3>macOS (Apple silicon)</h3>
-          <div class="code"><pre id="macCmd">curl -fsSL https://raw.githubusercontent.com/gke0op/argus/main/install.sh | sh</pre><button class="copy" type="button" data-copy="macCmd">Copy</button></div>
-          <p class="small" style="margin-top:0.9rem">It downloads the latest release, checks it against the release’s SHA-256, puts it in <code>~/Applications/Argus</code> and opens it. Run it again to update. No Zig needed: every theme ships precompiled. The app isn’t notarized; the script is short, <a href="https://github.com/gke0op/argus/blob/main/install.sh">read it</a> first if you like, or follow <a href="https://github.com/gke0op/argus/blob/main/docs/INSTALL.md">the zip steps</a>.</p>
-          <p class="small mute">Then click the eye in the menu bar and drop a theme on any Space.</p>
+      <div class="installs">
+        <div class="card install mac">
+          <div class="card-head"><h3>macOS</h3><span class="tag">Apple silicon</span></div>
+          <div class="code"><pre id="macCmd">curl -fsSL https://raw.githubusercontent.com/<wbr>gke0op/argus/main/<wbr>install.sh | sh</pre><button class="copy" type="button" data-copy="macCmd">Copy</button></div>
+          <p>It downloads the latest release, checks it against the release’s SHA-256, puts it in <code>~/Applications/Argus</code> and opens it. Run it again to update. No Zig needed: every theme ships precompiled. The app isn’t notarized; the script is short, <a href="https://github.com/gke0op/argus/blob/main/install.sh">read it</a> first if you like, or follow <a href="https://github.com/gke0op/argus/blob/main/docs/INSTALL.md">the zip steps</a>.</p>
+          <p class="then">Then click the eye in the menu bar and drop a theme on any Space.</p>
         </div>
-        <div class="card">
-          <h3>Linux (experimental, X11)</h3>
+        <div class="card install linux">
+          <div class="card-head"><h3>Linux</h3><span class="tag">experimental · X11</span></div>
           <div class="code"><pre id="linuxCmd">sudo apt install git make curl
 git clone https://github.com/gke0op/argus.git &amp;&amp; cd argus
 make zig                              <span class="c"># the pinned Zig 0.17.0, into .toolchain/</span>
 make linux THEME=themes/Cygnus_A.zig  <span class="c"># or THEME=themes/cpu/Tutorial_Tides.zig</span>
 ./argus-linux                         <span class="c"># Ctrl+C or kill to stop</span></pre><button class="copy" type="button" data-copy="linuxCmd">Copy</button></div>
-          <p class="small" style="margin-top:0.9rem">A single static binary, pure Zig with no libc and no X libraries, that draws one theme (chosen at build time) as your X11 desktop background. Tested on Ubuntu 24.04: arm64 with Xorg/Xfce and GNOME on Wayland through Xwayland; x86_64 (emulated) with Xorg/Xfce. Zig themes run as they are; Metal themes need a CPU port first, and so far one exists (Tutorial Tides).</p>
+          <p>A single static binary, pure Zig with no libc and no X libraries, that draws one theme (chosen at build time) as your X11 desktop background. Tested on Ubuntu 24.04: arm64 with Xorg/Xfce and GNOME on Wayland through Xwayland; x86_64 (emulated) with Xorg/Xfce. Zig themes run as they are; Metal themes need a CPU port first, and so far one exists (Tutorial Tides).</p>
         </div>
       </div>
-      <p style="margin-top:1.2rem"><a class="btn" href="https://github.com/gke0op/argus">github.com/gke0op/argus</a> <span class="mute small">&nbsp;MIT licence. Build from source on a Mac: <code>make zig &amp;&amp; make run</code>.</span></p>
+      <p class="repo"><a class="btn" href="https://github.com/gke0op/argus"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg>github.com/gke0op/argus</a> <span>MIT licence. Build from source on a Mac: <code>make zig &amp;&amp; make run</code>.</span></p>
     </div>
   </section>
 
@@ -162,18 +168,38 @@ make linux THEME=themes/Cygnus_A.zig  <span class="c"># or THEME=themes/cpu/Tuto
     <div class="wrap">
       <div class="eyebrow">ARGUS-BENCH</div>
       <h2>A benchmark where the answer is a wallpaper</h2>
-      <div class="narrow">
-        <p>Hand a model <a href="https://github.com/gke0op/argus/blob/main/BENCHMARK.md">BENCHMARK.md</a> and one sentence. It writes a single Zig 0.17.0 file that simulates something real, and the harness grades it with eight gates: it compiles, makes one allocation, survives a 320×200 watchdog, respects the row stride, writes opaque pixels, produces no NaN, moves visibly, and stays under 16.7 ms a frame on one CPU core. A submission that passes is, at the same moment, a wallpaper you can drop on a Space.</p>
-        <p>Six models, both modes (zero-shot in a chat, agentic with a shell), 34 runs, every theme rescored by the harness on one machine. 31 pass all eight gates; the three failures are zero-shot compile errors. Click a column to sort.</p>
+      <div class="bench-intro">
+        <div class="prose">
+          <p>Hand a model <a href="https://github.com/gke0op/argus/blob/main/BENCHMARK.md">BENCHMARK.md</a> and one sentence. It writes a single Zig 0.17.0 file that simulates something real, and the harness grades it with eight gates. A submission that passes is, at the same moment, a wallpaper you can drop on a Space.</p>
+        </div>
+        <ol class="gatelist" aria-label="The eight gates">
+          <li><span class="n">1</span>it compiles</li>
+          <li><span class="n">2</span>makes one allocation</li>
+          <li><span class="n">3</span>survives a 320×200 watchdog</li>
+          <li><span class="n">4</span>respects the row stride</li>
+          <li><span class="n">5</span>writes opaque pixels</li>
+          <li><span class="n">6</span>produces no NaN</li>
+          <li><span class="n">7</span>moves visibly</li>
+          <li><span class="n">8</span>stays under 16.7 ms a frame on one CPU core</li>
+        </ol>
       </div>
-      <div class="tablewrap" style="margin-top:1rem"><!-- @LEADERBOARD --></div>
-      <ul class="small mute" style="margin-top:0.9rem; padding-left:1.1rem">
+      <dl class="figures">
+        <div><dt>models</dt><dd>6</dd><dd class="sub">both modes: zero-shot in a chat, agentic with a shell</dd></div>
+        <div><dt>runs</dt><dd>34</dd><dd class="sub">every theme rescored by the harness on one machine</dd></div>
+        <div><dt>pass all eight gates</dt><dd>31</dd><dd class="sub">the three failures are zero-shot compile errors</dd></div>
+      </dl>
+      <div class="lb-head"><h3>Cross-model leaderboard <span>2026-10-19</span></h3><span class="hint">Click a column to sort.</span></div>
+      <div class="tablewrap" tabindex="0" role="region" aria-label="Leaderboard, scrolls sideways"><!-- @LEADERBOARD --></div>
+      <ul class="footnotes">
         <li><b>Argon is grading itself:</b> Argon (Google Gemini) wrote ARGUS-BENCH, the first Argus engine and the theme SDK, so its rows are scored on its own benchmark.</li>
         <li>† Argon’s agentic mode has 1 run, not 3: the owner’s Gemini quota ran short, and the cap was set before any of its results were known.</li>
         <li>* Haiku’s two passing zero-shot themes are mostly the BENCHMARK.md skeleton (59–61% of their lines); neither simulates a system. The gates check that a theme runs, not what it simulates.</li>
         <li>Frame times vary up to 9× within one model and mode, more than between the medians, so this table cannot rank the models on speed. The machine was loaded throughout; treat every figure as roughly 30% slow. Methods and every run: <a href="https://github.com/gke0op/argus/blob/main/docs/notes/bench-leaderboard.md">the leaderboard note</a>.</li>
       </ul>
-      <p style="margin-top:1.4rem"><a class="btn primary" href="bench/">Run ARGUS-BENCH in your browser</a> <span class="small mute">&nbsp;Copy the prompt, paste the model’s answer, watch it run and get graded.</span></p>
+      <div class="cta-band">
+        <div><h3>Run ARGUS-BENCH in your browser</h3><p>Copy the prompt, paste the model’s answer, watch it run and get graded.</p></div>
+        <a class="btn primary" href="bench/">Open the bench <span aria-hidden="true">→</span></a>
+      </div>
     </div>
   </section>
 
@@ -183,40 +209,47 @@ make linux THEME=themes/Cygnus_A.zig  <span class="c"># or THEME=themes/cpu/Tuto
       <h2>One file per theme, three ways to run it here</h2>
       <div class="grid three">
         <div class="card">
+          <div class="card-k">.metal · .zig</div>
           <h3>Themes are single files</h3>
           <p>A <code>.metal</code> theme is a compute kernel over every pixel, with an optional state texture that persists between frames. A <code>.zig</code> theme is a <code>State</code> with <code>init</code>, <code>step</code> and <code>draw</code>: one allocation at init, none after. The Mac app compiles either on drop; the headless harness checks and times it.</p>
         </div>
         <div class="card">
+          <div class="card-k">GPU</div>
           <h3>Metal → WGSL on WebGPU</h3>
           <p>Each of the nine Metal themes has a one-to-one WGSL translation, run with the app’s frame semantics (30 Hz logic tick, state textures, data files). Against the Metal harness’s frame 120 at 1920×1200, every pixel is within 3/255 of Metal’s, and six of the nine within 1/255.</p>
         </div>
         <div class="card">
+          <div class="card-k">CPU</div>
           <h3>Zig → wasm on Workers</h3>
           <p>Zig themes compile unchanged to wasm32 with SIMD128 (Tides is 19 KB). Kernel themes split rows across Worker threads on shared memory. The 8 gates are the native harness’s own code compiled into the same module, and Tides’ final frame is bit-identical to the native one.</p>
         </div>
       </div>
-      <div class="grid two" style="margin-top:1.1rem">
-        <div class="card">
-          <h3>Cygnus A: Kerr light paths, checked</h3>
+      <div class="grid two">
+        <div class="card feature">
+          <div class="card-k">Cygnus A</div>
+          <h3>Kerr light paths, checked</h3>
           <p>The black hole’s Metal kernels are ported to WGSL kernel for kernel, and the theme’s own Zig (tables, exposure, each frame’s step) runs as a 79 KB wasm module. On the same frame as the app, 99.996% of pixels are identical and none differs by more than 2 levels. The traced edge of the shadow matches Bardeen’s analytic curve to 1.79e-5 M (worst of 766 points).</p>
-          <p class="small mute">In the app, every checked physics claim about Cygnus A is a record in a test ledger (claim, reference, measured value, bounds, the command that produced it): 49 claims, all passing. <a href="https://github.com/gke0op/argus/blob/main/docs/QUASARS.md">What is computed and what is chosen</a>.</p>
+          <p class="aside">In the app, every checked physics claim about Cygnus A is a record in a test ledger (claim, reference, measured value, bounds, the command that produced it): 49 claims, all passing. <a href="https://github.com/gke0op/argus/blob/main/docs/QUASARS.md">What is computed and what is chosen</a>.</p>
         </div>
         <div class="card">
+          <div class="card-k">Limits</div>
           <h3>What this page can’t match yet</h3>
           <p>At full Retina size and 120 Hz, Lizard Island, Roulette Chrome and Night Tide come close to the 8.33 ms frame budget and drop some frames; their simulations stay on the 30 Hz tick, so motion is unaffected. Tides in wasm takes 17–18 ms a frame in Chrome against 15.3 ms natively, so in a browser it fails Gate 8 only. Measured in Chrome 157 on an Apple M3; Safari and Firefox are not tested yet.</p>
-          <p class="small mute">The readout in the corner shows this machine’s numbers: GPU and CPU milliseconds per frame, the wasm module’s size and its threads.</p>
+          <p class="aside">The readout in the corner shows this machine’s numbers: GPU and CPU milliseconds per frame, the wasm module’s size and its threads.</p>
         </div>
       </div>
     </div>
   </section>
 </main>
 
-<footer>
+<footer class="foot">
   <div class="wrap">
-    <span>Argus · MIT licence · made by Operator with AI systems; <a href="https://github.com/gke0op/argus/blob/main/NOTICE.md">NOTICE.md</a> credits each piece</span>
-    <a href="https://github.com/gke0op/argus">GitHub</a>
-    <a href="bench/">ARGUS-BENCH</a>
-    <a href="https://youtu.be/ib9DmonvtZE">Video</a>
+    <div class="foot-brand"><span class="brand">Argus</span><span>MIT licence · made by Operator with AI systems; <a href="https://github.com/gke0op/argus/blob/main/NOTICE.md">NOTICE.md</a> credits each piece</span></div>
+    <nav aria-label="Footer">
+      <a href="https://github.com/gke0op/argus">GitHub</a>
+      <a href="bench/">ARGUS-BENCH</a>
+      <a href="https://youtu.be/ib9DmonvtZE">Video</a>
+    </nav>
   </div>
 </footer>
 <script type="module" src="assets/home.js"></script>
