@@ -1,0 +1,76 @@
+name: Bench
+
+# ARGUS-BENCH on a pull request: every Zig theme added or changed under bench/submissions/ goes
+# through the native harness (make harness, src/theme_harness.zig), the 8 gates as BENCHMARK.md
+# states them. The site's "Submit as a pull request" button puts a model's answer there.
+#
+# This job runs the submission's code, so it has no write access and no secrets. It uploads the
+# reports as an artifact; bench-comment.yml (workflow_run) posts them on the pull request
+# without checking out or running anything from it.
+
+on:
+  pull_request:
+    paths:
+      - 'bench/submissions/**.zig'
+
+permissions:
+  contents: read
+
+jobs:
+  harness:
+    # Apple silicon, as the harness and the leaderboard: the theme is built for aarch64-macos.
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache Zig 0.17.0
+        uses: actions/cache@v4
+        with:
+          path: .toolchain
+          key: zig-0.17.0-aarch64-macos-${{ hashFiles('tools/get-zig.sh') }}
+
+      - name: Install the pinned Zig (tools/get-zig.sh, SHA-256 checked)
+        run: tools/get-zig.sh
+
+      - name: Run the harness on each submission
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -u
+          mkdir -p out
+          echo "$PR_NUMBER" > out/pr.txt
+          echo "$HEAD_SHA" > out/head.txt
+          git diff --name-only --diff-filter=AM "$BASE_SHA" HEAD -- 'bench/submissions/*.zig' > out/files.txt
+          status=0
+          while read -r f; do
+            n=$(basename "$f" .zig)
+            # A theme imports argus_theme_sdk.zig from its own folder, as in themes/.
+            case "$n" in (*[!A-Za-z0-9_]*|'') echo "skipping $f: the name must be letters, digits and _" >> out/skipped.txt; continue ;; esac
+            cp "$f" "themes/$n.zig"
+            # The harness has no time limit of its own; a theme that hangs is stopped after 5 minutes.
+            if perl -e 'alarm shift; exec @ARGV' 300 make -s harness THEME="themes/$n.zig" OUT="out/$n.png" > "out/$n.txt" 2>&1; then
+              echo "$n PASS" >> out/verdicts.txt
+            else
+              code=$?
+              [ "$code" = 142 ] && echo "Stopped after 300 s (the theme did not return)." >> "out/$n.txt"
+              echo "$n FAIL" >> out/verdicts.txt
+              status=1
+            fi
+            rm -f "themes/$n.zig"
+          done < out/files.txt
+          cat out/verdicts.txt 2>/dev/null || echo "no submissions"
+          for t in out/*.txt; do echo "::group::$t"; cat "$t"; echo "::endgroup::"; done
+          exit $status
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-reports
+          path: out/
+          retention-days: 30

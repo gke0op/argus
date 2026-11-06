@@ -17,3 +17,4 @@ dist/
 __pycache__/
 .sign_identity
 web/wasm/build/
+_site/

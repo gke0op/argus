@@ -1,0 +1,69 @@
+name: Bench comment
+
+# Posts the Bench workflow's harness reports on the pull request. It runs in the base
+# repository's context with permission to comment, so it never checks out or runs the pull
+# request's code: it only reads the reports artifact, and treats everything in it as untrusted
+# text (the PR number is checked against the run's head commit; reports go inside a code block).
+
+on:
+  workflow_run:
+    workflows: [Bench]
+    types: [completed]
+
+permissions:
+  actions: read
+  pull-requests: write
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download the reports
+        uses: actions/download-artifact@v4
+        with:
+          name: bench-reports
+          path: reports
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Comment the verdicts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -eu
+          pr=$(tr -cd '0-9' < reports/pr.txt | head -c 10)
+          [ -n "$pr" ] || { echo "no PR number"; exit 0; }
+          head=$(gh api "repos/$REPO/pulls/$pr" --jq .head.sha)
+          [ "$head" = "$RUN_HEAD" ] || { echo "PR $pr head $head is not this run's $RUN_HEAD: not commenting"; exit 0; }
+          {
+            echo "<!-- argus-bench -->"
+            echo "### ARGUS-BENCH: native harness"
+            echo
+            if [ -s reports/verdicts.txt ]; then
+              while read -r name verdict; do
+                name=$(printf '%s' "$name" | tr -cd 'A-Za-z0-9_')
+                verdict=$(printf '%s' "$verdict" | tr -cd 'A-Z')
+                echo "**\`$name.zig\`: $verdict**"
+                echo
+                echo '```text'
+                tr -d '`' < "reports/$name.txt" | head -c 6000
+                echo '```'
+                echo
+              done < reports/verdicts.txt
+            else
+              echo "No Zig theme under \`bench/submissions/\` was graded (run: $CONCLUSION)."
+            fi
+            [ -s reports/skipped.txt ] && { tr -d '`' < reports/skipped.txt; echo; }
+            echo "Run on a GitHub-hosted Apple silicon runner (\`macos-15\`), shared and virtualized: Gate 8's frame time there is not the M3 of the leaderboard. [The run]($RUN_URL)."
+          } > body.md
+          old=$(gh api "repos/$REPO/issues/$pr/comments" --paginate --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- argus-bench -->"))) | .id' | tail -1)
+          if [ -n "$old" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$old" -F body=@body.md > /dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$pr/comments" -F body=@body.md > /dev/null
+          fi
