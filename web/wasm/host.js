@@ -164,18 +164,34 @@ export async function create(canvas, opts = {}) {
     while (presented.length && presented[0] < performance.now() - 1000) presented.shift();
   }
 
+  // A frame() that finds the Worker busy is not lost: its time is added to the next step, and
+  // that step starts as soon as the current frame is on the canvas, not at the next frame()
+  // call. So a theme that costs 18 ms runs at ~55 FPS on a 60 Hz display, not at 30.
+  let catchUp = false;
+  function run(dt) {
+    busy = true;
+    return step(dt).catch((e) => { lastError = e; console.error(e); }).finally(() => {
+      busy = false;
+      if (catchUp && !destroyed) {
+        catchUp = false;
+        const next = pendingS;
+        pendingS = 0;
+        run(next);
+      }
+    });
+  }
+
   return {
     name,
     variant: m.variant,
     frame(timeSec, dtSec) {
-      if (destroyed) return;
+      if (destroyed) return null;
       pendingS += Math.max(0, dtSec || 0);
-      if (busy) { dropped++; return null; }
-      busy = true;
+      if (busy) { dropped++; catchUp = true; return null; }
       const dt = pendingS;
       pendingS = 0;
       // Returns a promise that settles when this frame is on the canvas (null if skipped).
-      return step(dt).catch((e) => { lastError = e; console.error(e); }).finally(() => { busy = false; });
+      return run(dt);
     },
     /// Throughput: `frames` frames back to back (step + draw + upload + draw call), no rAF, at
     /// dtSec each. Resolves to { frames, ms, msPerFrame, fps }. (The canvas shows each frame;
