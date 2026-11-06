@@ -59,7 +59,7 @@ p { margin: 0 0 1em; }
 /* ---- buttons ------------------------------------------------------------------------ */
 button, .btn {
   font: 600 0.92rem/1 var(--sans); letter-spacing: -0.005em; color: var(--fg); background: var(--surface-3);
-  border: 1px solid var(--line-2); border-radius: 999px; padding: 0.82em 1.25em; cursor: pointer;
+  border: 1px solid var(--line-2); border-radius: 4px; padding: 0.82em 1.25em; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 0.5em; text-decoration: none; white-space: nowrap;
   transition: background-color 0.18s, border-color 0.18s, color 0.18s, transform 0.18s var(--ease);
   -webkit-tap-highlight-color: transparent; touch-action: manipulation;
@@ -67,8 +67,8 @@ button, .btn {
 button:hover, .btn:hover { border-color: var(--line-3); background: #1d1e23; color: #fff; text-decoration: none; }
 button:active, .btn:active { transform: translateY(1px); }
 button:disabled { opacity: 0.45; cursor: default; }
-.btn.primary, button.primary { background: #fff; color: #000; border-color: #fff; }
-.btn.primary:hover, button.primary:hover { background: var(--acc); border-color: var(--acc); color: #000; }
+.btn.primary, button.primary { background: rgba(255, 255, 255, 0.1); color: #fff; border-color: rgba(255, 255, 255, 0.62); }
+.btn.primary:hover, button.primary:hover { background: rgba(255, 255, 255, 0.16); border-color: #fff; color: #fff; }
 .btn.quiet { background: rgba(0, 0, 0, 0.55); border-color: rgba(255, 255, 255, 0.22); }
 .btn.quiet:hover { background: rgba(0, 0, 0, 0.8); border-color: rgba(255, 255, 255, 0.5); }
 .btn svg.gh { width: 1.05em; height: 1.05em; }
