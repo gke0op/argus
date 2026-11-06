@@ -1,6 +1,6 @@
 // web/zigc/test.mjs — compile and grade themes with zig.wasm in Node, as the bench page does.
 //
-//   node web/zigc/test.mjs [--zig zig.wasm] [--lib DIR | --bundle zig-lib.bin] [--only NAME] [--no-gates] [--pathological]
+//   node web/zigc/test.mjs [--zig zig.wasm] [--lib DIR | --bundle zig-lib.bin] [--only NAME] [--no-gates] [--pathological] [--extra FILE,...]
 //
 // Every tests/fixtures/Gate*.zig, the BENCHMARK.md skeleton, themes/cpu/Tutorial_Tides.zig and
 // the u32/usize trap, one after another in one MemFS (so the second compile onward reuses the
@@ -13,6 +13,8 @@
 // garbage). Each must end in its expected outcome within its time limit, and after each the
 // skeleton must compile and pass. After a compiler crash the test starts a fresh MemFS, as the
 // page starts a fresh Worker.
+// --extra FILE[,FILE...]: also these themes, kept outside the repo (a model's answer someone
+// hit trouble with, say). Each must pass gates 1-7, and the skeleton must pass after it.
 // --no-gates: compile only, and print each module's SHA-256 (to compare two libs' output).
 // Tutorial_Tides (a @Vector kernel theme) is ~150x slower in this build than with LLVM, so its
 // 120 gate frames at 1920x1200 would take ~26 min: it is compiled and run for 3 frames at
@@ -35,6 +37,7 @@ const only = opt('--only', null);
 const bundlePath = opt('--bundle', null);
 const noGates = argv.includes('--no-gates');
 const withPathological = argv.includes('--pathological');
+const extras = (opt('--extra', '') || '').split(',').filter(Boolean);
 
 const { runGates } = await import('../wasm/gates.js');
 const { moduleFromBytes } = await import('../wasm/engine.js');
@@ -68,6 +71,7 @@ const cases = [
   ['Trap_U32_Usize', trap, expectOf(1)],
   ['Tutorial_Tides', readFileSync(join(ROOT, 'themes/cpu/Tutorial_Tides.zig'), 'utf8'), expectOf(0)],
   ...(withPathological ? pathologicalCases(gate0).filter((c) => !c[4]?.browserOnly).map(([n, src, e, limitS]) => [n, src, e, limitS, true]) : []),
+  ...extras.map((f) => [f.replace(/^.*\//, '').replace(/\.zig$/, '').replace(/[^A-Za-z0-9_]/g, '_'), readFileSync(f, 'utf8'), { pass: true }, 120, true]),
 ].filter(([n]) => !only || n === only);
 
 const zig = await WebAssembly.compile(readFileSync(zigPath));

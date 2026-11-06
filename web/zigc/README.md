@@ -157,5 +157,5 @@ skipped: Gate 1's type-check goes from 1.2 s to under 0.1 s in Node.
 | `build.sh` | `web/zigc/build/`: `zig.wasm.gz`, `zig-lib.bin.gz`, support sources, `manifest.json` |
 | `node.mjs` | run zig.wasm in Node through `wasi.js` with any arguments |
 | `test.mjs` | the page's compile and gates on the fixtures and `cases.js`, in Node (`make web-zigc-test`) |
-| `cases.js` | the pathological inputs |
+| `cases.js` | the pathological inputs; `test.mjs --extra FILE` and `verify.html?extra=URL` add themes kept outside the repo (each must pass gates 1-7, then the skeleton) |
 | `verify.html`, `verify.mjs` | drive the real bench page in a browser and collect the verdicts |
