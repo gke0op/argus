@@ -81,7 +81,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   transition: background-color 0.25s;
 }
 .top > * { pointer-events: auto; }
-.brand { font: 700 0.95rem/1 var(--mono); letter-spacing: 0.22em; text-transform: uppercase; color: var(--fg); text-decoration: none; }
+.brand { font: 800 1rem/1 var(--mono); -webkit-text-stroke: 0.35px currentColor; letter-spacing: 0.22em; text-transform: uppercase; color: var(--fg); text-decoration: none; }
 .brand:hover { color: #fff; }
 .top nav { margin-left: auto; display: flex; gap: 0.25rem; font-size: 0.9rem; }
 .top nav a { color: rgba(255, 255, 255, 0.86); text-decoration: none; padding: 0.45em 0.6em; border-radius: 8px; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.7); }
