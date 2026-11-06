@@ -98,7 +98,7 @@ and web alike by 5-10x, are not used):
 |---|---|---|
 | trace 1920x1080 | 0.82-0.85 s GPU (0.90 s wall incl. meter) | 1.91 s |
 | trace 2048x1536 (the browser pane's native canvas, 1024x768 at 2x) | 1.48-1.58 s GPU (1.61 s wall) | 2.74 s |
-| trace 3024x1964 (M3 MacBook Air native) | 2.55-2.60 s GPU (2.65 s wall) | 3.88 s |
+| trace 3024x1964 (this Mac's built-in display) | 2.55-2.60 s GPU (2.65 s wall) | 3.88 s |
 | shade 1920x1080 | 0.66-0.78 ms/frame | 0.62 ms unpaced, 0.79 ms paced at 30 FPS |
 | shade 2048x1536 | 0.69-1.28 ms/frame | 1.76 ms unpaced, 1.67 ms paced |
 | shade 3024x1964 | 1.33-1.61 ms/frame | 1.67 ms unpaced, 2.27 ms paced |
