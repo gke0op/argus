@@ -168,6 +168,7 @@ Native `make harness` on Tides at the same time: 15.3 ms on 8 threads. Module si
 | `coi-serviceworker.js` | COOP/COEP from a service worker, for hosts without headers |
 | `serve.mjs` | local static server with (or `--no-isolation`, without) the headers |
 | `index.html` | dev page: live view and HUD, gates for one build or all, native comparison |
+| `blit-test.html` | the canvas shows the frame the theme drew: every pixel at 1:1 (WebGL2 and 2D), the whole frame the right way up when scaled |
 
 The page reads `?theme=`, `?threads=`, `?scale=`, `?blit=` and `?gates=1|all`.
 

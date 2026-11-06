@@ -19,19 +19,32 @@ const SDK_DT_PER_S = 0.008 * 30;
 // After a long pause (a hidden tab) step at most this much at once.
 const MAX_STEP_S = 0.25;
 
+// One triangle over the whole canvas: p runs 0..2, so the canvas is p in [0, 1] and uv = p
+// there (uv = p / 2 showed only a quarter of the frame, magnified 2x).
 const VS = `#version 300 es
 out vec2 uv;
 void main() {
   vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-  uv = vec2(p.x * 0.5, 1.0 - p.y * 0.5); // theme row 0 is the top
+  uv = vec2(p.x, 1.0 - p.y); // theme row 0 is the top
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`;
+// A frame the canvas's size is copied texel for texel (texelFetch), so the canvas shows exactly
+// what the theme drew; a smaller one (renderScale < 1) is scaled up with linear filtering.
 const FS = `#version 300 es
-precision mediump float;
+precision highp float;
 in vec2 uv;
-uniform sampler2D tex;
+uniform highp sampler2D tex;
+uniform ivec2 outSize;
 out vec4 color;
-void main() { color = vec4(texture(tex, uv).rgb, 1.0); }`;
+void main() {
+  ivec2 ts = textureSize(tex, 0);
+  if (ts == outSize) {
+    ivec2 c = ivec2(gl_FragCoord.xy);
+    color = vec4(texelFetch(tex, ivec2(c.x, ts.y - 1 - c.y), 0).rgb, 1.0);
+  } else {
+    color = vec4(texture(tex, uv).rgb, 1.0);
+  }
+}`;
 
 function makeGL(canvas) {
   const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: false, desynchronized: true });
@@ -56,7 +69,7 @@ function makeGL(canvas) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
   gl.useProgram(prog);
-  return { gl, tex, w: 0, h: 0, sharedOk: true, staging: null };
+  return { gl, tex, outSize: gl.getUniformLocation(prog, 'outSize'), w: 0, h: 0, sharedOk: true, staging: null };
 }
 
 /// Show `n` RGBA pixels (rw x rh) from `src` (a Uint8Array, maybe over shared memory).
@@ -80,6 +93,7 @@ function blitGL(g, canvas, src, rw, rh) {
     return blitGL(g, canvas, src, rw, rh);
   }
   gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.uniform2i(g.outSize, canvas.width, canvas.height);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
@@ -112,6 +126,9 @@ class Avg {
 /// ('auto' | number of Workers; 1 = single-threaded module), blit ('auto' | 'webgl2' | '2d'),
 /// renderScale (1 = the canvas's full size; 0.5 = half each way, upscaled), scale (the theme's
 /// `scale`, default devicePixelRatio).
+/// For web/wasm/blit-test.html: the two blits on their own.
+export const _blit = { makeGL, blitGL, make2D, blit2D };
+
 export async function create(canvas, opts = {}) {
   const name = opts.theme || 'Tutorial_Tides';
   const base = opts.base || new URL('./build/', import.meta.url);
