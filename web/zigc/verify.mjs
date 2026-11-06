@@ -34,7 +34,8 @@ const server = http.createServer((req, res) => {
       const file = path.join(args.out, `zigc_${name}.json`);
       fs.writeFileSync(file, JSON.stringify(r, null, 2));
       for (const c of [...(r.cases || []), ...(r.cached ? [{ ...r.cached, name: 'Bench_Skeleton (cached)' }] : [])]) {
-        console.log(`${c.ok ? 'ok  ' : 'BAD '} ${c.name.padEnd(24)} ${c.badge.padEnd(16)} ${String(c.secs).padStart(6)} s  sema ${c.zigc?.semaMs} ms  build ${c.zigc?.buildMs ?? '-'} ms  download ${c.zigc?.downloadBytes ?? '-'} B${c.zigc?.ms320 ? `  320x200 ${c.zigc.ms320.toFixed(1)} ms` : ''}`);
+        const z = c.zigc || {};
+        console.log(`${c.ok ? 'ok  ' : 'BAD '} ${String(c.scenario || c.name).padEnd(24)} ${String(c.outcome ?? '').padEnd(16)} ${String(c.badge ?? '').padEnd(16)} ${String(c.secs ?? '').padStart(6)} s  sema ${z.semaMs ?? '-'} ms  build ${z.buildMs ?? '-'} ms  download ${z.downloadBytes ?? '-'} B${z.ms320 ? `  320x200 ${z.ms320.toFixed(1)} ms` : ''}${z.cacheDropped ? `  cache dropped: ${z.cacheDropped}` : ''}`);
       }
       console.log(`${r.ua}\n${r.error ? 'ERROR ' + r.error : r.pass ? 'ALL OK' : 'SOME BAD'} -> ${file}`);
       server.close();

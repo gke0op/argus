@@ -23,7 +23,7 @@
 //   web/zigc/absent.zig                                                   written here (see root.zig)
 //   out/NAME.st.wasm                                                      the result
 
-import { runWasi } from './wasi.js';
+import { runWasi, WasiCrash } from './wasi.js';
 
 /// Files the compile needs besides the theme: [path in the virtual cwd, path in the repo].
 export const SUPPORT = [
@@ -62,37 +62,64 @@ export function themeName(fileName) {
   return /^[A-Za-z_]/.test(n) ? n : `T_${n || 'Theme'}`;
 }
 
-/// Compile `source` as theme NAME on `fs` (a MemFS with /lib mounted and SUPPORT written).
-/// onPhase(p): 'sema' | 'build'. Returns { ok, gate1: { ok, log, ms }, build: { ok, log, ms },
-/// wasm (Uint8Array) or null, args }.
+/// Compile `source` (a string or bytes) as theme NAME on `fs` (a MemFS with /lib mounted and
+/// SUPPORT written). onPhase(p): 'sema' | 'build'; onLog(bytes): Zig's stderr as it is written.
+/// Returns { ok, gate1: { ok, log, ms }, build: { ok, log, ms, absent } | null, wasm | null,
+/// crash | null, memBytes }. `crash` is set when zig.wasm did not exit (wasi.js WasiCrash):
+/// { phase, kind, message, panic, stderr, memBytes }; Zig's own errors are not crashes.
 export function compileTheme(zigModule, fs, name, source, { onPhase, onLog } = {}) {
   // Each theme gets a clean theme/NAME.zig; the out/ folder is emptied so a failed build
   // never hands back an earlier module.
   fs.writeFile(fs.cwd, `theme/${name}.zig`, source);
   const out = fs.mkdirp(fs.cwd, 'out');
   out.children.clear();
-  const run = (args) => runWasi(zigModule, { args, fs, onStderr: onLog });
+  let memBytes = 0;
+  let phase = 'sema';
+  const run = (args) => {
+    const r = runWasi(zigModule, { args, fs, onStderr: onLog });
+    memBytes = Math.max(memBytes, r.memBytes || 0);
+    // Zig's own "error: OutOfMemory" (no file:line:col) is the compiler running out of memory,
+    // not a verdict on the theme: report it as a crash, like a trap.
+    if (r.code !== 0 && /^error: OutOfMemory\s*$/m.test(r.stderr) && !/^\S+:\d+:\d+: error:/m.test(r.stderr)) {
+      throw new WasiCrash(new Error('Zig reported OutOfMemory'), r.stderr, r.memBytes, r.ms, 'out-of-memory');
+    }
+    return r;
+  };
+  const crashed = (e) => {
+    if (!(e instanceof WasiCrash)) throw e;
+    memBytes = Math.max(memBytes, e.memBytes || 0);
+    return { phase, kind: e.kind, message: String(e.cause && e.cause.message || e.cause), panic: e.panic, stderr: e.stderr.trim(), memBytes: e.memBytes, ms: e.ms };
+  };
 
   onPhase?.('sema');
-  const s = run(semaArgs(name));
+  let s;
+  try { s = run(semaArgs(name)); } catch (e) {
+    const crash = crashed(e);
+    return { ok: false, gate1: { ok: null, log: crash.stderr, ms: crash.ms, args: semaArgs(name) }, build: null, wasm: null, crash, memBytes };
+  }
   const gate1 = { ok: s.code === 0, log: s.stderr.trim(), ms: s.ms, args: semaArgs(name) };
-  if (!gate1.ok) return { ok: false, gate1, build: null, wasm: null };
+  if (!gate1.ok) return { ok: false, gate1, build: null, wasm: null, crash: null, memBytes };
 
   // The optional ABI functions the theme lacks: link with none listed; for each the linker
   // reports undefined, list it and link again (what dlsym's null is natively).
+  phase = 'build';
   onPhase?.('build');
   const absent = [];
-  let b;
+  let b, buildMs = 0;
   for (let pass = 0; pass < 3; pass++) {
     fs.writeFile(fs.cwd, 'web/zigc/absent.zig', `pub const names = [_][]const u8{${absent.map((a) => ` "${a}",`).join('')} };\n`);
-    b = run(buildArgs(name));
+    try { b = run(buildArgs(name)); } catch (e) {
+      const crash = crashed(e);
+      return { ok: false, gate1, build: { ok: false, log: crash.stderr, ms: buildMs + crash.ms, args: buildArgs(name), absent }, wasm: null, crash, memBytes };
+    }
+    buildMs += b.ms;
     const missing = [...b.stderr.matchAll(/undefined function: (argus_[a-z_]+)/g)].map((m) => m[1]).filter((m) => OPTIONAL.includes(m) && !absent.includes(m));
     if (b.code === 0 || !missing.length) break;
     absent.push(...missing);
   }
   const wasm = b.code === 0 ? fs.readFile(fs.cwd, `out/${name}.st.wasm`) : null;
-  const build = { ok: b.code === 0 && !!wasm && wasm.length > 8, log: b.stderr.trim(), ms: b.ms, args: buildArgs(name), absent };
-  return { ok: build.ok, gate1, build, wasm: build.ok ? wasm.slice() : null };
+  const build = { ok: b.code === 0 && !!wasm && wasm.length > 8, log: b.stderr.trim(), ms: buildMs, args: buildArgs(name), absent };
+  return { ok: build.ok, gate1, build, wasm: build.ok ? wasm.slice() : null, crash: null, memBytes };
 }
 
 /// Zig's diagnostics as [{ file, line, col, kind, msg }] (for links and highlighting).

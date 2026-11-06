@@ -12,20 +12,26 @@
 <body>
 <!--
   Opens the bench page (site/bench/) in a same-origin frame and drives its UI as a person would:
-  for each case it puts the source in the editor, clicks "Compile and grade here" and waits for
-  the verdict (window.__bench, window.__zigc). Cases: the BENCHMARK.md skeleton, each
-  tests/fixtures/Gate*.zig, the u32/usize trap, themes/cpu/Tutorial_Tides.zig. Then it reloads
-  the page and compiles the skeleton again (the cached run). The result is POSTed to
-  /__report when web/zigc/verify.mjs serves the page, and shown here either way.
-  ?only=NAME runs one case; ?gatesAnyway=1 also runs Tides's deferred gates (~26 min).
+  it puts each source in the editor (or drops it as a file), clicks "Compile and grade here" and
+  waits for the outcome (window.__bench). Cases: the BENCHMARK.md skeleton, each
+  tests/fixtures/Gate*.zig, the u32/usize trap, themes/cpu/Tutorial_Tides.zig; then
+  web/zigc/cases.js (each followed by the skeleton, which must pass); then three scenarios:
+    paste-fix    a broken theme pasted into the empty editor, then the fixed one pasted over all of it
+    cancel       Cancel during a long compile, then the skeleton
+    bad-cache    a damaged IndexedDB record, a reload, the skeleton (the record must be dropped)
+  and last a reload and the skeleton again (the cached run). Every case has a time limit. The
+  result is POSTed to /__report when web/zigc/verify.mjs serves the page.
+  ?only=NAME runs one case (or one scenario); ?skip=pathological,scenarios leaves groups out.
 -->
 <div id="log"></div>
 <iframe id="f" src="../../bench/#zig"></iframe>
 <script type="module">
+import { pathologicalCases } from './cases.js';
 const $log = document.getElementById('log');
 const f = document.getElementById('f');
 const log = (s) => { $log.textContent += s + '\n'; $log.scrollTop = 1e9; };
 const q = new URLSearchParams(location.search);
+const only = q.get('only'), skip = (q.get('skip') || '').split(',');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const text = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error(`${u}: ${r.status}`); return r.text(); };
 
@@ -38,64 +44,158 @@ async function frameReady() {
   }
   throw new Error('the bench page did not load');
 }
+async function reloadFrame() { f.contentWindow.location.reload(); await sleep(500); await frameReady(); }
 
-async function runCase(name, src, expect) {
-  const w = f.contentWindow, d = f.contentDocument;
-  w.__bench = null; w.__zigc = null;
-  d.getElementById('zigName').value = name;
-  d.getElementById('zigName').dispatchEvent(new w.Event('input'));
-  d.getElementById('zigSrc').value = src;
-  const t0 = performance.now();
-  d.getElementById('zigCompile').click();
+const w = () => f.contentWindow, d = () => f.contentDocument;
+function setSource(name, src) {
+  d().getElementById('zigName').value = name;
+  d().getElementById('zigName').dispatchEvent(new (w().Event)('input'));
+  d().getElementById('zigSrc').value = src;
+}
+/// Wait for an outcome for `name` (window.__bench), at most limitS; record the progress lines.
+async function outcome(name, limitS, t0) {
   const phases = [];
-  for (let i = 0; i < 6000; i++) {
-    const p = d.getElementById('zigPhase').textContent;
+  while ((performance.now() - t0) / 1000 < limitS) {
+    const p = d().getElementById('zigPhase').textContent;
     if (p && phases[phases.length - 1] !== p) phases.push(p);
-    const b = w.__bench;
-    if (b && b.name === name) break;
+    const b = w().__bench;
+    if (b && b.name === name && b.outcome) return { b, phases };
     await sleep(50);
   }
-  const b = w.__bench || {};
-  const secs = (performance.now() - t0) / 1000;
+  return { b: null, phases };
+}
+function judge(expect, b) {
+  if (!b) return false;
+  if (expect.kind) return expect.kind.includes(b.outcome);
+  if (b.outcome === 'deferred') return !!expect.pass && b.gates[0] === true;
+  if (b.outcome !== 'verdict' && b.outcome !== 'compile-error') return false;
   const failed = (b.gates || []).map((g, i) => (g === false ? i + 1 : 0)).filter(Boolean);
-  // Gates 1-7 must be native's verdict; Gate 8 times this build (checked only for Gate8_Budget).
-  const verdict = failed.filter((g) => g !== 8 || expect === 8);
-  let ok;
-  if (b.deferred) ok = expect === 0 && b.gates[0] === true;
-  else if (expect === 0) ok = verdict.length === 0 && b.gates?.[0] === true;
-  else ok = verdict.includes(expect) && verdict.every((g) => g === expect || (expect === 4 && g === 3));
-  const diag = d.getElementById('zigDiag');
-  const r = { name, expect, ok, failed, deferred: !!b.deferred, secs: Number(secs.toFixed(2)), zigc: w.__zigc, badge: d.getElementById('zigBadge').textContent, phases, diag: diag.hidden ? '' : diag.textContent.slice(0, 300), live: d.getElementById('zigLiveCap').textContent };
-  log(`${ok ? 'ok  ' : 'BAD '} ${name.padEnd(16)} expect ${expect ? 'FAIL ' + expect : 'PASS'} got ${b.deferred ? 'Gate 1 PASS, gates deferred' : failed.length ? 'FAIL ' + failed.join(',') : 'PASS'} | ${r.badge} | ${secs.toFixed(1)} s | sema ${w.__zigc?.semaMs} ms build ${w.__zigc?.buildMs ?? '-'} ms${w.__zigc?.ms320 ? ` 320x200 ${w.__zigc.ms320.toFixed(1)} ms` : ''}${r.diag ? ' | ' + r.diag.split('\n')[0].slice(0, 120) : ''}`);
+  const verdict = failed.filter((g) => g !== 8 || expect.gate === 8);
+  if (expect.pass) return verdict.length === 0 && b.gates[0] === true;
+  return verdict.includes(expect.gate) && verdict.every((g) => g === expect.gate || (expect.gate === 4 && g === 3));
+}
+const show = (e) => (e.kind ? e.kind.join('|') : e.pass ? 'PASS' : `FAIL ${e.gate}`);
+
+/// One case through the UI. how: 'click' (editor + button), 'drop' (a File dropped on the page),
+/// 'paste' (a paste event into the editor with all of it selected). Returns the record.
+async function runCase(name, src, expect, limitS = 120, how = 'click') {
+  w().__bench = null; w().__zigc = null;
+  const t0 = performance.now();
+  let key = name;
+  if (how === 'drop') {
+    key = `${name}`;
+    const dt = new (w().DataTransfer)();
+    dt.items.add(new (w().File)([src], `${name}.zig`, { type: 'text/plain' }));
+    d().body.dispatchEvent(new (w().DragEvent)('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  } else if (how === 'paste') {
+    const ta = d().getElementById('zigSrc');
+    d().getElementById('zigName').value = name;
+    ta.focus(); ta.select();
+    const dt = new (w().DataTransfer)(); dt.setData('text/plain', src);
+    const go = ta.dispatchEvent(new (w().ClipboardEvent)('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    if (go) ta.value = src; // what the browser itself does with a paste nobody prevented
+  } else {
+    setSource(name, src);
+    d().getElementById('zigCompile').click();
+  }
+  const { b, phases } = await outcome(key, limitS, t0);
+  const secs = (performance.now() - t0) / 1000;
+  const failed = (b?.gates || []).map((g, i) => (g === false ? i + 1 : 0)).filter(Boolean);
+  const ok = judge(expect, b) && secs <= limitS;
+  const diag = d().getElementById('zigDiag');
+  const r = { name, how, expect, ok, outcome: b?.outcome ?? 'no outcome in time', failed, secs: Number(secs.toFixed(2)), limitS, zigc: w().__zigc, badge: d().getElementById('zigBadge').textContent, phase: d().getElementById('zigPhase').textContent, phases, diag: diag.hidden ? '' : diag.textContent.slice(0, 500) };
+  const got = !b ? 'nothing' : b.outcome === 'verdict' || b.outcome === 'compile-error' ? (failed.length ? `FAIL ${failed.join(',')}` : 'PASS') : b.outcome;
+  log(`${ok ? 'ok  ' : 'BAD '} ${name.padEnd(22)} expect ${show(expect).padEnd(30)} got ${got.padEnd(16)} ${secs.toFixed(1).padStart(5)} s | ${r.badge} | ${r.phase.slice(0, 110)}`);
   return r;
 }
 
 const out = { ua: navigator.userAgent, started: new Date().toISOString(), cases: [], cached: null };
+const want = (n) => !only || only === n;
 try {
   await frameReady();
   const zig = (n) => text(`../../bench/zig/${n}.zig`);
   const skeleton = await zig('Bench_Skeleton');
   const gate0 = await zig('Gate0_Control');
   const trap = gate0.replace('st.* = .{ .w = w, .h = h, .t = 0, .centre = 0.2 };', 'st.* = .{ .w = w, .h = h, .t = 0, .centre = 0.2 };\n    const n_px: usize = @as(usize, w) * h;\n    const n32: u32 = n_px;\n    _ = n32;');
-  let cases = [['Bench_Skeleton', skeleton, 0]];
+  const then = async () => out.cases.push({ ...(await runCase('Bench_Skeleton', skeleton, { pass: true }, 60)), after: true });
+
+  const standard = [['Bench_Skeleton', skeleton, { pass: true }]];
   for (let g = 0; g <= 8; g++) {
     const n = ['Gate0_Control', 'Gate1_Compile', 'Gate2_Alloc', 'Gate3_Watchdog', 'Gate4_Stride', 'Gate5_Alpha', 'Gate6_Frozen', 'Gate7_NaN', 'Gate8_Budget'][g];
-    cases.push([n, await zig(n), g]);
+    standard.push([n, await zig(n), g ? { gate: g } : { pass: true }]);
   }
-  cases.push(['Trap_U32_Usize', trap, 1], ['Tutorial_Tides', await zig('Tutorial_Tides'), 0]);
-  if (q.get('only')) cases = cases.filter((c) => c[0] === q.get('only'));
-  for (const [n, s, e] of cases) out.cases.push(await runCase(n, s, e));
-  if (q.get('gatesAnyway') && out.cases.at(-1)?.deferred) {
-    log('running the deferred gates for Tutorial_Tides…');
-    f.contentDocument.getElementById('zigGatesAnyway').click();
+  standard.push(['Trap_U32_Usize', trap, { gate: 1 }], ['Tutorial_Tides', await zig('Tutorial_Tides'), { pass: true }]);
+  for (const [n, s, e] of standard) if (want(n)) out.cases.push(await runCase(n, s, e, 120));
+
+  if (!skip.includes('pathological')) {
+    for (const [n, s, e, limitS] of pathologicalCases(gate0)) {
+      if (!want(n)) continue;
+      out.cases.push(await runCase(n, s, e, limitS, s instanceof Uint8Array ? 'drop' : 'click'));
+      await then();
+    }
   }
-  // The second visit: reload, compile the skeleton again.
-  f.contentWindow.location.reload();
-  await sleep(500);
-  await frameReady();
-  out.cached = await runCase('Bench_Skeleton', skeleton, 0);
-  out.pass = out.cases.every((c) => c.ok) && out.cached.ok;
-  log(`\n${out.pass ? 'ALL OK' : 'SOME BAD'}: first compile downloaded ${out.cases[0]?.zigc?.downloadBytes} B; cached run downloaded ${out.cached.zigc?.downloadBytes} B, restored ${out.cached.zigc?.restoredCacheFiles} cache files`);
+
+  if (!skip.includes('scenarios')) {
+    if (want('paste-fix')) {
+      // The owner's workflow: paste a broken answer into the empty editor, get the error, paste
+      // the fixed answer over all of it, then another. Each paste must compile by itself.
+      d().getElementById('zigSrc').value = '';
+      out.cases.push({ ...(await runCase('Model_Theme', gate0.replace('return st;', 'return st'), { gate: 1 }, 60, 'paste')), scenario: 'paste-fix: broken' });
+      out.cases.push({ ...(await runCase('Model_Theme', gate0, { pass: true }, 60, 'paste')), scenario: 'paste-fix: fixed' });
+      out.cases.push({ ...(await runCase('Model_Theme', trap, { gate: 1 }, 60, 'paste')), scenario: 'paste-fix: third' });
+    }
+    if (want('cancel')) {
+      const [, huge] = pathologicalCases(gate0).find((c) => c[0] === 'Path_HugeComptimeTable');
+      w().__bench = null;
+      setSource('Path_Cancel', huge);
+      const t0 = performance.now();
+      d().getElementById('zigCompile').click();
+      await sleep(3000);
+      const cancelVisible = !d().getElementById('zigCancel').hidden;
+      const elapsedShown = d().getElementById('zigElapsed').textContent;
+      d().getElementById('zigCancel').click();
+      const { b } = await outcome('Path_Cancel.zig', 10, t0);
+      const ok = cancelVisible && /\d+\.\d s/.test(elapsedShown) && b?.outcome === 'cancelled';
+      log(`${ok ? 'ok  ' : 'BAD '} cancel                 Cancel shown ${cancelVisible}, elapsed "${elapsedShown}", outcome ${b?.outcome} after ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+      out.cases.push({ name: 'cancel', ok, cancelVisible, elapsedShown, outcome: b?.outcome ?? null });
+      await then();
+    }
+    if (want('bad-cache')) {
+      // Damage the saved compiler cache, then reload: the page must drop it and still pass.
+      await sleep(1500); // let the last compile's cache save land first
+      await new Promise((res, rej) => {
+        const req = w().indexedDB.open('argus-zigc', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('cache');
+        req.onsuccess = () => {
+          const db = req.result;
+          const st = db.transaction('cache', 'readwrite').objectStore('cache');
+          const all = st.getAllKeys();
+          all.onsuccess = () => {
+            const buf = new Uint8Array(4096); buf.set(new TextEncoder().encode('ZCACHE1\n')); buf.fill(0xff, 8);
+            for (const k of all.result) st.put({ format: 2, sha256: '0'.repeat(64), bytes: buf.length, buf: buf.buffer }, k);
+            log(`bad-cache: damaged ${all.result.length} record(s)`);
+            st.transaction.oncomplete = () => { db.close(); res(); };
+          };
+        };
+        req.onerror = () => rej(req.error);
+      });
+      await reloadFrame();
+      const r = await runCase('Bench_Skeleton', skeleton, { pass: true }, 60);
+      r.scenario = 'bad-cache';
+      r.ok = r.ok && !!r.zigc?.cacheDropped;
+      log(`${r.ok ? 'ok  ' : 'BAD '} bad-cache              the record was dropped: ${r.zigc?.cacheDropped}`);
+      out.cases.push(r);
+    }
+  }
+
+  // The second visit: reload, compile the skeleton again (a cache saved by the runs above).
+  if (!only) {
+    await sleep(1500);
+    await reloadFrame();
+    out.cached = await runCase('Bench_Skeleton', skeleton, { pass: true }, 60);
+  }
+  out.pass = out.cases.every((c) => c.ok) && (!out.cached || out.cached.ok);
+  log(`\n${out.pass ? 'ALL OK' : 'SOME BAD'}${out.cached ? `: cached run downloaded ${out.cached.zigc?.downloadBytes} B, restored ${out.cached.zigc?.restoredCacheFiles} cache files` : ''}`);
 } catch (e) {
   out.error = String(e.stack || e);
   log('ERROR ' + out.error);

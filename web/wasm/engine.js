@@ -24,7 +24,11 @@ async function defaultWorker(url) {
     const w = new Worker(url, { type: 'module' });
     return {
       post: (m, t) => w.postMessage(m, t),
-      on: (f) => { w.onmessage = (e) => f(e.data); w.onerror = (e) => f({ type: 'error', error: e.message }); },
+      on: (f) => {
+        w.onmessage = (e) => f(e.data);
+        w.onerror = (e) => { e.preventDefault?.(); f({ type: 'error', error: e.message || 'the Worker stopped (out of memory?)' }); };
+        w.onmessageerror = () => f({ type: 'error', error: 'a message from the Worker could not be read' });
+      },
       terminate: () => w.terminate(),
     };
   }

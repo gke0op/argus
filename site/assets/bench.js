@@ -82,7 +82,10 @@ async function runLive(stage, cap, theme, extra) {
   const gen = liveGen;
   cap.textContent = 'Starting live…';
   try {
-    const h = await mount(stage, theme, extra);
+    let t;
+    const mounting = mount(stage, theme, extra);
+    const h = await Promise.race([mounting, new Promise((_, rej) => { t = setTimeout(() => rej(new Error('it did not start in 15 s')), 15000); })]).finally(() => clearTimeout(t))
+      .catch((e) => { mounting.then((late) => late.stop(), () => {}); throw e; });
     if (gen !== liveGen) { h.stop(); return; }
     live = h;
     const tick = () => {
@@ -96,14 +99,62 @@ async function runLive(stage, cap, theme, extra) {
   } catch (e) { cap.textContent = `Live view failed: ${e.message ?? e}`; }
 }
 
-// ---- Zig: prebuilt, uploaded and in-page compiled builds -----------------------------------
+// ---- Zig: one run at a time -----------------------------------------------------------------
+// Every Zig run (a compile here, a prebuilt or an uploaded build) is a Run. Starting one cancels
+// the one in flight (never a silent no-op); Cancel cancels it; while it works the progress line
+// shows the elapsed time; every step has a time limit and ends in a visible outcome.
 let gatesMod = null;
 const gatesLib = async () => (gatesMod ??= await import(new URL('wasm/gates.js', WEB)));
-let busy = false;
 const MB = (b) => `${(b / 1048576).toFixed(1)} MB`;
-const phase = (s) => { $('zigPhase').textContent = s; };
-
+const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
 const NOTE8_PREBUILT = 'Gate 8 here times this browser’s wasm on this machine; leaderboard times come from the native harness on an M3. Near the 16.7 ms line, judge on a quiet machine.';
+const NOTE8_INPAGE = 'Gates 1–7 give the native harness’s verdict. Gate 8 here times a build from Zig’s self-hosted wasm backend (no LLVM, no SIMD, one thread), which is slower than the native harness’s ReleaseFast build: the official Gate 8 is the native harness’s, on a pull request.';
+const COMPILE_LIMIT_MS = 60000;
+
+let run = null;
+let ticker = 0;
+function phase(text) {
+  if (run) run.label = text;
+  if ($('zigPhase').textContent !== text) $('zigPhase').textContent = text;
+}
+const tick = (r) => { $('zigElapsed').textContent = r.done ? '' : secs(performance.now() - r.t0); };
+function beginRun(title) {
+  if (run && !run.done) run.ac.abort();
+  stopLive();
+  const r = { ac: new AbortController(), t0: performance.now(), label: '', done: false };
+  run = r;
+  resetZigResult(title);
+  $('zigCancel').hidden = false;
+  clearInterval(ticker);
+  tick(r);
+  ticker = setInterval(() => { if (run === r) tick(r); }, 200);
+  return r;
+}
+/// End `r` with `text` on the progress line (no elapsed time: the text says what happened).
+function endRun(r, text) {
+  if (run !== r) return;
+  r.done = true;
+  clearInterval(ticker);
+  $('zigCancel').hidden = true;
+  tick(r);
+  if (text !== undefined) $('zigPhase').textContent = text;
+}
+const cancelled = (r) => r.ac.signal.aborted || run !== r;
+$('zigCancel').addEventListener('click', () => {
+  const r = run;
+  if (!r || r.done) return;
+  r.ac.abort();
+  badge($('zigBadge'), 'RUN'); $('zigBadge').textContent = 'CANCELLED';
+  endRun(r, `cancelled after ${secs(performance.now() - r.t0)}; the next run starts clean`);
+  window.__bench = { kind: 'zig', name: $('zigTitle').textContent, outcome: 'cancelled' };
+});
+
+/// `p` or, after `ms`, a rejection with `what` (and `onTimeout()` run). For steps with no limit of their own.
+function bounded(p, ms, what, onTimeout) {
+  let t;
+  return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => { onTimeout?.(); rej(new Error(`${what} did not finish in ${secs(ms)}`)); }, ms); })]).finally(() => clearTimeout(t));
+}
+
 function resetZigResult(title) {
   stopLive();
   $('zigResult').classList.add('on');
@@ -111,36 +162,36 @@ function resetZigResult(title) {
   $('zigTitle').textContent = title;
   $('zigReport').textContent = '';
   $('zigDiag').hidden = true;
+  $('zigDiag').style.borderLeftColor = '';
   $('zigMore').hidden = true;
   $('zigFull').hidden = true;
   $('zigGates').tBodies[0].innerHTML = '';
   $('zigLiveCap').textContent = 'Live, after the gates.';
   $('zigFinalCap').textContent = 'Frame 120 at 1920×1200, as the gates saw it.';
   $('zigNote8').textContent = NOTE8_PREBUILT;
+  $('zigHint').dataset.stale = '';
   drawFinal($('zigFinal'), null);
   $('zigResult').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-/// Grade a module through the gates (web/wasm/gates.js) and show it live. opts: module, title,
-/// gate1 (Gate 1's line), inPage (built by the in-page compiler: Gate 8 is labelled as this
-/// build's), maxPixels (live render size), extra (merged into window.__bench).
-async function gradeZig(name, opts = {}) {
-  if (busy && !opts.continuing) return;
-  busy = true;
-  if (!opts.continuing) resetZigResult(opts.title ?? name);
-  const t0 = performance.now();
+/// Grade a module through the gates (web/wasm/gates.js) and show it live, as part of run `r`.
+/// opts: module, gate1 (Gate 1's line), inPage (built here: Gate 8 is labelled as this build's),
+/// maxPixels (live render size), extra (merged into window.__bench).
+async function gradeZig(r, name, opts = {}) {
   try {
     const { runGates, GATES } = await gatesLib();
     renderGates($('zigGates').tBodies[0], GATES.map((g) => ({ ...g, pass: g.id === 1 && opts.gate1 ? true : null, detail: g.id === 1 && opts.gate1 ? opts.gate1 : '…' })));
-    phase('gates: watchdog 320x200');
-    const res = await runGates(name, { base: new URL('wasm/build/', WEB), module: opts.module, gate1: opts.gate1, onPhase: (p) => phase(`gates: ${p}${p === 'frames' ? ' (120 at 1920×1200)' : ''}`) });
-    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    phase('gates: starting');
+    const tg = performance.now();
+    const res = await runGates(name, { base: new URL('wasm/build/', WEB), module: opts.module, gate1: opts.gate1, signal: r.ac.signal, onPhase: (p) => phase(`gates: ${p}${p === 'frames' ? ' (120 at 1920×1200)' : ''}`) });
+    if (cancelled(r) || res.cancelled) return;
+    const took = secs(performance.now() - tg);
     let pass = res.pass;
     if (opts.inPage) {
-      $('zigNote8').textContent = 'Gates 1–7 give the native harness’s verdict. Gate 8 here times a build from Zig’s self-hosted wasm backend (no LLVM, no SIMD, one thread), which is slower than the native harness’s ReleaseFast build: the official Gate 8 is the native harness’s, on a pull request.';
+      $('zigNote8').textContent = NOTE8_INPAGE;
       // Gates 1-7 are the native harness's verdict; Gate 8 times this build, not the official one.
       const g8 = res.gates[7];
-      if (g8.pass !== null) {
+      if (g8.pass !== null && !res.crashed && !res.timedOut) {
         g8.info = `here: ${g8.pass ? 'PASS' : 'FAIL'}`;
         g8.detail = `${g8.detail}\nthis browser build: Zig's self-hosted wasm backend, no SIMD, 1 thread. The official Gate 8 is the native harness's (pull request).`;
       }
@@ -150,21 +201,24 @@ async function gradeZig(name, opts = {}) {
     badge($('zigBadge'), pass ? 'PASS' : 'FAIL');
     if (opts.inPage && pass) $('zigBadge').textContent = 'PASS 1–7';
     const g8here = opts.inPage && res.report ? ` · Gate 8 here: ${res.gates[7].pass ? 'PASS' : 'FAIL'}, ${(res.report.avg_us / 1000).toFixed(1)} ms/frame in this build; the native harness decides it` : '';
-    phase(`graded in ${secs} s · ${res.threads || 1} thread${res.threads === 1 ? '' : 's'} (${res.variant || '–'})${g8here}`);
+    const how = res.crashed ? ` · the theme crashed in ${res.crashed.phase}` : res.timedOut ? ` · stopped: the theme hung in ${res.timedOut}` : '';
+    endRun(r, `graded in ${took} · ${res.threads || 1} thread${res.threads === 1 ? '' : 's'} (${res.variant || '–'})${how}${g8here}`);
     $('zigReport').textContent = res.text;
     drawFinal($('zigFinal'), res.pixels, res.width, res.height);
-    window.__bench = { kind: 'zig', name, pass, gates: res.gates.map((g) => g.pass), text: res.text, secs: Number(secs), ...(opts.extra || {}) };
-    busy = false; // graded: a new run may start while the live view comes up
-    if (res.pixels && !res.timedOut) await startZigLive(name, opts);
+    window.__bench = { kind: 'zig', name, outcome: 'verdict', pass, gates: res.gates.map((g) => g.pass), text: res.text, secs: Number(((performance.now() - tg) / 1000).toFixed(1)), crashed: res.crashed || null, timedOut: res.timedOut || null, ...(opts.extra || {}) };
+    if (res.pixels && !res.timedOut && !res.crashed) await startZigLive(r, name, opts);
     else $('zigLiveCap').textContent = 'No live view: the theme did not get through its frames.';
   } catch (e) {
+    if (cancelled(r)) return;
     badge($('zigBadge'), 'FAIL');
     $('zigReport').textContent = `ERROR: ${e.message ?? e}`;
-    window.__bench = { kind: 'zig', name, error: String(e.message ?? e), ...(opts.extra || {}) };
-  } finally { busy = false; }
+    endRun(r, `the gates did not complete: ${e.message ?? e}`);
+    window.__bench = { kind: 'zig', name, outcome: 'gates-error', error: String(e.message ?? e), ...(opts.extra || {}) };
+  }
 }
 
-async function startZigLive(name, opts) {
+async function startZigLive(r, name, opts) {
+  if (run !== r) return; // a newer run owns the result area now
   const label = opts.inPage ? 'wasm, Zig self-hosted backend (CPU, 1 thread)' : undefined;
   await runLive($('zigLive'), $('zigLiveCap'), { id: `bench:${name}`, label: name, kind: 'wasm', build: name }, { module: opts.module, maxPixels: opts.maxPixels, label });
   $('zigFull').hidden = !live;
@@ -176,44 +230,57 @@ $('zigFull').addEventListener('click', () => {
 });
 
 $('zigBuild').addEventListener('change', () => { $('buildSrc').href = `zig/${$('zigBuild').value}.zig`; });
-$('runBuild').addEventListener('click', () => gradeZig($('zigBuild').value));
+$('runBuild').addEventListener('click', async () => {
+  const name = $('zigBuild').value;
+  const r = beginRun(name);
+  await gradeZig(r, name);
+  endRun(r);
+});
 
 async function gradeUpload(file) {
-  if (!file || busy) return;
-  const { moduleFromBytes } = await import(new URL('wasm/engine.js', WEB));
+  if (!file) return;
+  const r = beginRun(`${file.name} (uploaded)`);
   const name = file.name.replace(/\.(mt|st)?\.?wasm$/, '').replace(/[^A-Za-z0-9_]/g, '_') || 'Upload';
   try {
-    const module = await moduleFromBytes(new Uint8Array(await file.arrayBuffer()));
-    await gradeZig(name, { module, title: `${file.name} (uploaded)` });
+    const { moduleFromBytes } = await import(new URL('wasm/engine.js', WEB));
+    phase('compiling the module in this browser');
+    const module = await bounded(moduleFromBytes(new Uint8Array(await file.arrayBuffer())), 30000, 'compiling the uploaded module');
+    if (cancelled(r)) return;
+    await gradeZig(r, name, { module });
   } catch (e) {
-    resetZigResult(file.name);
+    if (cancelled(r)) return;
     badge($('zigBadge'), 'FAIL');
     $('zigReport').textContent = `Gate 1: this file is not a module the page can run: ${e.message ?? e}`;
+    endRun(r, 'not a module this page can run');
+    window.__bench = { kind: 'zig', name, outcome: 'not-a-module' };
   }
+  endRun(r);
 }
 
 // ---- Zig: compiled in this page (web/zigc: zig.wasm, Zig 0.17.0) ---------------------------
 let zcPromise = null;
 const loading = { compiler: [0, 0], std: [0, 0] };
 function onLoadProgress(m) {
-  if (m.phase === 'starting') { if (busy) phase('starting the compiler…'); return; }
+  if (m.phase === 'starting') { if (run && !run.done && /loading/.test(run.label)) phase('starting the compiler'); return; }
+  if (m.phase === 'support') return;
   loading[m.phase] = [m.loaded, m.total];
-  if (!busy) return;
+  if (!run || run.done || !/loading|starting/.test(run.label)) return;
   const part = (k, label) => { const [a, b] = loading[k]; return b ? `${label} ${MB(a)} / ${MB(b)}` : `${label} …`; };
-  phase(`loading ${part('compiler', 'the compiler')} · ${part('std', 'std')}${m.cached ? ' (cached)' : ''}`);
+  phase(`loading ${part('compiler', 'the compiler')} · ${part('std', 'std')}${m.retry ? ` (try ${m.attempt} of 3: ${m.retry})` : m.cached ? ' (cached)' : ''}`);
 }
-/// The compiler, loaded on first use (or first sign of use: a drag, a paste, the editor's focus).
+/// The compiler (web/zigc/client.js), loaded on first use or first sign of use.
 function zigc() {
   zcPromise ??= import(new URL('zigc/client.js', WEB)).then((m) => m.getCompiler({ onProgress: onLoadProgress }));
   return zcPromise;
 }
-const warm = () => { zigc().catch(() => {}); };
+const warm = () => { zigc().then((zc) => zc.warm()).catch(() => {}); };
 
-function showDiagnostics(log, name) {
+function showDiagnostics(log, name, tone) {
   const el = $('zigDiag');
   const html = esc(log).replace(/^(theme\/[A-Za-z0-9_]+\.zig):(\d+):(\d+):/gm, (all, file, l, c) =>
     file === `theme/${name}.zig` ? `<a href="#zigSrc" data-line="${l}" data-col="${c}">${file}:${l}:${c}</a>:` : all);
   el.innerHTML = html;
+  el.style.borderLeftColor = tone === 'warn' ? 'var(--warn)' : '';
   el.hidden = false;
 }
 $('zigDiag').addEventListener('click', (e) => {
@@ -233,114 +300,195 @@ $('zigDiag').addEventListener('click', (e) => {
 });
 
 /// One 320x200 step + draw, timed (after a first one): how fast this build is, before the gates
-/// spend 120 frames at 1920x1200 on it. undefined if it did not answer within 10 s.
-async function speedProbe(m) {
+/// spend 120 frames at 1920x1200 on it. undefined if it did not answer within 10 s (starting
+/// the Worker included), null if it failed; its Workers are always terminated.
+async function speedProbe(m, signal) {
   const { startEngine } = await import(new URL('wasm/engine.js', WEB));
-  const eng = await startEngine({ module: m.module, threaded: false, threads: 1 });
-  try {
-    const run = (async () => {
-      const { ptr } = await eng.leader.call('liveInit', { w: 320, h: 200, scale: 2 });
-      if (!ptr) return null;
-      await eng.leader.call('frame', { dt: 0.008, w: 320, h: 200, ptr });
-      return (await eng.leader.call('frame', { dt: 0.008, w: 320, h: 200, ptr })).cpuMs;
-    })();
-    return await Promise.race([run, new Promise((res) => setTimeout(() => res(undefined), 10000))]);
-  } catch { return null; } finally { eng.terminate(); }
+  let eng = null, stop = false;
+  const work = (async () => {
+    eng = await startEngine({ module: m.module, threaded: false, threads: 1 });
+    if (stop) return undefined;
+    const { ptr } = await eng.leader.call('liveInit', { w: 320, h: 200, scale: 2 });
+    if (!ptr) return null;
+    await eng.leader.call('frame', { dt: 0.008, w: 320, h: 200, ptr });
+    return (await eng.leader.call('frame', { dt: 0.008, w: 320, h: 200, ptr })).cpuMs;
+  })().catch(() => null);
+  let t;
+  const r = await Promise.race([work, new Promise((res) => { t = setTimeout(() => res(undefined), 10000); signal.addEventListener('abort', () => res(undefined), { once: true }); })]);
+  clearTimeout(t);
+  stop = true;
+  eng?.terminate();
+  work.then(() => eng?.terminate());
+  return r;
 }
 
 const GATE_BUDGET_S = 90; // run the gates without asking when 120 frames at 1920x1200 take less
 
+/// What the page says when zig.wasm itself did not finish: a time limit, a crash, a dead Worker,
+/// a failed load. Gate 1 is then not decided here (the native compiler has no such limits).
+function compilerTrouble(r, name, kind, why, log, extra) {
+  const { GATES } = gatesMod;
+  const gates = GATES.map((g) => ({ ...g, pass: null, info: g.id === 1 ? 'not decided' : undefined, detail: g.id === 1 ? `${why.split('\n')[0]}` : 'not run' }));
+  renderGates($('zigGates').tBodies[0], gates);
+  showDiagnostics(`${why}${log ? `\n\nZig’s output so far:\n${log.trim()}` : ''}`, name, 'warn');
+  badge($('zigBadge'), 'RUN');
+  $('zigBadge').textContent = kind === 'load-error' ? 'NOT LOADED' : 'NOT DECIDED';
+  $('zigReport').textContent = log || '';
+  $('zigLiveCap').textContent = 'No live view: there is no module.';
+  window.__bench = { kind: 'zig', name, outcome: kind, pass: null, gates: gates.map((g) => g.pass), message: why, ...extra };
+}
+
+function crashText(c, retried) {
+  const where = c.phase === 'sema' ? 'Gate 1’s type-check' : 'the module build';
+  const mem = c.memBytes ? ` (zig.wasm had ${MB(c.memBytes)})` : '';
+  const head = {
+    'stack-overflow': `The compiler ran out of stack in ${where}${mem}. zig.wasm runs on the browser’s stack, which is far smaller than native Zig’s: endless comptime recursion (which native Zig stops with “evaluation exceeded 1000 backwards branches”), comptime recursion deeper than about 150 calls, or very deeply nested expressions overflow it first.`,
+    'out-of-memory': `The compiler ran out of memory in ${where}${mem}. zig.wasm can use at most 4 GB (the wasm32 limit), and a browser may give it less.`,
+    panic: `The compiler panicked in ${where}: ${c.panic}${mem}.`,
+    trap: `The compiler stopped in ${where} with “${c.message}”${mem}.`,
+    error: `The compiler failed in ${where}: ${c.message}${mem}.`,
+  }[c.kind] || `The compiler failed in ${where}: ${c.message}.`;
+  return `${head}\nGate 1 is not decided here; the native harness (a pull request) decides it. The next compile starts a fresh compiler.${retried ? '\nIt failed the same way with the saved compiler cache and without it, so the cache was not the cause.' : ''}`;
+}
+
 async function compileAndGrade(name, source, title) {
-  if (busy) return;
-  if (!source.trim()) { $('zigHint').textContent = 'Paste the model’s answer first, or drop a .zig file.'; $('zigSrc').focus(); return; }
-  busy = true;
-  resetZigResult(title ?? `${name}.zig`);
-  const t0 = performance.now();
-  let info = null, c = null;
+  const text = typeof source === 'string' ? source : null;
+  if (text !== null && !text.trim()) { $('zigHint').textContent = 'Paste the model’s answer first, or drop a .zig file.'; $('zigSrc').focus(); return; }
+  const r = beginRun(title ?? `${name}.zig`);
+  const t0 = r.t0;
   try {
     const { GATES } = await gatesLib();
     renderGates($('zigGates').tBodies[0], GATES.map((g) => ({ ...g, pass: null, detail: '…' })));
-    phase('loading the compiler…');
+    phase('loading the compiler');
     const zc = await zigc();
-    info = await zc.ready;
-    const tLoad = performance.now() - t0;
-    c = await zc.compile(name, source, (p) => phase(p === 'sema' ? 'compiling: Gate 1, type-checking for a 64-bit target (wasm64)…' : 'compiling: building the module (wasm32, Zig’s wasm backend)…'));
-    const extra = { compile: { loadMs: Math.round(tLoad), semaMs: Math.round(c.gate1.ms), buildMs: c.build ? Math.round(c.build.ms) : null, wasmKB: c.wasm ? Math.round(c.wasm.length / 1024) : null, cachedDownloads: info.cachedDownloads, downloadBytes: info.downloadBytes, restoredCacheFiles: info.restoredCacheFiles, ok: c.ok, gate1: c.gate1.ok } };
+    let c;
+    try {
+      c = await zc.compile(name, source, {
+        signal: r.ac.signal,
+        timeoutMs: COMPILE_LIMIT_MS,
+        onPhase: (p) => phase(p === 'sema' ? 'compiling: Gate 1, type-checking for a 64-bit target (wasm64)' : 'compiling: building the module (wasm32, Zig’s wasm backend)'),
+      });
+    } catch (e) {
+      if (cancelled(r)) return;
+      const kind = { timeout: 'compiler-timeout', load: 'load-error', worker: 'compiler-crash' }[e.kind] || 'compiler-crash';
+      const why = e.kind === 'timeout'
+        ? `The compiler did not finish in ${COMPILE_LIMIT_MS / 1000} s, so it was stopped. Heavy comptime work can take that long here: this compiler runs well below native speed. Gate 1 is not decided here; the native harness (a pull request) has no such limit. The next compile starts a fresh compiler.`
+        : e.kind === 'load' ? `${e.message[0].toUpperCase()}${e.message.slice(1)}. Check the connection and compile again: the next try loads it afresh.`
+        : `${e.message}. The next compile starts a fresh compiler.`;
+      compilerTrouble(r, name, kind, why, e.log, { compile: { wallMs: Math.round(e.wallMs || 0) } });
+      endRun(r, `${kind === 'load-error' ? 'the compiler did not load' : e.kind === 'timeout' ? `stopped after ${COMPILE_LIMIT_MS / 1000} s` : 'the compiler failed'} · ${secs(performance.now() - t0)}`);
+      return;
+    }
+    if (cancelled(r)) return;
+    const info = c.info || {};
+    const extra = { compile: { semaMs: Math.round(c.gate1.ms || 0), buildMs: c.build ? Math.round(c.build.ms) : null, wallMs: Math.round(c.wallMs || 0), wasmKB: c.wasm ? Math.round(c.wasm.length / 1024) : null, cachedDownloads: info.cachedDownloads, downloadBytes: info.downloadBytes, restoredCacheFiles: info.restoredCacheFiles, cacheDropped: info.cacheDropped || null, retriedWithoutCache: !!c.retriedWithoutCache, memMB: Math.round((c.memBytes || 0) / 1048576), ok: c.ok, gate1: c.gate1.ok } };
     window.__zigc = extra.compile;
+    const cacheNote = info.cacheDropped ? ` · the saved compiler cache was dropped (${info.cacheDropped})` : c.retriedWithoutCache ? ' · retried without the saved compiler cache' : '';
+    if (c.crash) {
+      compilerTrouble(r, name, 'compiler-crash', crashText(c.crash, !!c.retriedWithoutCache), c.crash.stderr, extra);
+      endRun(r, `the compiler ${c.crash.kind === 'stack-overflow' ? 'ran out of stack' : c.crash.kind === 'out-of-memory' ? 'ran out of memory' : 'crashed'} · ${secs(performance.now() - t0)}${cacheNote}`);
+      return;
+    }
     if (!c.gate1.ok) {
-      const gates = GATES.map((g) => ({ ...g, pass: g.id === 1 ? false : null, detail: g.id === 1 ? `zig build-obj -fno-emit-bin -target wasm64-freestanding failed (${(c.gate1.ms / 1000).toFixed(1)} s):\n${c.gate1.log}` : 'not run' }));
+      const gates = GATES.map((g) => ({ ...g, pass: g.id === 1 ? false : null, detail: g.id === 1 ? `zig build-obj -fno-emit-bin -target wasm64-freestanding failed (${secs(c.gate1.ms)}):\n${c.gate1.log}` : 'not run' }));
       renderGates($('zigGates').tBodies[0], gates);
       showDiagnostics(c.gate1.log, name);
       badge($('zigBadge'), 'FAIL');
-      phase(`Gate 1 failed: Zig 0.17.0’s own errors, as the native harness reports them · ${((performance.now() - t0) / 1000).toFixed(1)} s`);
-      $('zigReport').textContent = `${c.gate1.log}\n\n${(await gatesLib()).reportText({ name, gates, variant: 'st', threads: 0 })}`;
+      endRun(r, `Gate 1 failed: Zig 0.17.0’s own errors, as the native harness reports them · ${secs(performance.now() - t0)}${cacheNote}`);
+      $('zigReport').textContent = `${c.gate1.log}\n\n${gatesMod.reportText({ name, gates, variant: 'st', threads: 0 })}`;
       $('zigLiveCap').textContent = 'No live view: the theme does not compile.';
-      window.__bench = { kind: 'zig', name, pass: false, gates: gates.map((g) => g.pass), text: $('zigReport').textContent, ...extra };
-      busy = false;
+      window.__bench = { kind: 'zig', name, outcome: 'compile-error', pass: false, gates: gates.map((g) => g.pass), text: $('zigReport').textContent, ...extra };
       return;
     }
-    const sema = `type-checks with Zig 0.17.0 in this page for wasm64 (64-bit usize, as aarch64-macos), ${(c.gate1.ms / 1000).toFixed(1)} s`;
+    const sema = `type-checks with Zig 0.17.0 in this page for wasm64 (64-bit usize, as aarch64-macos), ${secs(c.gate1.ms)}`;
     if (!c.ok) {
       const gates = GATES.map((g) => ({ ...g, pass: g.id === 1 ? true : null, detail: g.id === 1 ? sema : 'not run: this page’s compiler could not build it (see above)' }));
       renderGates($('zigGates').tBodies[0], gates);
-      showDiagnostics(`This theme passes Gate 1, but Zig’s self-hosted wasm backend, the only one in this page’s compiler, could not build it. That is a limit of the browser build, not a verdict: the native harness (a pull request) builds it with LLVM.\n\n${c.build.log}`, name);
+      showDiagnostics(`This theme passes Gate 1, but Zig’s self-hosted wasm backend, the only one in this page’s compiler, could not build it. That is a limit of the browser build, not a verdict: the native harness (a pull request) builds it with LLVM.\n\n${c.build.log}`, name, 'warn');
       badge($('zigBadge'), 'RUN'); $('zigBadge').textContent = 'NOT GRADED HERE';
-      phase('Gate 1 passed; gates 2–8 need the native harness for this theme');
+      endRun(r, `Gate 1 passed; gates 2–8 need the native harness for this theme · ${secs(performance.now() - t0)}`);
       $('zigReport').textContent = c.build.log;
-      window.__bench = { kind: 'zig', name, pass: null, gates: gates.map((g) => g.pass), text: c.build.log, ...extra };
-      busy = false;
+      window.__bench = { kind: 'zig', name, outcome: 'not-graded', pass: null, gates: gates.map((g) => g.pass), text: c.build.log, ...extra };
       return;
     }
     const { moduleFromBytes } = await import(new URL('wasm/engine.js', WEB));
-    const module = await moduleFromBytes(c.wasm);
-    const gate1 = `${sema}; built wasm32-freestanding, ${(c.wasm.length / 1024).toFixed(0)} KB, in ${(c.build.ms / 1000).toFixed(1)} s (Zig’s wasm backend, no SIMD, 1 thread)`;
+    phase('compiling the module in this browser');
+    let module;
+    try { module = await bounded(moduleFromBytes(c.wasm), 30000, 'compiling the module in this browser'); } catch (e) {
+      if (cancelled(r)) return;
+      compilerTrouble(r, name, 'module-error', `Zig built a module that this browser could not load: ${e.message ?? e}. This is a fault of the browser build, not a verdict on the theme.`, '', extra);
+      endRun(r, 'the module did not load in this browser');
+      return;
+    }
+    if (cancelled(r)) return;
+    const gate1 = `${sema}; built wasm32-freestanding, ${(c.wasm.length / 1024).toFixed(0)} KB, in ${secs(c.build.ms)} (Zig’s wasm backend, no SIMD, 1 thread)`;
     renderGates($('zigGates').tBodies[0], GATES.map((g) => ({ ...g, pass: g.id === 1 ? true : null, detail: g.id === 1 ? gate1 : '…' })));
-    phase('timing one frame at 320×200…');
-    const ms320 = await speedProbe(module);
+    phase('timing one frame at 320×200');
+    const ms320 = await speedProbe(module, r.ac.signal);
+    if (cancelled(r)) return;
     // The live view renders as many pixels as this build draws in ~25 ms (at most 1920x1200).
     const maxPixels = ms320 > 0 ? Math.max(320 * 200, Math.min(1920 * 1200, Math.round(320 * 200 * 25 / ms320))) : undefined;
     const projected = ms320 > 0 ? ms320 * ((1920 * 1200) / (320 * 200)) * 121 / 1000 : 0;
     extra.compile.ms320 = ms320 ?? null;
     extra.compile.projectedGatesS = Math.round(projected);
-    const grade = () => gradeZig(name, { module, gate1, inPage: true, maxPixels, extra, continuing: true });
     if (projected > GATE_BUDGET_S) {
       const mins = Math.ceil(projected / 60);
       const gates = GATES.map((g) => ({ ...g, pass: g.id === 1 ? true : null, detail: g.id === 1 ? gate1 : `not run yet: about ${mins} min in this build` }));
       renderGates($('zigGates').tBodies[0], gates);
       badge($('zigBadge'), 'RUN'); $('zigBadge').textContent = 'GATE 1 PASS';
-      phase(`this build draws 320×200 in ${ms320.toFixed(0)} ms, so the gates’ 120 frames at 1920×1200 would take about ${mins} min here`);
-      showDiagnostics(`Gates 2–8 are not run yet. This build draws a 320×200 frame in ${ms320.toFixed(0)} ms; the gates need 120 frames at 1920×1200, about ${mins} min here. Zig’s self-hosted wasm backend turns @Vector code into slow scalar code (Tutorial_Tides runs about 60× slower than LLVM’s wasm in Chrome), and natively this theme is far faster. The native harness grades it in seconds: submit a pull request, or run the gates here anyway.`, name);
-      $('zigDiag').style.borderLeftColor = 'var(--warn)';
+      endRun(r, `this build draws 320×200 in ${ms320.toFixed(0)} ms, so the gates’ 120 frames at 1920×1200 would take about ${mins} min here`);
+      showDiagnostics(`Gates 2–8 are not run yet. This build draws a 320×200 frame in ${ms320.toFixed(0)} ms; the gates need 120 frames at 1920×1200, about ${mins} min here. Zig’s self-hosted wasm backend turns @Vector code into slow scalar code (Tutorial_Tides runs about 60× slower than LLVM’s wasm in Chrome), and natively this theme is far faster. The native harness grades it in seconds: submit a pull request, or run the gates here anyway.`, name, 'warn');
       $('zigMore').hidden = false;
       $('zigGatesAnyway').textContent = `Run the gates here anyway (about ${mins} min)`;
-      $('zigGatesAnyway').onclick = () => { if (busy) return; stopLive(); $('zigFull').hidden = true; $('zigMore').hidden = true; $('zigDiag').hidden = true; busy = true; grade(); };
+      $('zigGatesAnyway').onclick = async () => {
+        const r2 = beginRun(`${name}.zig`);
+        $('zigNote8').textContent = NOTE8_INPAGE;
+        await gradeZig(r2, name, { module, gate1, inPage: true, maxPixels, extra });
+        endRun(r2);
+      };
       $('zigFinalCap').textContent = 'No gate frame yet: the gates have not run.';
-      window.__bench = { kind: 'zig', name, pass: null, gates: gates.map((g) => g.pass), deferred: true, ...extra };
-      busy = false;
-      await startZigLive(name, { module, inPage: true, maxPixels });
+      window.__bench = { kind: 'zig', name, outcome: 'deferred', pass: null, gates: gates.map((g) => g.pass), deferred: true, ...extra };
+      await startZigLive(r, name, { module, inPage: true, maxPixels });
       return;
     }
-    await grade();
+    await gradeZig(r, name, { module, gate1, inPage: true, maxPixels, extra });
   } catch (e) {
+    if (cancelled(r)) return;
     badge($('zigBadge'), 'FAIL');
     $('zigReport').textContent = `ERROR: ${e.message ?? e}`;
-    phase('the in-page compiler failed');
-    window.__bench = { kind: 'zig', name, error: String(e.message ?? e) };
-    busy = false;
+    endRun(r, `the page failed: ${e.message ?? e}`);
+    window.__bench = { kind: 'zig', name, outcome: 'page-error', error: String(e.message ?? e) };
+  } finally {
+    endRun(r);
   }
 }
 
 $('zigCompile').addEventListener('click', () => compileAndGrade(zigName(), $('zigSrc').value));
 $('zigSrc').addEventListener('focus', warm, { once: true });
 $('zigSrc').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); compileAndGrade(zigName(), $('zigSrc').value); } });
+// A result for an older source says so, instead of looking like the answer to the new one.
+$('zigSrc').addEventListener('input', () => {
+  if (!$('zigResult').classList.contains('on') || $('zigHint').dataset.stale) return;
+  $('zigHint').dataset.stale = '1';
+  $('zigHint').textContent = 'The source changed since the result below: press Compile and grade here (or Ctrl+Enter) for a new one.';
+});
 
-/// A .zig file: into the editor, then compiled. A .wasm: graded as an upload.
+/// A .zig file: into the editor, then compiled. A .wasm: graded as an upload. Anything else: said so.
 async function takeFile(file) {
   if (!file) return;
   if (/\.wasm$/i.test(file.name)) return gradeUpload(file);
+  const isZig = /\.zig$/i.test(file.name);
+  const src = await file.text();
+  if (!isZig && !looksLikeZig(src)) {
+    const r = beginRun(file.name);
+    badge($('zigBadge'), 'RUN'); $('zigBadge').textContent = 'NOT ZIG';
+    showDiagnostics(`${file.name} is not a .zig theme or a .wasm build, so nothing was compiled.`, '', 'warn');
+    endRun(r, 'not a .zig or .wasm file');
+    window.__bench = { kind: 'zig', name: file.name, outcome: 'not-zig' };
+    return;
+  }
   const { themeName } = await import(new URL('zigc/zigc.js', WEB));
   const name = themeName(file.name);
-  const src = await file.text();
   showTab('tab-zig');
   $('zigName').value = name;
   $('zigName').dispatchEvent(new Event('input'));
@@ -364,22 +512,25 @@ document.addEventListener('drop', (e) => {
   takeFile(e.dataTransfer.files[0]);
 });
 
-// Paste anywhere: Zig source pasted outside a field, or into the empty editor, compiles at once.
+// Paste: Zig source pasted outside a field compiles at once; so does a paste into the editor
+// that fills it (it was empty, or all of it was selected: the "paste the fixed version" case).
+// A paste into part of the source is an edit: the user compiles.
 const looksLikeZig = (s) => /@import\s*\(|\bexport\s+fn\b|\bpub\s+fn\b|\bconst\s+std\b/.test(s);
 document.addEventListener('paste', (e) => {
   const text = e.clipboardData?.getData('text/plain') || '';
   const t = e.target;
+  const ta = $('zigSrc');
   const inField = t instanceof HTMLElement && (t.closest('input, textarea, select, [contenteditable]'));
-  if (inField && t !== $('zigSrc')) return;
+  if (inField && t !== ta) return;
   if (!looksLikeZig(text)) return;
-  if (t === $('zigSrc')) {
-    if ($('zigSrc').value.trim()) return; // editing an existing source: the user compiles
-    setTimeout(() => compileAndGrade(zigName(), $('zigSrc').value), 0);
+  if (t === ta) {
+    const fills = !ta.value.trim() || (ta.selectionStart === 0 && ta.selectionEnd === ta.value.length);
+    if (fills) setTimeout(() => compileAndGrade(zigName(), ta.value), 0);
     return;
   }
   e.preventDefault();
   showTab('tab-zig');
-  $('zigSrc').value = text;
+  ta.value = text;
   compileAndGrade(zigName(), text);
 });
 
@@ -413,12 +564,13 @@ $('wgslExample').addEventListener('change', async () => {
   $('wgslName').value = v.replace(/^.*\//, '').replace(/\.wgsl$/, '');
 });
 let harnessMod = null;
+let wgslBusy = false;
 $('runWgsl').addEventListener('click', async () => {
-  if (busy) return;
+  if (wgslBusy) return;
   const src = $('wgslSrc').value;
   if (!src.trim()) { $('wgslSrc').focus(); return; }
   if (!gpu.ok) { $('wgslResult').classList.add('on'); badge($('wgslBadge'), 'FAIL'); $('wgslReport').textContent = `No WebGPU in this browser: ${gpu.why}`; return; }
-  busy = true;
+  wgslBusy = true;
   stopLive();
   const name = $('wgslName').value.trim().replace(/[^A-Za-z0-9_]/g, '_') || 'Model_Theme';
   $('wgslResult').classList.add('on');
@@ -447,7 +599,7 @@ $('runWgsl').addEventListener('click', async () => {
     badge($('wgslBadge'), 'FAIL');
     $('wgslReport').textContent = `ERROR: ${e.message ?? e}`;
     window.__bench = { kind: 'wgsl', name, error: String(e.message ?? e) };
-  } finally { busy = false; }
+  } finally { wgslBusy = false; }
 });
 
 // For web/zigc/verify.html, which drives this page in a frame.
