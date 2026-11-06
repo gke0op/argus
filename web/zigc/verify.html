@@ -22,14 +22,18 @@
   and last a reload and the skeleton again (the cached run). Every case has a time limit. The
   result is POSTed to /__report when web/zigc/verify.mjs serves the page.
   ?only=NAME runs one case (or one scenario); ?skip=pathological,scenarios leaves groups out.
+  ?extra=URL[,URL...] also runs these .zig files (same origin; kept outside the repo), each of
+  which must pass gates 1-7, followed by the skeleton.
 -->
-<div id="log"></div>
+<div id="log">AUTOMATED TEST PAGE: this page drives the bench page below by itself and overwrites its editor.
+To compile your own theme, use the bench page: <a href="../../bench/" style="color:#f2b65a">../../bench/</a>
+</div>
 <iframe id="f" src="../../bench/#zig"></iframe>
 <script type="module">
 import { pathologicalCases } from './cases.js';
 const $log = document.getElementById('log');
 const f = document.getElementById('f');
-const log = (s) => { $log.textContent += s + '\n'; $log.scrollTop = 1e9; };
+const log = (s) => { $log.append(s + '\n'); $log.scrollTop = 1e9; };
 const q = new URLSearchParams(location.search);
 const only = q.get('only'), skip = (q.get('skip') || '').split(',');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -133,6 +137,13 @@ try {
       out.cases.push(await runCase(n, s, e, limitS, s instanceof Uint8Array ? 'drop' : 'click'));
       await then();
     }
+  }
+
+  for (const u of (q.get('extra') || '').split(',').filter(Boolean)) {
+    const n = u.replace(/^.*\//, '').replace(/\.zig$/, '').replace(/[^A-Za-z0-9_]/g, '_');
+    if (!want(n)) continue;
+    out.cases.push(await runCase(n, await text(u), { pass: true }, 120));
+    await then();
   }
 
   if (!skip.includes('scenarios')) {
