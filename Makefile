@@ -6,7 +6,7 @@ THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: icon quasars all app desktop kronos harness linux check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
+.PHONY: icon quasars all app desktop kronos harness linux web-wasm web-wasm-all web-wasm-refs web-wasm-serve check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
 
 all: app kronos
 
@@ -38,6 +38,47 @@ harness:
 CPU ?= native
 linux:
 	$(ZIG) build-exe -O ReleaseFast -fstrip -mcpu=$(CPU) --dep theme -Mroot=src/argus_linux.zig -Mtheme=$(THEME) -femit-bin=argus-linux
+
+# Browser (web/wasm/README.md): THEME compiled to WebAssembly with SIMD128, the same source the
+# harness builds, twice: NAME.mt.wasm (+atomics, shared memory: a page's Worker pool runs it on
+# every core) and NAME.st.wasm (one thread, for pages without cross-origin isolation).
+WEB_WASM_OUT ?= web/wasm/build
+WASM_FLAGS = -O ReleaseFast -target wasm32-freestanding -fno-entry -rdynamic -fstrip \
+	--import-memory --initial-memory=4194304 --max-memory=1073741824 \
+	--dep theme --dep harness_gates -Mroot=web/wasm/runtime.zig -Mtheme=$(THEME) -Mharness_gates=src/harness_gates.zig
+web-wasm:
+	@mkdir -p $(WEB_WASM_OUT)
+	$(ZIG) build-exe -mcpu=generic+simd128+atomics+bulk_memory -fno-single-threaded --shared-memory $(WASM_FLAGS) -femit-bin=$(WEB_WASM_OUT)/$(basename $(notdir $(THEME))).mt.wasm
+	$(ZIG) build-exe -mcpu=generic+simd128 -fsingle-threaded $(WASM_FLAGS) -femit-bin=$(WEB_WASM_OUT)/$(basename $(notdir $(THEME))).st.wasm
+
+# Every theme the dev page lists, the BENCHMARK.md skeleton and the gate fixtures. A theme that
+# fails to compile is recorded (Gate 1) in build/NAME.compile.txt, not fatal. Then the manifest.
+WEB_WASM_THEMES ?= themes/cpu/Tutorial_Tides.zig themes/Cygnus_A.zig tests/fixtures/Fixture_Stateful.zig tests/fixtures/Fixture_Stateless.zig tests/fixtures/Fixture_Hang.zig $(sort $(wildcard tests/fixtures/Gate*.zig))
+web-wasm-all:
+	@mkdir -p $(WEB_WASM_OUT)/stage
+	@awk '/^### Minimal Working Skeleton/{s=1} s&&/^```zig/{c=1;next} c&&/^```/{exit} c' BENCHMARK.md > $(WEB_WASM_OUT)/stage/Bench_Skeleton.zig
+	@cp themes/argus_theme_sdk.zig $(WEB_WASM_OUT)/stage/argus_theme_sdk.zig
+	@for t in $(WEB_WASM_THEMES) $(WEB_WASM_OUT)/stage/Bench_Skeleton.zig; do \
+		n=$$(basename $$t .zig); \
+		if $(MAKE) -s web-wasm THEME=$$t > $(WEB_WASM_OUT)/$$n.compile.txt 2>&1; then echo "  ok    $$n"; else echo "  FAIL  $$n (Gate 1: compile; see $(WEB_WASM_OUT)/$$n.compile.txt)"; fi; \
+	done
+	@cd $(WEB_WASM_OUT) && { printf '['; sep=''; for f in *.compile.txt; do n=$${f%.compile.txt}; \
+		if [ -f $$n.st.wasm ]; then ok=true; else ok=false; fi; \
+		printf '%s{"name":"%s","compiled":%s}' "$$sep" "$$n" "$$ok"; sep=','; done; printf ']\n'; } > manifest.json
+
+# Native harness reports and final frames for the dev page's comparison (build/NAME.native.*).
+# Fixture_Hang is left out: the native harness has no time limit and would never return.
+web-wasm-refs: web-wasm-all
+	@for t in $(filter-out tests/fixtures/Fixture_Hang.zig,$(WEB_WASM_THEMES)) $(WEB_WASM_OUT)/stage/Bench_Skeleton.zig; do \
+		n=$$(basename $$t .zig); \
+		$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $$t --frames 120 --out $(WEB_WASM_OUT)/$$n.native.png > $(WEB_WASM_OUT)/$$n.native.txt 2>&1; \
+		echo "  native $$n: $$(grep -o 'Verdict *: [A-Z]*' $(WEB_WASM_OUT)/$$n.native.txt || echo 'did not compile')"; \
+	done
+
+# The dev page needs cross-origin isolation for threads; this server sends the COOP/COEP headers
+# (GitHub Pages cannot; there coi-serviceworker.js adds them, see web/wasm/README.md).
+web-wasm-serve:
+	node web/wasm/serve.mjs
 
 # The harness on every tracked theme: CPU for each .zig, GPU for each .metal (skipped without a
 # Metal device). tools/check_themes.sh --all also checks untracked local themes.

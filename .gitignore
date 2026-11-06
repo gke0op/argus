@@ -16,3 +16,4 @@ Argus.app/Contents/_CodeSignature/
 dist/
 __pycache__/
 .sign_identity
+web/wasm/build/

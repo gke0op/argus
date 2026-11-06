@@ -20,6 +20,8 @@
 //
 // Hosts: argus_theme_draw writes [R, G, B, A] bytes; argus_theme_draw_target writes any
 // 32-bit RGB layout (Target), so a display's own memory can be the render target.
+// In a browser (wasm32, +simd128: N = 4) the rows go to the page's Workers instead of
+// std.Thread (WasmPool below); everything a lane computes is the same code.
 //
 // Time: one SDK step of 0.008 is one 30 Hz Metal tick (f.time += 1/30 s, f.frame += 1), so
 // the app's speed setting, which scales the step, scales f.time the same way.
@@ -116,7 +118,32 @@ inline fn k_mix(a: F, b: F, t: F) F {
     return a + (b - a) * t;
 }
 inline fn k_sat(x: F) F {
-    return @min(@max(x, f(0)), f(1));
+    return minc(maxc(x, 0), 1);
+}
+
+// @round and @max / @min against a constant, spelled for wasm SIMD128. wasm has no f32x4
+// round-half-away-from-zero or IEEE maxNum, so LLVM turns those builtins into a libm call per
+// lane (roundf, fmaxf). These give the builtins' results bit for bit (test below); natively the
+// builtins stay, so native output cannot move.
+inline fn round(x: F) F {
+    return if (on_wasm) roundExact(x) else @round(x);
+}
+inline fn maxc(x: F, comptime c: f32) F {
+    return if (on_wasm) maxcExact(x, c) else @max(x, f(c));
+}
+inline fn minc(x: F, comptime c: f32) F {
+    return if (on_wasm) mincExact(x, c) else @min(x, f(c));
+}
+inline fn roundExact(x: F) F {
+    const t = @trunc(x);
+    return sel(@abs(x - t) >= f(0.5), t + sel(x < f(0), f(-1), f(1)), t);
+}
+/// max(x, c) for a constant c (not NaN).
+inline fn maxcExact(x: F, comptime c: f32) F {
+    return sel(x > f(c), x, f(c));
+}
+inline fn mincExact(x: F, comptime c: f32) F {
+    return sel(x < f(c), x, f(c));
 }
 pub const mix = k_mix;
 pub const saturate = k_sat;
@@ -134,7 +161,7 @@ pub inline fn smoothstep(e0: f32, e1: f32, x: F) F {
 /// grows with |x| (measured: sin 2.1e-7 -> 2.7e-6 at |x| <= 100; f.time runs to 14400 s).
 inline fn reduce(x: F) F {
     @setFloatMode(.strict);
-    const k = @round(x * f(1.0 / (2.0 * std.math.pi)));
+    const k = round(x * f(1.0 / (2.0 * std.math.pi)));
     return x - k * f(6.28125) - k * f(2.0 * std.math.pi - 6.28125);
 }
 
@@ -165,8 +192,8 @@ pub inline fn cos(x: F) F {
 /// 2^x: integer part into the exponent bits, fraction (in [-0.5, 0.5]) by a degree-6 polynomial.
 pub inline fn exp2(x0: F) F {
     @setFloatMode(.optimized);
-    const x = @min(@max(x0, f(-126)), f(127));
-    const n = @round(x);
+    const x = minc(maxc(x0, -126), 127);
+    const n = round(x);
     const r = x - n;
     var p = f(1.5403530e-4);
     p = p * r + f(1.3333558e-3);
@@ -311,7 +338,7 @@ pub inline fn srgb(lin0: V3) V3 {
     const lin = lin0.saturate();
     const one = struct {
         inline fn ch(l: F) F {
-            const hi = f(1.055) * exp2(log2(@max(l, f(1e-30))) * f(1.0 / 2.4)) - f(0.055);
+            const hi = f(1.055) * exp2(log2(maxc(l, 1e-30)) * f(1.0 / 2.4)) - f(0.055);
             return sel(l <= f(0.0031308), l * f(12.92), hi);
         }
     };
@@ -336,6 +363,78 @@ const lane_ids: U = std.simd.iota(u32, N);
 
 const Shift = @Vector(N, u5);
 
+/// Threads in a browser (web/wasm). wasm has no thread to spawn from inside: the page starts
+/// Workers that share this module's memory, and each waits (Atomics.wait) on `epoch`, then
+/// calls argus_kernel_help, which runs the frame's Job.run (the same row-grabbing loop native
+/// threads run) until no rows are left. The drawing thread runs it too, then waits for every
+/// helper that joined, so the frame is complete when draw returns, as with join() natively.
+const on_wasm = builtin.cpu.arch.isWasm();
+const wasm_pool = on_wasm and !builtin.single_threaded;
+
+pub const WasmPool = struct {
+    pub const Work = struct { ctx: *anyopaque, run: *const fn (*anyopaque) void };
+    var work: std.atomic.Value(?*const Work) = .init(null);
+    var active: std.atomic.Value(u32) = .init(0);
+    var epoch: std.atomic.Value(u32) = .init(0);
+
+    fn dispatch(w: *const Work) void {
+        work.store(w, .seq_cst);
+        _ = epoch.fetchAdd(1, .seq_cst);
+        _ = notify(&epoch.raw, std.math.maxInt(u32));
+        w.run(w.ctx);
+        // No helper can take the work after this store; wait out the ones that already did.
+        work.store(null, .seq_cst);
+        while (true) {
+            const a = active.load(.seq_cst);
+            if (a == 0) break;
+            wait(&active.raw, a);
+        }
+    }
+
+    fn help() callconv(.c) void {
+        _ = active.fetchAdd(1, .seq_cst);
+        if (work.load(.seq_cst)) |w| w.run(w.ctx);
+        if (active.fetchSub(1, .seq_cst) == 1) _ = notify(&active.raw, 1);
+    }
+
+    /// The address of the u32 the page's Workers wait on.
+    fn epochAddr() callconv(.c) *u32 {
+        return &epoch.raw;
+    }
+
+    fn wait(ptr: *const u32, expect: u32) void {
+        _ = asm volatile (
+            \\local.get %[ptr]
+            \\local.get %[expect]
+            \\i64.const -1
+            \\memory.atomic.wait32 0
+            \\local.set %[ret]
+            : [ret] "=r" (-> u32),
+            : [ptr] "r" (ptr),
+              [expect] "r" (@as(i32, @bitCast(expect))),
+        );
+    }
+
+    fn notify(ptr: *const u32, count: u32) u32 {
+        return asm volatile (
+            \\local.get %[ptr]
+            \\local.get %[count]
+            \\memory.atomic.notify 0
+            \\local.set %[ret]
+            : [ret] "=r" (-> u32),
+            : [ptr] "r" (ptr),
+              [count] "r" (count),
+        );
+    }
+
+    comptime {
+        if (wasm_pool) {
+            @export(&help, .{ .name = "argus_kernel_help" });
+            @export(&epochAddr, .{ .name = "argus_kernel_epoch" });
+        }
+    }
+};
+
 /// A pixel buffer in any 32-bit RGB layout: `shift` is each channel's bit offset (R, G, B).
 /// argus_theme_draw is draw_target with {0, 8, 16} (Argus's [R, G, B, A] bytes); a host can
 /// instead hand over its display memory in the display's own order (X11 BGRX: {16, 8, 0})
@@ -350,9 +449,9 @@ pub const Target = extern struct {
 /// round(saturate(c) * 255) per channel, as the GPU harness packs, at the target's bit offsets.
 inline fn pack(c: V3, sr: Shift, sg: Shift, sb: Shift) U {
     const s = f(255);
-    const r: U = @intFromFloat(@round(k_sat(c.x) * s));
-    const g: U = @intFromFloat(@round(k_sat(c.y) * s));
-    const b: U = @intFromFloat(@round(k_sat(c.z) * s));
+    const r: U = @intFromFloat(round(k_sat(c.x) * s));
+    const g: U = @intFromFloat(round(k_sat(c.y) * s));
+    const b: U = @intFromFloat(round(k_sat(c.z) * s));
     return u(0xFF00_0000) | (r << sr) | (g << sg) | (b << sb);
 }
 
@@ -371,6 +470,10 @@ pub fn exportKernelTheme(comptime K: type) void {
             stride: usize,
             shift: [3]u8,
             next_row: std.atomic.Value(u32) = .init(0),
+
+            fn runErased(ctx: *anyopaque) void {
+                run(@ptrCast(@alignCast(ctx)));
+            }
 
             fn run(job: *Job) void {
                 @setFloatMode(.optimized);
@@ -403,7 +506,7 @@ pub fn exportKernelTheme(comptime K: type) void {
             self.* = .{
                 .frame = .{ .time = 0, .dt = 1.0 / 30.0, .frame = 0, .width = w, .height = h, .seed = 0x5EED },
                 .clock = 0,
-                .threads = @min(MAX_THREADS, std.Thread.getCpuCount() catch 1),
+                .threads = if (on_wasm) 1 else @min(MAX_THREADS, std.Thread.getCpuCount() catch 1),
             };
             return self;
         }
@@ -428,10 +531,17 @@ pub fn exportKernelTheme(comptime K: type) void {
             if (self.frame.height == 0 or target.len < (self.frame.height - 1) * target.stride + self.frame.width) return;
             for (target.shift) |s| if (s > 24) return;
             var job = Job{ .th = self, .px = target.px[0..target.len], .stride = target.stride, .shift = target.shift };
-            var pool: [MAX_THREADS]?std.Thread = @splat(null);
-            for (1..self.threads) |t| pool[t] = std.Thread.spawn(.{}, Job.run, .{&job}) catch null;
-            job.run();
-            for (pool[1..self.threads]) |th| if (th) |t| t.join();
+            if (on_wasm) {
+                if (wasm_pool) {
+                    const w = WasmPool.Work{ .ctx = &job, .run = Job.runErased };
+                    WasmPool.dispatch(&w);
+                } else job.run();
+            } else {
+                var pool: [MAX_THREADS]?std.Thread = @splat(null);
+                for (1..self.threads) |t| pool[t] = std.Thread.spawn(.{}, Job.run, .{&job}) catch null;
+                job.run();
+                for (pool[1..self.threads]) |th| if (th) |t| t.join();
+            }
         }
 
         fn allocsInit() callconv(.c) usize {
@@ -556,6 +666,36 @@ test "rand, noise and fbm match the scalar prelude bit for bit in every lane" {
             try std.testing.expectEqual(Ref.fbm(xs[i], ys[i], 4), b[i]);
             try std.testing.expectEqual(Ref.rand(cx[i], cy[i], 7), rd[i]);
         }
+    }
+}
+
+test "the wasm spellings of round, max and min match the builtins bit for bit" {
+    var prng = std.Random.DefaultPrng.init(3);
+    const r = prng.random();
+    const special = [_]f32{ 0.0, -0.0, 0.5, -0.5, 1.5, -1.5, 2.5, -2.5, 0.49999997, -0.49999997, 8388607.5, -8388607.5, 8388608.0, 1e30, -1e30, std.math.inf(f32), -std.math.inf(f32), std.math.nan(f32), 1e-30, -1e-30 };
+    for (0..20000) |i| {
+        var xs: [N]f32 = undefined;
+        for (&xs, 0..) |*x, j| {
+            const n = i * N + j;
+            x.* = if (n < special.len) special[n] else switch (n % 3) {
+                0 => (r.float(f32) - 0.5) * 600.0,
+                1 => @as(f32, @floatFromInt(r.intRangeAtMost(i32, -1000, 1000))) * 0.5,
+                else => @bitCast(r.int(u32)),
+            };
+        }
+        const v = lanesFrom(xs);
+        const got = [_][N]f32{ roundExact(v), maxcExact(v, 0), mincExact(v, 1), maxcExact(v, -126), mincExact(v, 127) };
+        const want = [_][N]f32{ @as(F, @round(v)), @as(F, @max(v, f(0))), @as(F, @min(v, f(1))), @as(F, @max(v, f(-126))), @as(F, @min(v, f(127))) };
+        for (got, want, 0..) |g, w, op| for (g, w, xs) |a, b, x| {
+            if (std.math.isNan(x)) {
+                // max/min of NaN: the builtin itself answers NaN or c depending on the backend
+                // and optimizer, so only round (NaN in, NaN out) is checked.
+                if (op == 0) try std.testing.expect(std.math.isNan(a));
+            } else if (@as(u32, @bitCast(a)) != @as(u32, @bitCast(b))) {
+                // maxNum(-0, +0) may be either zero (IEEE 754-2008); the spelling gives +0.
+                try std.testing.expect(a == 0 and b == 0 and x == 0);
+            }
+        };
     }
 }
 
