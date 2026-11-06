@@ -36,13 +36,14 @@ node site/tools/check.mjs --url http://127.0.0.1:8136/argus/ --out /tmp/site-che
   bench). Without a service worker, wasm falls back to `NAME.st.wasm` on one thread.
 - **No cross-origin requests.** Isolation (COEP `require-corp`) would block third-party
   embeds, so the video is a link with a local poster, and fonts are the system's.
-- **Zig is not compiled in the page.** A Zig 0.17 compiler built for wasm32-wasi has no LLVM, so
-  it cannot emit the ReleaseFast code the harness times, and its 32-bit `usize` would change
-  Gate 1's verdicts (`expected type 'u32', found 'usize'` compiles on wasm32). A pasted `.zig`
-  goes to a pull request (`.github/workflows/bench.yml` runs the native harness;
-  `bench-comment.yml` posts the report), or to the local commands; an uploaded `.wasm` from
-  `make web-wasm` runs through all 8 gates here. `make web-wasm` type-checks the theme for
-  aarch64-macos before building it, so its Gate 1 matches the native harness.
+- **Zig is compiled in the page** (`web/zigc/README.md`). A dropped or pasted `.zig` is
+  type-checked and built by zig.wasm (Zig 0.17.0 for wasm32-wasi, built in `pages.yml` from the
+  official source tarball), then graded by the same gates. Gate 1 is type-checked for wasm64 (64-bit
+  `usize`, so `expected type 'u32', found 'usize'` fails as it does on aarch64-macos); gates 2-7
+  give the native verdict; Gate 8 times a build from Zig's self-hosted backend (no LLVM, SIMD
+  or threads) and is labelled as such. The official verdict, Gate 8 included, is still the
+  pull request (`.github/workflows/bench.yml` runs the native harness; `bench-comment.yml` posts
+  the report). An uploaded `.wasm` from `make web-wasm` also runs through the gates here.
 - **The WGSL checks are the Metal harness's.** Compilation, the 320x200 watchdog, NaN/Inf,
   pixel variance, temporal motion and the 8,333 us GPU budget; alpha is shown but not gated, as
   in the Metal harness (the app presents opaque layers).

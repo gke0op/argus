@@ -6,7 +6,7 @@ THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: icon quasars all app desktop kronos harness linux web-wasm web-wasm-all web-wasm-refs web-wasm-serve check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
+.PHONY: icon quasars all app desktop kronos harness linux web-wasm web-wasm-all web-wasm-refs web-wasm-serve web-zigc web-zigc-test check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
 
 all: app kronos
 
@@ -77,6 +77,16 @@ web-wasm-refs: web-wasm-all
 		$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $$t --frames 120 --out $(WEB_WASM_OUT)/$$n.native.png > $(WEB_WASM_OUT)/$$n.native.txt 2>&1; \
 		echo "  native $$n: $$(grep -o 'Verdict *: [A-Z]*' $(WEB_WASM_OUT)/$$n.native.txt || echo 'did not compile')"; \
 	done
+
+# The bench page's in-browser compiler (web/zigc/README.md): zig.wasm (Zig 0.17.0 for wasm32-wasi;
+# .github/workflows/pages.yml builds it from the official source tarball) and the std import
+# closure of the release's lib, into web/zigc/build/. web-zigc-test compiles and grades the gate
+# fixtures, the BENCHMARK.md skeleton and Tutorial_Tides with it in Node.
+ZIG_WASM ?=
+web-zigc:
+	ZIG="$(ZIG)" ZIG_WASM="$(ZIG_WASM)" web/zigc/build.sh
+web-zigc-test:
+	node web/zigc/test.mjs --zig "$(ZIG_WASM)" --lib "$$($(ZIG) env | sed -n 's/^ *\.lib_dir = "\(.*\)",$$/\1/p')"
 
 # The dev page needs cross-origin isolation for threads; this server sends the COOP/COEP headers
 # (GitHub Pages cannot; there coi-serviceworker.js adds them, see web/wasm/README.md).

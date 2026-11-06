@@ -17,6 +17,7 @@ const builtin = @import("builtin");
 const theme = @import("theme");
 const gates = @import("harness_gates");
 const wasm_heap = @import("wasm_heap.zig");
+const root = @import("root");
 
 comptime {
     _ = theme;
@@ -43,6 +44,15 @@ extern fn argus_theme_step(state: ?*anyopaque, dt: f64) callconv(.c) void;
 extern fn argus_theme_draw(state: ?*anyopaque, pixels: [*]u32, buf_len: usize, stride: usize) callconv(.c) void;
 
 fn weak(comptime T: type, comptime name: []const u8) ?T {
+    // Zig's self-hosted wasm linker (the bench page's compiler, web/zigc) cannot leave a weak
+    // function undefined. There the root (web/zigc/root.zig) lists the ABI symbols the theme
+    // lacks, found by linking, and the rest are taken as plain externs.
+    if (comptime @hasDecl(root, "web_absent")) {
+        inline for (root.web_absent) |absent| {
+            if (comptime std.mem.eql(u8, absent, name)) return null;
+        }
+        return @extern(T, .{ .name = name });
+    }
     return @extern(?T, .{ .name = name, .linkage = .weak });
 }
 

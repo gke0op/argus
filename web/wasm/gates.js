@@ -60,9 +60,10 @@ export async function runGates(name, opts = {}) {
   }
   out.variant = m.variant;
   out.wasmKB = m.bytes / 1024;
-  gate(1, true, opts.module
+  // opts.gate1: the caller's own Gate 1 line (the bench page's in-browser compile).
+  gate(1, true, opts.gate1 ?? (opts.module
     ? `uploaded ${m.variant}.wasm (${(m.bytes / 1024).toFixed(1)} KB): built outside this page, compiled and linked here`
-    : `zig build-exe -target wasm32-freestanding -O ReleaseFast (${m.variant}, ${(m.bytes / 1024).toFixed(1)} KB), compiled and linked here`);
+    : `zig build-exe -target wasm32-freestanding -O ReleaseFast (${m.variant}, ${(m.bytes / 1024).toFixed(1)} KB), compiled and linked here`));
 
   const engine = await startEngine({ module: m.module, threaded: m.threaded, threads: opts.threads ?? 'auto' });
   out.threads = engine.threads;
