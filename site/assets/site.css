@@ -118,11 +118,11 @@ button:disabled { opacity: 0.45; cursor: default; }
 /* Entrance: once, on the compositor (opacity and transform only). */
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
-.hero-copy > * { animation: rise 0.9s var(--ease) both; }
+.hero-copy > * { animation: rise 0.9s var(--ease) backwards; }
 .hero-copy > :nth-child(2) { animation-delay: 0.08s; }
 .hero-copy > :nth-child(3) { animation-delay: 0.14s; }
 .hero-copy > :nth-child(4) { animation-delay: 0.2s; }
-.dock, .tele { animation: fade 1s 0.3s var(--ease) both; }
+.dock, .tele { animation: fade 1s 0.3s var(--ease) backwards; }
 
 /* Hide UI: everything over the theme fades, except one quiet "show UI" control in the corner
    (the same button; home.js toggles .bare on the hero and keeps its label, so CSS swaps the words). */
