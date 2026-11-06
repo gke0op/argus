@@ -305,6 +305,45 @@ button:disabled { opacity: 0.45; cursor: default; }
   [data-dir="c"] .picker { padding-left: 24px; }
 }
 
+/* ---- direction A, below the hero: no cards, no frames; hairlines only where data needs them */
+/* Sections: no bands, no cards, no eyebrow rules. */
+[data-dir="a"] main section.band { border-top: 0; }
+[data-dir="a"] .eyebrow { color: var(--mute); letter-spacing: 0.16em; }
+[data-dir="a"] .eyebrow::before { display: none; }
+[data-dir="a"] .card, [data-dir="a"] .install.mac, [data-dir="a"] .card.feature { background: none; border: 0; border-radius: 0; padding: 0; }
+[data-dir="a"] .installs { gap: 56px; margin-top: 8px; }
+[data-dir="a"] .install { gap: 14px; }
+[data-dir="a"] .card-head h3 { font-size: 1.25rem; }
+[data-dir="a"] .tag { border: 0; padding: 0; color: var(--mute); }
+[data-dir="a"] .code { background: none; border: 0; border-left: 1px solid var(--line-3); border-radius: 0; padding: 2px 0 2px 16px; font-size: 13.5px; }
+[data-dir="a"] .code pre { padding-right: 0; }
+[data-dir="a"] .code .copy { position: static; display: inline; margin-top: 10px; padding: 0; background: none; border: 0; border-radius: 0; font: 500 12px/1 var(--mono); color: var(--mute); text-decoration: underline; text-underline-offset: 0.25em; }
+[data-dir="a"] .code .copy:hover { color: #fff; }
+[data-dir="a"] .install.mac .code pre { font-size: 14px; color: #fff; }
+[data-dir="a"] .repo .btn { background: none; border: 0; padding: 0; color: var(--fg); font-weight: 500; }
+[data-dir="a"] .repo .btn:hover { text-decoration: underline; text-underline-offset: 0.25em; }
+
+/* Bench section: the list and the figures without frames; the table without a container. */
+[data-dir="a"] .gatelist { border: 0; border-radius: 0; background: none; }
+[data-dir="a"] .gatelist li { border: 0 !important; padding: 7px 0; gap: 14px; }
+[data-dir="a"] .gatelist .n { width: auto; height: auto; background: none; border: 0; color: var(--mute); }
+[data-dir="a"] .figures { border: 0; margin-top: 56px; }
+[data-dir="a"] .figures > div + div { border-left: 0; }
+[data-dir="a"] .tablewrap { border: 0; border-radius: 0; background: none; }
+[data-dir="a"] table.lb th, [data-dir="a"] table.lb th:nth-child(1) { background: var(--bg); border-bottom-color: var(--line-2); }
+[data-dir="a"] table.lb td:nth-child(1) { background: var(--bg); }
+[data-dir="a"] table.lb th:first-child, [data-dir="a"] table.lb td:first-child { padding-left: 0; }
+[data-dir="a"] tbody tr:hover td, [data-dir="a"] table.lb tbody tr:hover td:nth-child(1) { background: #0a0a0c; }
+[data-dir="a"] .lb-head { margin-top: 64px; }
+[data-dir="a"] .grid { gap: 40px 48px; }
+[data-dir="a"] .grid + .grid { margin-top: 56px; }
+
+[data-dir="a"] .video { box-shadow: none; border-radius: 4px; }
+[data-dir="a"] .video .play { background: none; border: 0; padding-left: 0; text-shadow: 0 1px 8px #000; }
+[data-dir="a"] main :not(pre) > code { border: 0; background: rgba(255, 255, 255, 0.06); }
+[data-dir="a"] .cta-band { background: none; border: 0; border-radius: 0; padding: 0; margin-top: 72px; }
+@media (min-width: 720px) { [data-dir="a"] table.lb th:nth-child(1), [data-dir="a"] table.lb td:nth-child(1) { box-shadow: none; } }
+
 /* ---- sections ------------------------------------------------------------------------ */
 main section.band { padding: clamp(72px, 10vw, 148px) var(--gutter-r) clamp(72px, 10vw, 148px) var(--gutter); border-top: 1px solid var(--line); }
 .wrap { max-width: 72rem; margin: 0 auto; }
