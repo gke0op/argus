@@ -41,6 +41,17 @@ done
 mkdir -p "$OUT/web/wasm/build"
 cp web/wasm/build/*.wasm web/wasm/build/*.compile.txt web/wasm/build/manifest.json "$OUT/web/wasm/build/"
 
+# The bench page's in-browser compiler (make web-zigc ZIG_WASM=...; CI builds zig.wasm). Without
+# it the page still grades prebuilt and uploaded builds; REQUIRE_ZIGC=1 (CI) makes it an error.
+if [ -f web/zigc/build/manifest.json ]; then
+    mkdir -p "$OUT/web/zigc"
+    cp -R web/zigc/build "$OUT/web/zigc/build"
+elif [ "${REQUIRE_ZIGC:-0}" = 1 ]; then
+    echo "site: web/zigc/build is missing (make web-zigc ZIG_WASM=...)" >&2; exit 1
+else
+    echo "site: no web/zigc/build: the bench page cannot compile Zig (make web-zigc ZIG_WASM=...)" >&2
+fi
+
 # The Zig sources of the bench page's prebuilt builds, to read next to their verdicts.
 mkdir -p "$OUT/bench/zig"
 cp tests/fixtures/Gate*.zig tests/fixtures/Fixture_*.zig web/wasm/build/stage/Bench_Skeleton.zig "$OUT/bench/zig/"

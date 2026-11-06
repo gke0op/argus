@@ -1,7 +1,9 @@
 name: Pages
 
 # The public site (site/, see site/README.md): the wasm builds with the pinned Zig 0.17.0, the
-# pages filled from BENCHMARK.md, the three web engines, assembled by site/build.sh.
+# pages filled from BENCHMARK.md, the three web engines and the bench page's in-browser Zig
+# compiler (web/zigc: zig.wasm built here from the official source tarball, cached), assembled
+# by site/build.sh.
 #
 # Every push to main builds it (so a broken site fails here). It deploys only once the owner
 # has turned Pages on: Settings > Pages > Source: GitHub Actions, then the repository variable
@@ -22,7 +24,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # A cold zig.wasm build (no cache yet, or tools/get-zig-wasm.sh changed) takes most of this.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
@@ -35,15 +38,42 @@ jobs:
       - name: Install the pinned Zig (tools/get-zig.sh, SHA-256 checked)
         run: tools/get-zig.sh
 
+      # zig.wasm: Zig 0.17.0's compiler for wasm32-wasi, from the source tarball whose SHA-256
+      # ziglang.org/download/index.json lists (and tools/get-zig-wasm.sh pins). ~4.2 MB; built
+      # once per change of that script, never committed.
+      - name: Cache zig.wasm
+        id: zigwasm
+        uses: actions/cache@v4
+        with:
+          path: .zig-wasm
+          key: zig-wasm-0.17.0-dev-wasm-${{ hashFiles('tools/get-zig-wasm.sh') }}
+
+      - name: Build zig.wasm from the official Zig 0.17.0 source (tools/get-zig-wasm.sh, SHA-256 checked)
+        if: steps.zigwasm.outputs.cache-hit != 'true'
+        run: tools/get-zig-wasm.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # web/zigc/build/: the compiler and the std import closure, gzipped, for the bench page.
+      # Then, in Node, the page's compile on every gate fixture, the skeleton and Tutorial_Tides:
+      # each must get its own gate's verdict.
+      - name: The in-browser compiler, and its gate fixtures
+        run: |
+          make web-zigc ZIG_WASM=.zig-wasm/zig.wasm
+          make web-zigc-test ZIG_WASM=.zig-wasm/zig.wasm
+
       - name: Test the site tools
         run: |
           .toolchain/zig test site/tools/render.zig
           .toolchain/zig test site/tools/serve.zig
+          .toolchain/zig test web/zigc/bundle.zig
 
       # make web-wasm-all: the wasm themes, the BENCHMARK.md skeleton and the gate fixtures, each
       # as NAME.mt.wasm (threads) and NAME.st.wasm; then the pages and the engines into _site/.
       - name: Build the wasm and assemble the site
-        run: REBUILD_WASM=1 site/build.sh _site
+        run: REBUILD_WASM=1 REQUIRE_ZIGC=1 site/build.sh _site
 
       - name: Upload the site
         uses: actions/upload-pages-artifact@v3
