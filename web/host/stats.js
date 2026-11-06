@@ -13,14 +13,15 @@ const f = Math.fround;
 const sin32 = (x) => f(Math.sin(f(x)));
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 
-export function synthetic(seq) {
+// `cores`: how many per-core loads to fill (10 in the harness; the browser's core count live).
+export function synthetic(seq, cores = 10) {
   const t = f(seq);
   const s = {
     seq: seq >>> 0,
     sample_dt: 1.0,
     uptime_s: 3 * 86400 + 4 * 3600 + seq,
     thermal: seq % 120 >= 100 ? 1 : 0,
-    cpu_total: 0, cpu_count: 10, cpu_p_cores: 6, cpu_e_cores: 4,
+    cpu_total: 0, cpu_count: Math.min(cores, MAX_CORES), cpu_p_cores: 6, cpu_e_cores: 4,
     cpu_core: new Array(MAX_CORES).fill(0),
     mem_total_gb: 16.0,
     mem_used_gb: f(f(10.5 + f(1.2 * sin32(t * f(0.05)))) + f(0.15 * sin32(t * f(0.9)))),
@@ -122,31 +123,20 @@ export class BrowserStats {
     const dt = this.lastSample === -Infinity ? 1 : (nowMs - this.lastSample) / 1000;
     this.lastSample = nowMs;
     this.seq += 1;
-    const s = synthetic(this.seq);
+    const cores = navigator.hardwareConcurrency ? Math.min(navigator.hardwareConcurrency, MAX_CORES) : 10;
+    const s = synthetic(this.seq, cores);
     const src = {};
     for (const k of Object.keys(s)) src[k] = 'synthetic';
     s.seq = this.seq; src.seq = 'live';
     s.sample_dt = Math.fround(dt); src.sample_dt = 'live';
     if (navigator.hardwareConcurrency) {
-      s.cpu_count = Math.min(navigator.hardwareConcurrency, MAX_CORES);
+      // The count is live; the per-core loads stay synthetic (the same formula, one per core).
       s.cpu_p_cores = 0; s.cpu_e_cores = 0; // the browser doesn't say
       src.cpu_count = 'live (navigator.hardwareConcurrency)';
       src.cpu_p_cores = src.cpu_e_cores = 'unknown in a browser (0)';
-      // Per-core loads stay synthetic; keep only cpu_count of them and re-total.
-      let sum = 0;
-      for (let c = 0; c < MAX_CORES; c++) {
-        if (c >= s.cpu_count) s.cpu_core[c] = 0;
-        else {
-          if (s.cpu_core[c] === 0) s.cpu_core[c] = 0.2;
-          sum += s.cpu_core[c];
-        }
-      }
-      s.cpu_total = Math.fround(sum / s.cpu_count);
     }
-    if (navigator.deviceMemory) {
-      s.mem_total_gb = navigator.deviceMemory;
-      src.mem_total_gb = 'live (navigator.deviceMemory, rounded and capped by the browser)';
-    }
+    // navigator.deviceMemory is rounded and capped (8 in Chrome), so it would misreport most Macs:
+    // mem_total_gb stays synthetic.
     if (this.pressure !== null) { s.thermal = this.pressure; src.thermal = 'live (Compute Pressure API: CPU pressure state)'; }
     if (this.battery) {
       const b = this.battery;

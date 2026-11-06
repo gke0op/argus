@@ -85,13 +85,12 @@ which is which, and `index.html` shows it:
 | Field | Source |
 |---|---|
 | `seq`, `sample_dt` | live: a new sample about once a second |
-| `cpu_count` | live: `navigator.hardwareConcurrency` (P/E split unknown: 0) |
-| `mem_total_gb` | live where available: `navigator.deviceMemory` (Chromium; rounded and capped by the browser) |
+| `cpu_count` | live: `navigator.hardwareConcurrency` (P/E split unknown: 0; per-core loads synthetic) |
 | `thermal` | live where available: the Compute Pressure API's CPU pressure state (Chromium) |
 | `battery_*`, `on_ac` | live where available: the Battery Status API (Chromium) |
 | `gpu_busy` | live: this page's own GPU time / frame interval |
 | `uptime_s` | live: the page's uptime, not the machine's |
-| everything else (per-core load, memory use, network, disk, processes) | synthetic |
+| everything else (per-core load, memory size and use, network, disk, processes) | synthetic (`navigator.deviceMemory` is capped at 8 GB, so it isn't used) |
 
 ## Writing or translating a theme in WGSL
 
@@ -137,6 +136,8 @@ Language traps when translating from Metal:
   side indexes out of range or costs a lot.
 - No swizzle assignment (`v.xy = ...`): assign components or rebuild the vector.
 - Parameters are immutable (copy to a `var`); `x++` is a statement, never an expression.
+- `round()` differs: Metal rounds halves away from zero, WGSL to even (`rint` matches WGSL's).
+  Translate Metal's `round(x)` as `select(floor(x + 0.5), ceil(x - 0.5), x < 0.0)`-style code.
 - `fmod(x, y)` is `x % y` for floats (both truncate); `rsqrt` is `inverseSqrt`; `atan2`, `fract`,
   `mix`, `clamp`, `saturate`, `smoothstep`, `step`, `fma` keep their meaning. There is no `isnan`.
 - Matrices are column-major in both: `float2x2(a, b, c, d)` is `mat2x2f(a, b, c, d)`.

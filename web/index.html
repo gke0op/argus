@@ -66,12 +66,6 @@ async function load() {
     const buildMs = performance.now() - t0;
     frameTimes.length = 0;
     stop = runLoop(engine, (now, dt) => { frameTimes.push(dt * 1000); if (frameTimes.length > 240) frameTimes.shift(); });
-    const sources = engine.statsSources?.();
-    if (sources) {
-      const synth = Object.entries(sources).filter(([, v]) => String(v).startsWith('synthetic')).map(([k]) => k);
-      const live = Object.entries(sources).filter(([, v]) => String(v).startsWith('live')).map(([k]) => k);
-      $('src').textContent = `stats: live ${live.join(', ') || '—'}; synthetic ${synth.join(', ') || '—'}`;
-    }
     $('read').dataset.build = buildMs.toFixed(0);
   } catch (e) {
     $('err').textContent = String(e.message ?? e);
@@ -82,6 +76,12 @@ const med = (a) => { if (!a.length) return NaN; const s = [...a].sort((x, y) => 
 setInterval(() => {
   if (!engine) return;
   const s = engine.stats();
+  const sources = engine.statsSources?.();
+  if (sources && Object.keys(sources).length) {
+    const pick = (p) => Object.entries(sources).filter(([, v]) => p(String(v))).map(([k]) => k).join(', ') || '—';
+    $('src').textContent = sources.all ? `stats: ${sources.all}` :
+      `stats live: ${pick((v) => v.startsWith('live'))}. Synthetic: ${pick((v) => v.startsWith('synthetic'))}`;
+  }
   const interval = med(frameTimes);
   const hz = 1000 / interval;
   $('read').innerHTML =
