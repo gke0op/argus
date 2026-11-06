@@ -517,6 +517,21 @@ table.gates tr:has(.st.skip) td:nth-child(2) { color: var(--fg-2); }
 details { margin: 0.8rem 0; }
 summary { cursor: pointer; color: var(--fg); }
 
+/* ---- buttons in the links' violet ------------------------------------------------------- */
+:root { --vi: 201, 210, 255; }
+button, .btn { color: rgb(var(--vi)); background: rgba(var(--vi), 0.05); border-color: rgba(var(--vi), 0.42); }
+button:hover, .btn:hover { color: #fff; background: rgba(var(--vi), 0.12); border-color: rgba(var(--vi), 0.6); }
+.btn.primary, button.primary { color: rgb(var(--vi)); background: rgba(var(--vi), 0.14); border-color: rgba(var(--vi), 0.9); }
+.btn.primary:hover, button.primary:hover { color: #fff; background: rgba(var(--vi), 0.2); border-color: rgb(var(--vi)); }
+.hero .ctas .btn { color: rgb(var(--vi)); background: rgba(4, 4, 10, 0.5); border-color: rgba(var(--vi), 0.45); }
+.hero .ctas .btn:hover { color: #fff; background: rgba(var(--vi), 0.12); border-color: rgba(var(--vi), 0.65); }
+.hero .ctas .btn.primary { color: rgb(var(--vi)); background: rgba(var(--vi), 0.16); border-color: rgba(var(--vi), 0.9); }
+.hero .ctas .btn.primary:hover { color: #fff; background: rgba(var(--vi), 0.22); border-color: rgb(var(--vi)); }
+.hero .chip[aria-pressed="true"] { color: rgb(var(--vi)); background: rgba(var(--vi), 0.16); border-color: rgba(var(--vi), 0.9); }
+.hero .chip[aria-pressed="true"] small { color: rgba(var(--vi), 0.7); }
+.tabs button[aria-selected="true"] { background: rgba(var(--vi), 0.14); color: rgb(var(--vi)); box-shadow: inset 0 0 0 1px rgba(var(--vi), 0.9); }
+.tabs button { border: 0; }
+
 /* ---- motion off ------------------------------------------------------------------------ */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
