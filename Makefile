@@ -48,6 +48,9 @@ WASM_FLAGS = -O ReleaseFast -target wasm32-freestanding -fno-entry -rdynamic -fs
 	--dep theme --dep harness_gates -Mroot=web/wasm/runtime.zig -Mtheme=$(THEME) -Mharness_gates=src/harness_gates.zig
 web-wasm:
 	@mkdir -p $(WEB_WASM_OUT)
+	@# Gate 1 as the native harness sees it: on wasm32 usize is 32 bits, so `const x: u32 = n_usize;`
+	@# compiles there and fails on aarch64-macos. Type-check for the app's target first.
+	$(ZIG) build-lib -dynamic -lc -fno-emit-bin -O ReleaseFast -target aarch64-macos $(THEME)
 	$(ZIG) build-exe -mcpu=generic+simd128+atomics+bulk_memory -fno-single-threaded --shared-memory $(WASM_FLAGS) -femit-bin=$(WEB_WASM_OUT)/$(basename $(notdir $(THEME))).mt.wasm
 	$(ZIG) build-exe -mcpu=generic+simd128 -fsingle-threaded $(WASM_FLAGS) -femit-bin=$(WEB_WASM_OUT)/$(basename $(notdir $(THEME))).st.wasm
 

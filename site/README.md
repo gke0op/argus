@@ -41,7 +41,8 @@ node site/tools/check.mjs --url http://127.0.0.1:8136/argus/ --out /tmp/site-che
   Gate 1's verdicts (`expected type 'u32', found 'usize'` compiles on wasm32). A pasted `.zig`
   goes to a pull request (`.github/workflows/bench.yml` runs the native harness;
   `bench-comment.yml` posts the report), or to the local commands; an uploaded `.wasm` from
-  `make web-wasm` runs through all 8 gates here.
+  `make web-wasm` runs through all 8 gates here. `make web-wasm` type-checks the theme for
+  aarch64-macos before building it, so its Gate 1 matches the native harness.
 - **The WGSL checks are the Metal harness's.** Compilation, the 320x200 watchdog, NaN/Inf,
   pixel variance, temporal motion and the 8,333 us GPU budget; alpha is shown but not gated, as
   in the Metal harness (the app presents opaque layers).
