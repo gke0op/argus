@@ -69,6 +69,48 @@ and the official Gate 8 is the native harness's. Before grading, the page times 
 frame; if the gates' 120 frames at 1920x1200 would take over 90 s, it shows Gate 1, runs the
 theme live at a size it can draw, and offers to run the gates anyway.
 
+## Every run ends, visibly
+
+A run (a compile here, a prebuilt build, an upload) always ends with a verdict or a message. A
+new run cancels the one in flight, the Cancel button cancels it, and the progress line shows
+what it is doing and for how long.
+
+| stage | limit | then |
+| :--- | :--- | :--- |
+| loading the compiler | each download 3 tries (20 s without data fails a try); 45 s without progress | "the compiler did not load: ..."; the next compile loads afresh |
+| compiling | 60 s (`client.js`) | the Worker is terminated: "the compiler did not finish in 60 s", with Zig's output so far |
+| zig.wasm traps | - | the message by kind (`wasi.js` WasiCrash): out of stack, out of memory (also Zig's own `error: OutOfMemory`), a Zig panic with its text, any other trap. Gate 1 is "not decided" here |
+| a Worker error, an unreadable message | - | the Worker is terminated; the next compile gets a fresh one |
+| loading the module in the page | 30 s | "Zig built a module that this browser could not load" |
+| speed probe | 10 s, Workers terminated | the gates run (their watchdog decides) |
+| starting the gate Workers | 15 s | Gate 3 FAIL: "the module did not start in a Worker" |
+| the gates | watchdog 10 s, init 120 s, frames 30 s + 2 s each (as before) | Gate 3 or 8 FAIL "hung"; a trap (a panic, out of memory) is Gate 3 or 8 FAIL "crashed: ..." |
+| the live view | 15 s to start | "Live view failed" |
+
+After a crash, a time-out or a cancel the compiler's Worker is thrown away (zig.wasm's memory
+with it), and so is a Worker whose zig.wasm grew past 1.5 GB. `/cache` is saved to IndexedDB
+only after runs where zig.wasm exited normally, with its SHA-256; a record that does not verify
+or unpack is deleted on load (the page says so) and the compile starts from an empty cache. A
+crash with a restored cache is retried once without it.
+
+Editing the source marks the result below as out of date. A paste that fills the editor (it was
+empty, or all of it was selected) compiles at once, as a paste outside a field does.
+
+**Pathological inputs** (`cases.js`, in `make web-zigc-test` and `verify.html`): endless
+comptime recursion, a 256 MB comptime table, 200,000 nested parentheses, endless loops in init
+and in step, an allocation storm, 500 KB of source, 64 KB of random bytes. Each ends with its
+expected outcome within its limit, and the skeleton compiles and passes after each. Two of
+them differ from native Zig, and the page says why:
+
+- Endless comptime recursion: native Zig stops it with "evaluation exceeded 1000 backwards
+  branches" (Gate 1 FAIL). zig.wasm runs on the browser's stack, which is far smaller, and
+  overflows first: comptime recursion reaches 100-200 calls in Node's default stack (400 with
+  a 4 MB stack). The page reports "the compiler ran out of stack", Gate 1 not decided.
+- A 256 MB comptime table: zig.wasm grows to 3.1 GB and reports OutOfMemory after 12-13 s (Node,
+  Chrome). The page reports "the compiler ran out of memory", Gate 1 not decided.
+
+200,000 nested parentheses crash native Zig too (stack overflow).
+
 ## The standard library bundle
 
 Zig runs AstGen on every file reachable through an `@import("x.zig")` string, analysed or not,
@@ -114,5 +156,6 @@ skipped: Gate 1's type-check goes from 1.2 s to under 0.1 s in Node.
 | `bundle.zig` | the std import closure as one file |
 | `build.sh` | `web/zigc/build/`: `zig.wasm.gz`, `zig-lib.bin.gz`, support sources, `manifest.json` |
 | `node.mjs` | run zig.wasm in Node through `wasi.js` with any arguments |
-| `test.mjs` | the page's compile and gates on the fixtures, in Node (`make web-zigc-test`) |
+| `test.mjs` | the page's compile and gates on the fixtures and `cases.js`, in Node (`make web-zigc-test`) |
+| `cases.js` | the pathological inputs |
 | `verify.html`, `verify.mjs` | drive the real bench page in a browser and collect the verdicts |

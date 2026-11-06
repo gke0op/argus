@@ -40,7 +40,7 @@ export async function runGates(name, opts = {}) {
   const width = opts.width ?? 1920, height = opts.height ?? 1200, frames = opts.frames ?? 120;
   // The watchdog gets Argus.app's 10 s (its verifier runs that probe). The harness itself has no
   // limit; the page needs one, so init and the frames get room even for a slow machine.
-  const limit = { watchdog: 10000, init: 120000, frames: 30000 + frames * 2000, inspect: 30000, ...(opts.limitMs || {}) };
+  const limit = { start: 15000, watchdog: 10000, init: 120000, frames: 30000 + frames * 2000, inspect: 30000, ...(opts.limitMs || {}) };
   const out = { name, width, height, frames, gates: [], pass: false, report: null, text: '', pixels: null, timedOut: null, threads: 0, variant: '' };
   const gate = (id, pass, detail) => out.gates.push({ ...GATES[id - 1], pass, detail });
 
@@ -65,7 +65,31 @@ export async function runGates(name, opts = {}) {
     ? `uploaded ${m.variant}.wasm (${(m.bytes / 1024).toFixed(1)} KB): built outside this page, compiled and linked here`
     : `zig build-exe -target wasm32-freestanding -O ReleaseFast (${m.variant}, ${(m.bytes / 1024).toFixed(1)} KB), compiled and linked here`));
 
-  const engine = await startEngine({ module: m.module, threaded: m.threaded, threads: opts.threads ?? 'auto' });
+  // opts.signal (an AbortSignal) cancels: the Workers are terminated and out.cancelled is set.
+  const cancelled = opts.signal ? new Promise((resolve) => {
+    if (opts.signal.aborted) resolve({ cancelled: true });
+    opts.signal.addEventListener('abort', () => resolve({ cancelled: true }), { once: true });
+  }) : new Promise(() => {});
+  const notRun = (from, why = 'not run') => { for (let i = from; i <= 8; i++) gate(i, null, why); };
+  // Starting the Workers is bounded too (limit.start): a browser that cannot start them fails here.
+  const starting = startEngine({ module: m.module, threaded: m.threaded, threads: opts.threads ?? 'auto' });
+  let startTimer;
+  const st = await Promise.race([
+    starting.then((engine) => ({ engine }), (error) => ({ error })),
+    new Promise((resolve) => { startTimer = setTimeout(() => resolve({ timeout: true }), limit.start ?? 15000); }),
+    cancelled,
+  ]);
+  clearTimeout(startTimer);
+  if (!st.engine) {
+    starting.then((e) => e.terminate(), () => {});
+    if (st.cancelled) { out.cancelled = true; notRun(2, 'cancelled'); out.text = reportText(out); return out; }
+    gate(2, null, 'not run');
+    gate(3, false, st.timeout ? `the module did not start in a Worker within ${((limit.start ?? 15000) / 1000).toFixed(0)} s` : `the module did not start in a Worker: ${String(st.error && st.error.message || st.error).split('\n')[0]}`);
+    notRun(4);
+    out.text = reportText(out);
+    return out;
+  }
+  const engine = st.engine;
   out.threads = engine.threads;
   let phase = 'watchdog';
   let timer = null;
@@ -78,9 +102,35 @@ export async function runGates(name, opts = {}) {
     arm();
   });
   const t0 = performance.now();
-  const res = await Promise.race([engine.leader.call('gates', { w: width, h: height, frames }), timeout]);
+  // A theme that traps (a Zig panic, out of memory, a stack overflow) rejects the call.
+  const res = await Promise.race([engine.leader.call('gates', { w: width, h: height, frames }).catch((e) => ({ crash: String(e && e.message || e) })), timeout, cancelled]);
   clearTimeout(timer);
   out.wallMs = performance.now() - t0;
+
+  if (res.cancelled) {
+    engine.terminate();
+    out.cancelled = true;
+    notRun(2, 'cancelled');
+    out.text = reportText(out);
+    return out;
+  }
+  if (res.crash) {
+    engine.terminate();
+    const msg = res.crash.split('\n')[0].replace(/^(Error: )+/, '');
+    out.crashed = { phase, message: msg };
+    // As for a hang (below): the watchdog or init is Gate 3's, the frame loop Gate 8's.
+    if (phase === 'watchdog' || phase === 'init') {
+      gate(2, null, 'not run');
+      gate(3, false, `crashed in the ${phase === 'watchdog' ? '320x200 probe' : 'main init'}: ${msg}`);
+      notRun(4);
+    } else {
+      for (let i = 2; i <= 7; i++) gate(i, null, 'not run');
+      gate(8, false, `crashed in the frame loop: ${msg}`);
+    }
+    out.gates.sort((a, b) => a.id - b.id);
+    out.text = reportText(out);
+    return out;
+  }
 
   if (res.timeout) {
     engine.terminate();

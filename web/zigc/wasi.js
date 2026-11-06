@@ -416,13 +416,35 @@ export function runWasi(module, opts) {
     } : f;
   }
   const t0 = performance.now();
-  const inst = new WebAssembly.Instance(module, imports);
+  const join = (chunks) => { let n = 0; for (const c of chunks) n += c.length; const b = new Uint8Array(n); let o = 0; for (const c of chunks) { b.set(c, o); o += c.length; } return dec.decode(b); };
+  let inst;
+  try { inst = new WebAssembly.Instance(module, imports); } catch (e) { throw new WasiCrash(e, '', 0, performance.now() - t0); }
   memory = inst.exports.memory;
   let code = 0;
   try { inst.exports._start(); } catch (e) {
     if (e instanceof ProcExit) code = e.code;
-    else throw e;
+    else throw new WasiCrash(e, join(out.stderr), memory.buffer.byteLength, performance.now() - t0);
   }
-  const join = (chunks) => { let n = 0; for (const c of chunks) n += c.length; const b = new Uint8Array(n); let o = 0; for (const c of chunks) { b.set(c, o); o += c.length; } return dec.decode(b); };
-  return { code, stdout: join(out.stdout), stderr: join(out.stderr), ms: performance.now() - t0 };
+  return { code, stdout: join(out.stdout), stderr: join(out.stderr), ms: performance.now() - t0, memBytes: memory.buffer.byteLength };
+}
+
+/// The program did not exit: it trapped, or the engine stopped it. `kind`:
+///   'stack-overflow'  the JS engine's stack ran out (RangeError: Maximum call stack size exceeded)
+///   'out-of-memory'   the engine could not grow or allocate memory
+///   'panic'           a trap after Zig printed "panic: ..." (unreachable: a Zig panic)
+///   'trap'            any other WebAssembly trap (unreachable, out of bounds, ...)
+///   'error'           anything else
+/// `stderr`: what the program wrote before it; `memBytes`: its memory at that moment.
+export class WasiCrash extends Error {
+  constructor(cause, stderr, memBytes, ms, forceKind) {
+    const msg = String(cause && cause.message || cause);
+    const kind = forceKind ? forceKind : /call stack|too much recursion|stack overflow/i.test(msg) ? 'stack-overflow'
+      : /out of memory|Memory\.grow|allocation failed|could not allocate/i.test(msg) || cause instanceof RangeError && /memory/i.test(msg) ? 'out-of-memory'
+      : /^\s*panic: /m.test(stderr) ? 'panic'
+      : cause instanceof WebAssembly.RuntimeError ? 'trap' : 'error';
+    super(`${kind}: ${msg}`);
+    this.kind = kind; this.cause = cause; this.stderr = stderr; this.memBytes = memBytes; this.ms = ms;
+    const p = /^\s*panic: (.*)$/m.exec(stderr);
+    this.panic = p ? p[1] : null;
+  }
 }

@@ -86,7 +86,7 @@ ZIG_WASM ?=
 web-zigc:
 	ZIG="$(ZIG)" ZIG_WASM="$(ZIG_WASM)" web/zigc/build.sh
 web-zigc-test:
-	node web/zigc/test.mjs --zig "$(ZIG_WASM)" --lib "$$($(ZIG) env | sed -n 's/^ *\.lib_dir = "\(.*\)",$$/\1/p')"
+	node web/zigc/test.mjs --pathological --zig "$(ZIG_WASM)" --lib "$$($(ZIG) env | sed -n 's/^ *\.lib_dir = "\(.*\)",$$/\1/p')"
 
 # The dev page needs cross-origin isolation for threads; this server sends the COOP/COEP headers
 # (GitHub Pages cannot; there coi-serviceworker.js adds them, see web/wasm/README.md).
