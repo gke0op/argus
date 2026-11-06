@@ -44,7 +44,18 @@ export async function getDevice() {
           maxTextureDimension2D: L.maxTextureDimension2D,
         },
       });
-      device.lost.then((info) => { console.error(`WebGPU device lost: ${info.reason} ${info.message}`); devicePromise = null; });
+      // A driver that gives up (a shader it cannot compile, a dispatch it kills) shows up only as a
+      // lost device or an uncaptured error; keep both so the running engine can report them.
+      device.argusErrors = { lost: null, gpu: null };
+      device.lost.then((info) => {
+        console.error(`WebGPU device lost: ${info.reason} ${info.message}`);
+        device.argusErrors.lost = `the GPU device was lost (${info.reason || 'unknown'})${info.message ? `: ${info.message}` : ''}`;
+        devicePromise = null;
+      });
+      device.addEventListener('uncapturederror', (e) => {
+        console.error('WebGPU error:', e.error.message);
+        device.argusErrors.gpu ??= `GPU error: ${e.error.message}`;
+      });
       const ai = adapter.info ?? {};
       device.argusAdapter = `${ai.vendor ?? ''} ${ai.architecture ?? ''} ${ai.description ?? ''}`.trim();
       return device;
@@ -127,6 +138,7 @@ function formatCompileMessages(msgs, label, preludeLines) {
  */
 export async function create(canvas, opts = {}) {
   const device = opts.device ?? await getDevice();
+  if (device.argusErrors) device.argusErrors.gpu = null; // the previous theme's, not this one's
   const label = opts.theme ? `${String(opts.theme).replace(/^.*\//, '').replace(/\.wgsl$/, '')}.wgsl` : 'theme.wgsl';
   const name = label.replace(/\.wgsl$/, '');
 
@@ -431,7 +443,8 @@ export async function create(canvas, opts = {}) {
       if (stateFollowsOutput) { dir.stateW = w; dir.stateH = h; fr.stateW = w; fr.stateH = h; makeState(); }
     },
     stats() {
-      return { gpuMs: median(timing.gpuHist), drawMs: median(timing.drawHist), cpuMs: median(timing.cpuHist), width: outW, height: outH, frame: fr.frame, time: fr.time };
+      const error = device.argusErrors ? (device.argusErrors.lost ?? device.argusErrors.gpu ?? undefined) : undefined;
+      return { gpuMs: median(timing.gpuHist), drawMs: median(timing.drawHist), cpuMs: median(timing.cpuHist), width: outW, height: outH, frame: fr.frame, time: fr.time, error };
     },
     gpuSamples() { return [...timing.gpuHist]; },
     statsSources() { return vitals ? vitals.sources : (dir.stats ? { all: 'synthetic (the Metal harness feed)' } : null); },

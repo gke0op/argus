@@ -18,7 +18,7 @@ let gpu = { ok: false, why: 'checking' };
 let current = null;   // the mounted handle
 let loading = null;   // id being loaded
 let half = q.get('res') === 'half';
-let note = '', err = '';
+let note = '', err = '', errShown = false;
 let firstFrameMs = null;
 
 function chips() {
@@ -48,7 +48,7 @@ async function select(id, { replace = false } = {}) {
   if (t.kind !== 'wasm' && !gpu.ok) return;
   loading = id;
   mark(id);
-  note = ''; err = '';
+  note = ''; err = ''; errShown = false;
   const u = new URL(location.href);
   u.searchParams.set('theme', id);
   history[replace ? 'replaceState' : 'pushState'](null, '', u);
@@ -106,6 +106,7 @@ function tele() {
     html += row('frame rate', `${f(r.fps, 0)} fps of ${f(r.hz, 0)} Hz`);
     if (firstFrameMs != null) html += row('first frame', `${f(firstFrameMs, 0)} ms`, 'wide');
     if (r.kind === 'wgsl' && r.gpuMs == null && r.cpuMs != null && current.engine.stats().frame > 60) note ||= 'No timestamp-query here, so GPU time is not measured.';
+    if (r.error && !err) err = `${current.theme.label} can’t run on this GPU: ${r.error}`;
     if (r.statsSources && !r.statsSources.all) note ||= 'In the app these are your Mac’s; a browser knows only a few about itself.';
   } else if (loading) {
     html += row('engine', 'loading…');
@@ -114,6 +115,8 @@ function tele() {
   if (note) html += `<div class="note">${note}${note.startsWith('One thread') ? ' <button type="button" id="isoBtn">reload with threads</button>' : ''}</div>`;
   if (err) html += `<div class="err">${err.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div>`;
   teleBody.innerHTML = html;
+  // A folded readout (phones) would hide the error: unfold it once per failure.
+  if (err && !errShown) { errShown = true; $('tele').classList.remove('min'); $('teleBtn').textContent = '–'; }
   if (current) {
     const r = current.readout();
     const ms = r.kind === 'wasm' ? `CPU ${f(r.cpuMs)} ms · ${r.threads ?? 1}T` : `GPU ${r.gpuMs == null ? 'n/a' : f(r.gpuMs) + ' ms'}`;
