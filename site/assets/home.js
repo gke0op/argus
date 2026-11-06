@@ -103,7 +103,7 @@ function tele() {
       }
       html += row('size', `${r.width}×${r.height}`, 'wide');
     }
-    html += row('display', `${f(r.hz, 0)} Hz`);
+    html += row('frame rate', `${f(r.fps, 0)} fps of ${f(r.hz, 0)} Hz`);
     if (firstFrameMs != null) html += row('first frame', `${f(firstFrameMs, 0)} ms`, 'wide');
     if (r.kind === 'wgsl' && r.gpuMs == null && r.cpuMs != null && current.engine.stats().frame > 60) note ||= 'No timestamp-query here, so GPU time is not measured.';
     if (r.statsSources && !r.statsSources.all) note ||= 'In the app these are your Mac’s; a browser knows only a few about itself.';
@@ -117,7 +117,7 @@ function tele() {
   if (current) {
     const r = current.readout();
     const ms = r.kind === 'wasm' ? `CPU ${f(r.cpuMs)} ms · ${r.threads ?? 1}T` : `GPU ${r.gpuMs == null ? 'n/a' : f(r.gpuMs) + ' ms'}`;
-    $('teleSum').textContent = `${ms} · ${f(r.hz, 0)} Hz`;
+    $('teleSum').textContent = `${ms} · ${f(r.fps, 0)}/${f(r.hz, 0)} fps`;
   }
   $('isoBtn')?.addEventListener('click', enableThreads);
 }

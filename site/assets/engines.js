@@ -130,12 +130,16 @@ export async function mount(stage, t, opts = {}) {
     canvas,
     readout() {
       const s = engine.stats() || {};
+      // hz: the display's refresh (median interval). fps: frames actually drawn over the same
+      // window, so a theme that misses vsyncs shows fewer fps than hz.
       const iv = median(intervals);
+      const span = intervals.reduce((a, b) => a + b, 0);
       const r = {
         engine: label, kind,
         width: s.width ?? s.renderW ?? canvas.width, height: s.height ?? s.renderH ?? canvas.height,
         canvasW: canvas.width, canvasH: canvas.height,
         hz: Number.isFinite(iv) ? 1000 / iv : NaN, frameMs: iv,
+        fps: span > 0 ? (1000 * intervals.length) / span : NaN,
         gpuMs: s.gpuMs, cpuMs: s.cpuMs, blitMs: s.blitMs,
         wasmKB: s.wasmFileKB ?? s.wasmKB, threads: s.threads, variant: s.variant, isolated: globalThis.crossOriginIsolated === true,
         firstMs: firstMs > 0 ? firstMs : null, error: s.error,
