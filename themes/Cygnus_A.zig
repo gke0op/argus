@@ -1185,10 +1185,10 @@ pub const State = struct {
         ur = ur * ur * (3.0 - 2.0 * ur);
         up = up * up * (3.0 - 2.0 * up);
         const seed: u64 = 0xB1AC_401E + oct * 0x1000_0000;
-        const v00 = unitf(mix64(seed ^ (ir % gr) * 0x10001 ^ (ip % gp) << 24));
-        const v10 = unitf(mix64(seed ^ ((ir + 1) % gr) * 0x10001 ^ (ip % gp) << 24));
-        const v01 = unitf(mix64(seed ^ (ir % gr) * 0x10001 ^ ((ip + 1) % gp) << 24));
-        const v11 = unitf(mix64(seed ^ ((ir + 1) % gr) * 0x10001 ^ ((ip + 1) % gp) << 24));
+        const v00 = unitf(mix64(seed ^ @as(u64, ir % gr) * 0x10001 ^ @as(u64, ip % gp) << 24));
+        const v10 = unitf(mix64(seed ^ @as(u64, (ir + 1) % gr) * 0x10001 ^ @as(u64, ip % gp) << 24));
+        const v01 = unitf(mix64(seed ^ @as(u64, ir % gr) * 0x10001 ^ @as(u64, (ip + 1) % gp) << 24));
+        const v11 = unitf(mix64(seed ^ @as(u64, (ir + 1) % gr) * 0x10001 ^ @as(u64, (ip + 1) % gp) << 24));
         const top = v00 + (v01 - v00) * up;
         const bot = v10 + (v11 - v10) * up;
         return 2.0 * (top + (bot - top) * ur) - 1.0;
