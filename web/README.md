@@ -138,6 +138,8 @@ Language traps when translating from Metal:
 - Parameters are immutable (copy to a `var`); `x++` is a statement, never an expression.
 - `round()` differs: Metal rounds halves away from zero, WGSL to even (`rint` matches WGSL's).
   Translate Metal's `round(x)` as `select(floor(x + 0.5), ceil(x - 0.5), x < 0.0)`-style code.
+- `pow(x, y)` with a negative `x` is undefined in WGSL (NaN on some backends); Metal folds
+  `pow(x, 2.0f)` into `x * x`, so write the product.
 - `fmod(x, y)` is `x % y` for floats (both truncate); `rsqrt` is `inverseSqrt`; `atan2`, `fract`,
   `mix`, `clamp`, `saturate`, `smoothstep`, `step`, `fma` keep their meaning. There is no `isnan`.
 - Matrices are column-major in both: `float2x2(a, b, c, d)` is `mat2x2f(a, b, c, d)`.
