@@ -1,0 +1,65 @@
+name: Pages
+
+# The public site (site/, see site/README.md): the wasm builds with the pinned Zig 0.17.0, the
+# pages filled from BENCHMARK.md, the three web engines, assembled by site/build.sh.
+#
+# Every push to main builds it (so a broken site fails here). It deploys only once the owner
+# has turned Pages on: Settings > Pages > Source: GitHub Actions, then the repository variable
+# ARGUS_PAGES = on (Settings > Secrets and variables > Actions > Variables).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Zig 0.17.0
+        uses: actions/cache@v4
+        with:
+          path: .toolchain
+          key: zig-0.17.0-x86_64-linux-${{ hashFiles('tools/get-zig.sh') }}
+
+      - name: Install the pinned Zig (tools/get-zig.sh, SHA-256 checked)
+        run: tools/get-zig.sh
+
+      - name: Test the site tools
+        run: |
+          .toolchain/zig test site/tools/render.zig
+          .toolchain/zig test site/tools/serve.zig
+
+      # make web-wasm-all: the wasm themes, the BENCHMARK.md skeleton and the gate fixtures, each
+      # as NAME.mt.wasm (threads) and NAME.st.wasm; then the pages and the engines into _site/.
+      - name: Build the wasm and assemble the site
+        run: REBUILD_WASM=1 site/build.sh _site
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    if: vars.ARGUS_PAGES == 'on'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,5 @@
+# Every crawler is welcome.
+User-agent: *
+Allow: /
+
+Sitemap: https://gke0op.github.io/argus/sitemap.xml
