@@ -81,7 +81,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   transition: background-color 0.25s;
 }
 .top > * { pointer-events: auto; }
-.brand { font: 700 1.2rem/1 var(--display); letter-spacing: -0.035em; color: #fff; text-decoration: none; }
+.brand { font: 700 0.95rem/1 var(--mono); letter-spacing: 0.22em; text-transform: uppercase; color: var(--fg); text-decoration: none; }
 .brand:hover { color: #fff; }
 .top nav { margin-left: auto; display: flex; gap: 0.25rem; font-size: 0.9rem; }
 .top nav a { color: rgba(255, 255, 255, 0.86); text-decoration: none; padding: 0.45em 0.6em; border-radius: 8px; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.7); }
@@ -102,19 +102,18 @@ button:disabled { opacity: 0.45; cursor: default; }
 .hero .scrim {
   position: absolute; inset: 0; z-index: -1; pointer-events: none;
   background:
-    radial-gradient(90% 60% at 0% 0%, rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0) 70%),
-    linear-gradient(to top, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0) 26%);
+    radial-gradient(60% 42% at 0% 0%, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0) 70%),
+    linear-gradient(to top, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0) 20%);
 }
-.hero .frame { display: none; }
 
-.hero-copy { grid-row: 1; padding: calc(84px + env(safe-area-inset-top)) var(--gutter-r) 0 var(--gutter); max-width: 44rem; }
-.wordmark {
-  font: 700 clamp(4.4rem, 1.5rem + 10vw, 10.5rem)/0.86 var(--display); letter-spacing: -0.052em; margin: 0 0 0.16em -0.04em;
-  color: #fff; text-shadow: 0 2px 40px rgba(0, 0, 0, 0.55);
-}
-.lede { font: 500 clamp(1.08rem, 0.95rem + 0.55vw, 1.42rem)/1.38 var(--sans); letter-spacing: -0.012em; color: #fff; max-width: 31rem; margin: 0 0 0.5em; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 24px rgba(0, 0, 0, 0.75); text-wrap: pretty; }
-.lede-2 { font-size: 0.95rem; color: rgba(255, 255, 255, 0.78); max-width: 31rem; margin: 0; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 18px rgba(0, 0, 0, 0.8); }
-.ctas { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 1.5rem; }
+/* The words are small and sit in the top-left corner: the wallpaper is the subject. */
+.hero-copy { grid-row: 1; padding: calc(76px + env(safe-area-inset-top)) var(--gutter-r) 0 var(--gutter); }
+.wordmark { font: 700 1.6rem/1.1 var(--display); letter-spacing: -0.03em; margin: 0 0 0.3em; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 20px rgba(0, 0, 0, 0.7); }
+.lede, .lede-2 { margin: 0; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 18px rgba(0, 0, 0, 0.8); text-wrap: balance; }
+.lede { font: 500 1rem/1.45 var(--sans); letter-spacing: -0.005em; color: #fff; }
+.lede-2 { font-size: 0.88rem; line-height: 1.45; color: rgba(255, 255, 255, 0.72); margin-top: 0.15em; }
+.ctas { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; }
+.ctas .btn { padding: 0.68em 1.05em; font-size: 0.86rem; }
 
 /* Entrance: once, on the compositor (opacity and transform only). */
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
@@ -125,17 +124,30 @@ button:disabled { opacity: 0.45; cursor: default; }
 .hero-copy > :nth-child(4) { animation-delay: 0.2s; }
 .dock, .tele { animation: fade 1s 0.3s var(--ease) both; }
 
-.hero.bare .hero-copy, .hero.bare .scrim, .hero.bare .tele, .hero.bare .dock, .hero.bare .frame { opacity: 0; pointer-events: none; }
-.hero .hero-copy, .hero .scrim, .hero .tele, .hero .dock, .hero .frame { transition: opacity 0.4s var(--ease); }
+/* Hide UI: everything over the theme fades, except one quiet "show UI" control in the corner
+   (the same button; home.js toggles .bare on the hero and keeps its label, so CSS swaps the words). */
+.hero.bare .hero-copy, .hero.bare .scrim, .hero.bare .dock { opacity: 0; pointer-events: none; }
+.hero .hero-copy, .hero .scrim, .hero .tele, .hero .dock { transition: opacity 0.4s var(--ease); }
+.hero.bare .tele { background: none; border-color: transparent; padding: 0; width: auto; }
+.hero.bare .tele > :not(.tools), .hero.bare .tele .tools > :not(#bareBtn) { display: none; }
+.hero.bare .tele .tools { margin: 0; }
+.hero.bare .tele .tools #bareBtn { display: inline-flex; font-size: 0; padding: 7px 11px; border-radius: 999px; background: rgba(0, 0, 0, 0.6); border-color: rgba(255, 255, 255, 0.16); opacity: 0.6; }
+.hero.bare .tele .tools #bareBtn::after { content: "show UI"; font: 500 11px/1 var(--mono); }
+.hero.bare .tele .tools #bareBtn:hover, .hero.bare .tele .tools #bareBtn:focus-visible { opacity: 1; }
 
 /* The dock: what is playing, and the picker. */
 .dock { grid-row: 3; min-width: 0; padding: 0 0 max(14px, env(safe-area-inset-bottom)); }
+/* One line: the name, the source file, then the description, fading out at the edge.
+   Hover or focus shows the whole line. */
 .caption {
-  margin: 0 var(--gutter-r) 10px var(--gutter); font-size: 0.86rem; line-height: 1.5; color: rgba(255, 255, 255, 0.78); max-width: 46rem;
-  min-height: 3em; text-shadow: 0 1px 2px #000, 0 0 14px rgba(0, 0, 0, 0.9);
+  display: flex; align-items: baseline; gap: 0.6em; white-space: nowrap; overflow: hidden;
+  margin: 0 var(--gutter-r) 10px var(--gutter); font-size: 0.86rem; line-height: 1.5; color: rgba(255, 255, 255, 0.74); max-width: 52rem;
+  min-height: 1.5em; text-shadow: 0 1px 2px #000, 0 0 14px rgba(0, 0, 0, 0.9);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
 }
-.caption b { color: #fff; font-weight: 650; }
-.caption a { text-decoration: none; }
+.caption:hover, .caption:focus-within { display: block; white-space: normal; -webkit-mask-image: none; mask-image: none; }
+.caption b { order: -2; flex: none; color: #fff; font-weight: 650; }
+.caption a { order: -1; flex: none; text-decoration: none; }
 .caption code { font-size: 0.78rem; background: rgba(0, 0, 0, 0.6); border-color: rgba(255, 255, 255, 0.14); color: var(--link); white-space: nowrap; }
 .caption a:hover code { color: #fff; border-color: rgba(255, 255, 255, 0.4); }
 .picker {
@@ -180,129 +192,19 @@ button:disabled { opacity: 0.45; cursor: default; }
 .tele.min .tools { margin: 0; }
 .tele.min .tools button:not(#teleBtn) { display: none; }
 .tele.min #teleBtn { border-radius: 999px; width: 24px; height: 24px; padding: 0; }
+.hero .tele.min .tools #bareBtn { display: inline-flex; border-radius: 999px; height: 24px; }
 
 @media (min-width: 720px) {
-  .hero-copy { padding-top: calc(clamp(96px, 15vh, 168px) + env(safe-area-inset-top)); }
-  .lede-2 { font-size: 1rem; }
-  .ctas { margin-top: 1.9rem; }
-  .caption { font-size: 0.9rem; min-height: 1.6em; margin-bottom: 12px; }
+  .hero-copy { padding-top: calc(84px + env(safe-area-inset-top)); padding-right: calc(16.5rem + var(--gutter-r) + 32px); }
+  .caption { font-size: 0.9rem; margin-bottom: 12px; }
 }
 @media (max-width: 719px) {
   .tele { top: calc(54px + env(safe-area-inset-top)); }
   .tele:not(.min) { width: min(16.5rem, calc(100vw - 32px)); }
-  .hero-copy { padding-top: calc(108px + env(safe-area-inset-top)); }
-  .ctas .btn { flex: 1 1 auto; }
-}
-@media (max-height: 620px) and (min-width: 720px) { .hero-copy { padding-top: 76px; } .wordmark { font-size: 5rem; } }
-
-/* ---- direction A: title card (the social card's composition) ---------------------------
-   Wide screens: the wordmark sits in the sky above the disk, the words below its horizon. */
-@media (min-width: 720px) {
-  [data-dir="a"] .hero { grid-template-rows: auto 1fr auto auto auto auto; }
-  [data-dir="a"] .hero-copy { display: contents; }
-  [data-dir="a"] .hero-copy > * { margin-left: var(--gutter); margin-right: var(--gutter-r); }
-  [data-dir="a"] .wordmark { grid-row: 1; padding-top: calc(clamp(80px, 11vh, 132px) + env(safe-area-inset-top)); font-size: clamp(5rem, 1rem + 8.5vw, 9.6rem); margin-left: calc(var(--gutter) - 0.04em); }
-  [data-dir="a"] .lede { grid-row: 3; max-width: 25rem; font-size: clamp(1.15rem, 0.9rem + 0.6vw, 1.45rem); }
-  [data-dir="a"] .lede-2 { grid-row: 4; max-width: 25rem; }
-  [data-dir="a"] .ctas { grid-row: 5; margin-bottom: clamp(28px, 5vh, 56px); }
-  [data-dir="a"] .dock { grid-row: 6; }
-  [data-dir="a"] .hero .scrim {
-    background:
-      radial-gradient(60% 45% at 0% 0%, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0) 70%),
-      radial-gradient(55% 60% at 0% 80%, rgba(0, 0, 0, 0.74), rgba(0, 0, 0, 0) 74%),
-      linear-gradient(to top, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0) 20%);
-  }
-}
-
-/* ---- direction B: instrument ---------------------------------------------------------- */
-[data-dir="b"] { --acc: #ffbf5e; --link: #ffcf85; }
-[data-dir="b"] .hero { grid-template-rows: 1fr auto auto; }
-[data-dir="b"] .hero .frame { display: block; position: absolute; inset: calc(56px + env(safe-area-inset-top)) var(--gutter-r) 10px var(--gutter); pointer-events: none; z-index: -1; }
-[data-dir="b"] .frame i { position: absolute; width: 18px; height: 18px; border: 0 solid rgba(255, 255, 255, 0.4); }
-[data-dir="b"] .frame i:nth-child(1) { left: -8px; top: 0; border-left-width: 1px; border-top-width: 1px; }
-[data-dir="b"] .frame i:nth-child(2) { right: -8px; top: 0; border-right-width: 1px; border-top-width: 1px; }
-[data-dir="b"] .frame i:nth-child(3) { left: -8px; bottom: 0; border-left-width: 1px; border-bottom-width: 1px; }
-[data-dir="b"] .frame i:nth-child(4) { right: -8px; bottom: 0; border-right-width: 1px; border-bottom-width: 1px; }
-[data-dir="b"] .hero .scrim { background: radial-gradient(70% 55% at 0% 100%, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0) 70%), linear-gradient(to top, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0) 18%); }
-[data-dir="b"] .hero-copy { grid-row: 2; padding: 0 var(--gutter-r) 22px var(--gutter); max-width: 36rem; }
-[data-dir="b"] .wordmark { font: 600 0.78rem/1 var(--mono); letter-spacing: 0.42em; text-transform: uppercase; color: var(--acc); margin: 0 0 1.1em; text-shadow: none; }
-[data-dir="b"] .lede { font: 600 clamp(1.4rem, 1rem + 1.1vw, 1.95rem)/1.14 var(--display); letter-spacing: -0.028em; max-width: 26rem; }
-[data-dir="b"] .lede-2 { font: 12px/1.5 var(--mono); letter-spacing: 0.02em; color: rgba(255, 255, 255, 0.66); margin-top: 0.9em; }
-[data-dir="b"] .btn { border-radius: 8px; font: 600 0.78rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; padding: 1em 1.2em; }
-[data-dir="b"] .btn.primary { background: var(--acc); border-color: var(--acc); color: #120b00; }
-[data-dir="b"] .btn.primary:hover { background: #ffd590; border-color: #ffd590; }
-[data-dir="b"] .dock { grid-row: 3; }
-[data-dir="b"] .caption { font: 12px/1.5 var(--mono); }
-[data-dir="b"] .caption b { color: var(--acc); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
-[data-dir="b"] .picker { counter-reset: t; gap: 0; border-top: 1px solid rgba(255, 255, 255, 0.14); padding-top: 0; margin: 0 var(--gutter-r) 0 var(--gutter); padding-left: 0; }
-[data-dir="b"] .chip { counter-increment: t; background: transparent; border: 0; border-top: 2px solid transparent; border-radius: 0; padding: 0.95em 0.95em 0.8em 0; margin-right: 0.9em; font: 500 0.74rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255, 255, 255, 0.62); text-shadow: 0 1px 6px #000; }
-[data-dir="b"] .chip::before { content: counter(t, decimal-leading-zero) " "; color: rgba(255, 255, 255, 0.35); }
-[data-dir="b"] .chip:hover { color: #fff; background: transparent; }
-[data-dir="b"] .chip[aria-pressed="true"] { background: transparent; color: #fff; border-top-color: var(--acc); }
-[data-dir="b"] .chip[aria-pressed="true"]::before { color: var(--acc); }
-[data-dir="b"] .tele { border-radius: 4px; background: rgba(0, 0, 0, 0.7); border-color: rgba(255, 191, 94, 0.22); }
-[data-dir="b"] .tele-head .dot { background: var(--acc); box-shadow: 0 0 0 3px rgba(255, 191, 94, 0.16); }
-[data-dir="b"] .tele .tools button { border-radius: 3px; }
-[data-dir="b"] .tele.min { border-radius: 4px; }
-[data-dir="b"] .tele.min #teleBtn { border-radius: 3px; }
-[data-dir="b"] .eyebrow { color: var(--acc); }
-@media (max-width: 719px) { [data-dir="b"] .lede { font-size: 1.32rem; } }
-
-/* Phones, A and B: the sky holds the name and the sentence; the strip above the picker holds
-   the live-page line and the two actions. The disk in between is left alone. */
-@media (max-width: 719px) {
-  [data-dir="a"] .hero, [data-dir="b"] .hero { grid-template-rows: auto auto 1fr auto auto auto; }
-  [data-dir="a"] .hero-copy, [data-dir="b"] .hero-copy { display: contents; }
-  [data-dir="a"] .hero-copy > *, [data-dir="b"] .hero-copy > * { margin-left: var(--gutter); margin-right: var(--gutter-r); }
-  [data-dir="a"] .wordmark, [data-dir="b"] .wordmark { grid-row: 1; padding-top: calc(100px + env(safe-area-inset-top)); }
-  [data-dir="a"] .wordmark { font-size: clamp(4rem, 2rem + 12vw, 5.6rem); margin-left: calc(var(--gutter) - 0.04em); }
-  [data-dir="a"] .lede, [data-dir="b"] .lede { grid-row: 2; }
-  [data-dir="a"] .lede-2, [data-dir="b"] .lede-2 { grid-row: 4; font-size: 0.86rem; }
-  [data-dir="a"] .ctas, [data-dir="b"] .ctas { grid-row: 5; margin-top: 12px; margin-bottom: 16px; flex-wrap: nowrap; }
-  [data-dir="a"] .dock, [data-dir="b"] .dock { grid-row: 6; }
-  [data-dir="a"] .ctas .btn, [data-dir="b"] .ctas .btn { padding: 0.9em 0.8em; font-size: 0.86rem; min-width: 0; }
-  [data-dir="b"] .ctas .btn { font-size: 0.7rem; letter-spacing: 0.05em; }
-  [data-dir="a"] .hero .scrim, [data-dir="b"] .hero .scrim {
-    background:
-      radial-gradient(110% 40% at 0% 0%, rgba(0, 0, 0, 0.66), rgba(0, 0, 0, 0) 75%),
-      linear-gradient(to top, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.5) 26%, rgba(0, 0, 0, 0) 40%);
-  }
-  [data-dir="b"] .hero .frame { display: none; }
-}
-
-/* Phones, C: the caption and the picker join the placard as one sheet; the theme fills the
-   top half untouched. */
-@media (max-width: 899px) {
-  [data-dir="c"] .dock { grid-row: 2; margin: 0 var(--gutter-r) 0 var(--gutter); padding: 16px 0 12px; background: #000; border: 1px solid rgba(255, 255, 255, 0.11); border-bottom: 0; border-radius: 18px 18px 0 0; }
-  [data-dir="c"] .caption { margin: 0 18px 10px; min-height: 0; }
-  [data-dir="c"] .picker { padding-left: 18px; padding-right: 18px; scroll-padding-inline: 18px; }
-  [data-dir="c"] .hero-copy { border-top: 1px solid rgba(255, 255, 255, 0.07); border-radius: 0 0 18px 18px; padding: 18px 18px 20px; }
-  [data-dir="c"] .wordmark { font-size: 2.6rem; }
-  [data-dir="c"] .lede { font-size: 0.96rem; }
-  [data-dir="c"] .lede-2 { font-size: 0.84rem; }
-  [data-dir="c"] .ctas { flex-wrap: nowrap; margin-top: 1rem; }
-  [data-dir="c"] .ctas .btn { padding: 0.85em 0.8em; font-size: 0.86rem; }
-  [data-dir="c"] .hero-copy { padding-top: 18px; }
-}
-
-/* ---- direction C: placard -------------------------------------------------------------- */
-[data-dir="c"] .hero .scrim { background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0) 22%); }
-[data-dir="c"] .hero { grid-template-rows: 1fr auto auto; }
-[data-dir="c"] .hero-copy {
-  grid-row: 3; margin: 0 var(--gutter-r) max(14px, env(safe-area-inset-bottom)) var(--gutter); padding: 22px 22px 24px; max-width: none;
-  background: #000; border: 1px solid rgba(255, 255, 255, 0.11); border-radius: 18px;
-}
-[data-dir="c"] .wordmark { font-size: clamp(2.8rem, 2rem + 2.6vw, 4rem); letter-spacing: -0.045em; margin-bottom: 0.22em; text-shadow: none; }
-[data-dir="c"] .lede { font-size: 1.02rem; font-weight: 450; color: #e9ebef; text-shadow: none; }
-[data-dir="c"] .lede-2 { font-size: 0.88rem; color: var(--mute); text-shadow: none; }
-[data-dir="c"] .ctas { margin-top: 1.2rem; }
-[data-dir="c"] .dock { grid-row: 2; padding-bottom: 12px; }
-@media (min-width: 900px) {
-  [data-dir="c"] .hero { grid-template-columns: 26rem minmax(0, 1fr); grid-template-rows: 1fr auto; }
-  [data-dir="c"] .hero-copy { grid-column: 1; grid-row: 2; margin-right: 0; padding: 28px 28px 30px; }
-  [data-dir="c"] .dock { grid-column: 2; grid-row: 2; align-self: end; padding-bottom: max(18px, env(safe-area-inset-bottom)); }
-  [data-dir="c"] .caption { margin-left: 24px; }
-  [data-dir="c"] .picker { padding-left: 24px; }
+  .hero-copy { padding-top: calc(92px + env(safe-area-inset-top)); }
+  .wordmark { font-size: 1.4rem; }
+  .lede { font-size: 0.95rem; }
+  .lede-2 { font-size: 0.82rem; }
 }
 
 /* ---- direction A, below the hero: no cards, no frames; hairlines only where data needs them */
