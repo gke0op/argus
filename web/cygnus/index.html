@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cygnus A · Argus</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud { position: fixed; left: 12px; bottom: 10px; font: 12px/1.45 ui-monospace, Menlo, monospace;
+         color: #b9c0cc; background: rgba(0,0,0,.55); padding: 6px 9px; border-radius: 4px; white-space: pre; }
+  #hud.hide { display: none; }
+  #err { position: fixed; inset: 0; display: none; place-items: center; color: #e88; font: 14px ui-monospace, monospace; padding: 2em; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<div id="err"></div>
+<script type="module">
+// Dev page for web/cygnus (h toggles the HUD). Query: ?size=1920x1080 traces at a fixed size
+// (scaled to the window) instead of the canvas's device pixels; ?hdr=1&headroom=2 for an HDR
+// canvas; ?incl=60 another camera inclination (degrees; the theme's is 88).
+import { create } from './cygnus.js';
+const q = new URLSearchParams(location.search);
+const canvas = document.getElementById('c');
+const hud = document.getElementById('hud');
+const fixed = q.get('size')?.split('x').map(Number);
+const native = () => [Math.round(canvas.clientWidth * devicePixelRatio), Math.round(canvas.clientHeight * devicePixelRatio)];
+[canvas.width, canvas.height] = fixed ?? native();
+let e;
+try {
+  e = await create(canvas, { hdr: q.get('hdr') === '1', headroom: +(q.get('headroom') ?? 1), incl: q.has('incl') ? +q.get('incl') : undefined });
+} catch (err) {
+  const box = document.getElementById('err');
+  box.textContent = String(err?.message ?? err);
+  box.style.display = 'grid';
+  throw err;
+}
+window.cygnus = e;
+if (!fixed) new ResizeObserver(() => e.resize(...native())).observe(canvas);
+addEventListener('keydown', (k) => { if (k.key === 'h') hud.classList.toggle('hide'); });
+let last = performance.now();
+let fps = 0;
+function tick(now) {
+  const dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0) fps = fps ? fps * 0.95 + 0.05 / dt : 1 / dt;
+  e.frame(now / 1000, dt);
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+setInterval(() => {
+  const s = e.stats();
+  const f = (x, d = 2) => (x == null ? '–' : x.toFixed(d));
+  hud.textContent =
+    `Cygnus A  ${s.width}x${s.height}  ${fps.toFixed(0)} fps\n` +
+    `shade GPU ${f(s.gpuMs)} ms   CPU ${f(s.cpuMs)} ms   wasm ${s.wasmFileKB} KB file, ${s.wasmKB} KB memory\n` +
+    (s.traceMs == null
+      ? `tracing  ${s.rowsDone}/${s.height} rows  (${s.traceTiles} tiles)`
+      : `trace ${f(s.traceMs / 1000)} s wall, ${f(s.traceGpuMs / 1000)} s GPU (${s.traceTiles} tiles)`) +
+    `\nexposure ${f(s.exposure, 4)}   t ${f(s.simTimeM, 1)} M` + (s.timestamps ? '' : '   (no timestamp-query: GPU times unavailable)');
+}, 250);
+</script>
+</body>
+</html>
