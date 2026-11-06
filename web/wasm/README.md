@@ -173,8 +173,9 @@ The page reads `?theme=`, `?threads=`, `?scale=`, `?blit=` and `?gates=1|all`.
 
 ## Not here yet
 
-- **Compiling in the browser.** Gate 1 is decided by the build. Grading a pasted submission in
-  the page needs the Zig compiler as wasm (zig.wasm), which is a separate piece of work.
+- **Compiling in the browser** is in `web/zigc` (the bench page): zig.wasm builds a pasted theme
+  with Zig's self-hosted wasm backend, single-threaded and without SIMD, and grades it here
+  through `opts.module`. The SIMD128 and threaded builds above still need `make web-wasm`.
 - **Threads for SDK themes.** A theme that draws its own rows (Cygnus_A, the skeleton) runs on
   one thread, as it does natively. Spreading them would mean a row-range draw in the SDK.
 - **Safari and Firefox** were not tested: this was measured in Chrome 157 and Node 22.

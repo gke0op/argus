@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>web/zigc verify: the bench page's in-browser Zig, driven</title>
+<style>
+  body { margin: 0; font: 13px/1.5 ui-monospace, Menlo, monospace; background: #050608; color: #d7dde5; }
+  #log { padding: 8px 12px; white-space: pre-wrap; height: 30vh; overflow: auto; border-bottom: 1px solid #222; }
+  iframe { width: 100%; height: 70vh; border: 0; }
+</style>
+</head>
+<body>
+<!--
+  Opens the bench page (site/bench/) in a same-origin frame and drives its UI as a person would:
+  it puts each source in the editor (or drops it as a file), clicks "Compile and grade here" and
+  waits for the outcome (window.__bench). Cases: the BENCHMARK.md skeleton, each
+  tests/fixtures/Gate*.zig, the u32/usize trap, themes/cpu/Tutorial_Tides.zig; then
+  web/zigc/cases.js (each followed by the skeleton, which must pass); then three scenarios:
+    paste-fix    a broken theme pasted into the empty editor, then the fixed one pasted over all of it
+    cancel       Cancel during a long compile, then the skeleton
+    bad-cache    a damaged IndexedDB record, a reload, the skeleton (the record must be dropped)
+  and last a reload and the skeleton again (the cached run). Every case has a time limit. The
+  result is POSTed to /__report when web/zigc/verify.mjs serves the page.
+  ?only=NAME runs one case (or one scenario); ?skip=pathological,scenarios leaves groups out.
+  ?extra=URL[,URL...] also runs these .zig files (same origin; kept outside the repo), each of
+  which must pass gates 1-7, followed by the skeleton.
+-->
+<div id="log">AUTOMATED TEST PAGE: this page drives the bench page below by itself and overwrites its editor.
+To compile your own theme, use the bench page: <a href="../../bench/" style="color:#f2b65a">../../bench/</a>
+</div>
+<iframe id="f" src="../../bench/#zig"></iframe>
+<script type="module">
+import { pathologicalCases } from './cases.js';
+const $log = document.getElementById('log');
+const f = document.getElementById('f');
+const log = (s) => { $log.append(s + '\n'); $log.scrollTop = 1e9; };
+const q = new URLSearchParams(location.search);
+const only = q.get('only'), skip = (q.get('skip') || '').split(',');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const text = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error(`${u}: ${r.status}`); return r.text(); };
+
+async function frameReady() {
+  // The page may reload itself once (coi-serviceworker); wait for its editor and module.
+  for (let i = 0; i < 300; i++) {
+    const d = f.contentDocument;
+    if (d && d.readyState === 'complete' && d.getElementById('zigCompile') && f.contentWindow.__benchReady) return;
+    await sleep(100);
+  }
+  throw new Error('the bench page did not load');
+}
+async function reloadFrame() { f.contentWindow.location.reload(); await sleep(500); await frameReady(); }
+
+const w = () => f.contentWindow, d = () => f.contentDocument;
+function setSource(name, src) {
+  d().getElementById('zigName').value = name;
+  d().getElementById('zigName').dispatchEvent(new (w().Event)('input'));
+  d().getElementById('zigSrc').value = src;
+}
+/// Wait for an outcome for `name` (window.__bench), at most limitS; record the progress lines.
+async function outcome(name, limitS, t0) {
+  const phases = [];
+  while ((performance.now() - t0) / 1000 < limitS) {
+    const p = d().getElementById('zigPhase').textContent;
+    if (p && phases[phases.length - 1] !== p) phases.push(p);
+    const b = w().__bench;
+    if (b && b.name === name && b.outcome) return { b, phases };
+    await sleep(50);
+  }
+  return { b: null, phases };
+}
+function judge(expect, b) {
+  if (!b) return false;
+  if (expect.kind) return expect.kind.includes(b.outcome);
+  if (b.outcome === 'deferred') return !!expect.pass && b.gates[0] === true;
+  if (b.outcome !== 'verdict' && b.outcome !== 'compile-error') return false;
+  const failed = (b.gates || []).map((g, i) => (g === false ? i + 1 : 0)).filter(Boolean);
+  const verdict = failed.filter((g) => g !== 8 || expect.gate === 8);
+  if (expect.pass) return verdict.length === 0 && b.gates[0] === true;
+  return verdict.includes(expect.gate) && verdict.every((g) => g === expect.gate || (expect.gate === 4 && g === 3));
+}
+const show = (e) => (e.kind ? e.kind.join('|') : e.pass ? 'PASS' : `FAIL ${e.gate}`);
+
+/// One case through the UI. how: 'click' (editor + button), 'drop' (a File dropped on the page),
+/// 'paste' (a paste event into the editor with all of it selected). Returns the record.
+async function runCase(name, src, expect, limitS = 120, how = 'click') {
+  w().__bench = null; w().__zigc = null;
+  const t0 = performance.now();
+  let key = name;
+  if (how === 'drop') {
+    key = `${name}`;
+    const dt = new (w().DataTransfer)();
+    dt.items.add(new (w().File)([src], `${name}.zig`, { type: 'text/plain' }));
+    d().body.dispatchEvent(new (w().DragEvent)('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  } else if (how === 'paste') {
+    const ta = d().getElementById('zigSrc');
+    d().getElementById('zigName').value = name;
+    ta.focus(); ta.select();
+    const dt = new (w().DataTransfer)(); dt.setData('text/plain', src);
+    const go = ta.dispatchEvent(new (w().ClipboardEvent)('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+    if (go) ta.value = src; // what the browser itself does with a paste nobody prevented
+  } else {
+    setSource(name, src);
+    d().getElementById('zigCompile').click();
+  }
+  const { b, phases } = await outcome(key, limitS, t0);
+  const secs = (performance.now() - t0) / 1000;
+  const failed = (b?.gates || []).map((g, i) => (g === false ? i + 1 : 0)).filter(Boolean);
+  const ok = judge(expect, b) && secs <= limitS;
+  const diag = d().getElementById('zigDiag');
+  const r = { name, how, expect, ok, outcome: b?.outcome ?? 'no outcome in time', failed, secs: Number(secs.toFixed(2)), limitS, zigc: w().__zigc, badge: d().getElementById('zigBadge').textContent, phase: d().getElementById('zigPhase').textContent, phases, diag: diag.hidden ? '' : diag.textContent.slice(0, 500) };
+  const got = !b ? 'nothing' : b.outcome === 'verdict' || b.outcome === 'compile-error' ? (failed.length ? `FAIL ${failed.join(',')}` : 'PASS') : b.outcome;
+  log(`${ok ? 'ok  ' : 'BAD '} ${name.padEnd(22)} expect ${show(expect).padEnd(30)} got ${got.padEnd(16)} ${secs.toFixed(1).padStart(5)} s | ${r.badge} | ${r.phase.slice(0, 110)}`);
+  return r;
+}
+
+const out = { ua: navigator.userAgent, started: new Date().toISOString(), cases: [], cached: null };
+const want = (n) => !only || only === n;
+try {
+  await frameReady();
+  const zig = (n) => text(`../../bench/zig/${n}.zig`);
+  const skeleton = await zig('Bench_Skeleton');
+  const gate0 = await zig('Gate0_Control');
+  const trap = gate0.replace('st.* = .{ .w = w, .h = h, .t = 0, .centre = 0.2 };', 'st.* = .{ .w = w, .h = h, .t = 0, .centre = 0.2 };\n    const n_px: usize = @as(usize, w) * h;\n    const n32: u32 = n_px;\n    _ = n32;');
+  const then = async () => out.cases.push({ ...(await runCase('Bench_Skeleton', skeleton, { pass: true }, 60)), after: true });
+
+  const standard = [['Bench_Skeleton', skeleton, { pass: true }]];
+  for (let g = 0; g <= 8; g++) {
+    const n = ['Gate0_Control', 'Gate1_Compile', 'Gate2_Alloc', 'Gate3_Watchdog', 'Gate4_Stride', 'Gate5_Alpha', 'Gate6_Frozen', 'Gate7_NaN', 'Gate8_Budget'][g];
+    standard.push([n, await zig(n), g ? { gate: g } : { pass: true }]);
+  }
+  standard.push(['Trap_U32_Usize', trap, { gate: 1 }], ['Tutorial_Tides', await zig('Tutorial_Tides'), { pass: true }]);
+  for (const [n, s, e] of standard) if (want(n)) out.cases.push(await runCase(n, s, e, 120));
+
+  if (!skip.includes('pathological')) {
+    for (const [n, s, e, limitS] of pathologicalCases(gate0)) {
+      if (!want(n)) continue;
+      out.cases.push(await runCase(n, s, e, limitS, s instanceof Uint8Array ? 'drop' : 'click'));
+      await then();
+    }
+  }
+
+  for (const u of (q.get('extra') || '').split(',').filter(Boolean)) {
+    const n = u.replace(/^.*\//, '').replace(/\.zig$/, '').replace(/[^A-Za-z0-9_]/g, '_');
+    if (!want(n)) continue;
+    out.cases.push(await runCase(n, await text(u), { pass: true }, 120));
+    await then();
+  }
+
+  if (!skip.includes('scenarios')) {
+    if (want('paste-fix')) {
+      // The owner's workflow: paste a broken answer into the empty editor, get the error, paste
+      // the fixed answer over all of it, then another. Each paste must compile by itself.
+      d().getElementById('zigSrc').value = '';
+      out.cases.push({ ...(await runCase('Model_Theme', gate0.replace('return st;', 'return st'), { gate: 1 }, 60, 'paste')), scenario: 'paste-fix: broken' });
+      out.cases.push({ ...(await runCase('Model_Theme', gate0, { pass: true }, 60, 'paste')), scenario: 'paste-fix: fixed' });
+      out.cases.push({ ...(await runCase('Model_Theme', trap, { gate: 1 }, 60, 'paste')), scenario: 'paste-fix: third' });
+    }
+    if (want('cancel')) {
+      const [, huge] = pathologicalCases(gate0).find((c) => c[0] === 'Path_HugeComptimeTable');
+      w().__bench = null;
+      setSource('Path_Cancel', huge);
+      const t0 = performance.now();
+      d().getElementById('zigCompile').click();
+      await sleep(3000);
+      const cancelVisible = !d().getElementById('zigCancel').hidden;
+      const elapsedShown = d().getElementById('zigElapsed').textContent;
+      d().getElementById('zigCancel').click();
+      const { b } = await outcome('Path_Cancel.zig', 10, t0);
+      const ok = cancelVisible && /\d+\.\d s/.test(elapsedShown) && b?.outcome === 'cancelled';
+      log(`${ok ? 'ok  ' : 'BAD '} cancel                 Cancel shown ${cancelVisible}, elapsed "${elapsedShown}", outcome ${b?.outcome} after ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+      out.cases.push({ name: 'cancel', ok, cancelVisible, elapsedShown, outcome: b?.outcome ?? null });
+      await then();
+    }
+    if (want('bad-cache')) {
+      // Damage the saved compiler cache, then reload: the page must drop it and still pass.
+      await sleep(1500); // let the last compile's cache save land first
+      await new Promise((res, rej) => {
+        const req = w().indexedDB.open('argus-zigc', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('cache');
+        req.onsuccess = () => {
+          const db = req.result;
+          const st = db.transaction('cache', 'readwrite').objectStore('cache');
+          const all = st.getAllKeys();
+          all.onsuccess = () => {
+            const buf = new Uint8Array(4096); buf.set(new TextEncoder().encode('ZCACHE1\n')); buf.fill(0xff, 8);
+            for (const k of all.result) st.put({ format: 2, sha256: '0'.repeat(64), bytes: buf.length, buf: buf.buffer }, k);
+            log(`bad-cache: damaged ${all.result.length} record(s)`);
+            st.transaction.oncomplete = () => { db.close(); res(); };
+          };
+        };
+        req.onerror = () => rej(req.error);
+      });
+      await reloadFrame();
+      const r = await runCase('Bench_Skeleton', skeleton, { pass: true }, 60);
+      r.scenario = 'bad-cache';
+      r.ok = r.ok && !!r.zigc?.cacheDropped;
+      log(`${r.ok ? 'ok  ' : 'BAD '} bad-cache              the record was dropped: ${r.zigc?.cacheDropped}`);
+      out.cases.push(r);
+    }
+  }
+
+  // The second visit: reload, compile the skeleton again (a cache saved by the runs above).
+  if (!only) {
+    await sleep(1500);
+    await reloadFrame();
+    out.cached = await runCase('Bench_Skeleton', skeleton, { pass: true }, 60);
+  }
+  out.pass = out.cases.every((c) => c.ok) && (!out.cached || out.cached.ok);
+  log(`\n${out.pass ? 'ALL OK' : 'SOME BAD'}${out.cached ? `: cached run downloaded ${out.cached.zigc?.downloadBytes} B, restored ${out.cached.zigc?.restoredCacheFiles} cache files` : ''}`);
+} catch (e) {
+  out.error = String(e.stack || e);
+  log('ERROR ' + out.error);
+}
+window.__verify = out;
+fetch('/__report', { method: 'POST', body: JSON.stringify(out) }).catch(() => {});
+</script>
+</body>
+</html>

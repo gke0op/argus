@@ -90,13 +90,14 @@ export async function mount(stage, t, opts = {}) {
     } else {
       const { create } = await import(new URL('wasm/host.js', WEB));
       const [w, h] = px();
-      // Zig themes draw every pixel on the CPU: past the harness's 1920x1200 they render at that
-      // many pixels and the blit scales them up (shown in the readout).
-      const renderScale = Math.min(1, Math.sqrt((1920 * 1200) / (w * h)));
+      // Zig themes draw every pixel on the CPU: past the harness's 1920x1200 (or opts.maxPixels,
+      // for a slower build) they render at that many pixels and the blit scales them up (shown
+      // in the readout).
+      const renderScale = Math.min(1, Math.sqrt((opts.maxPixels ?? 1920 * 1200) / (w * h)));
       canvas.width = w; canvas.height = h;
       engine = await create(canvas, { theme: t.build, base: new URL('wasm/build/', WEB), renderScale, module: opts.module });
       engine.resize(w, h);
-      label = 'wasm SIMD128 (CPU)';
+      label = opts.label ?? 'wasm SIMD128 (CPU)';
       sizeObs = new ResizeObserver(() => { const [nw, nh] = px(); if (nw !== canvas.width || nh !== canvas.height) engine.resize(nw, nh); });
       sizeObs.observe(canvas);
     }

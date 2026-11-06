@@ -5,7 +5,7 @@
 <script src="../coi-serviceworker.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Run ARGUS-BENCH in your browser · Argus</title>
-<meta name="description" content="Copy the ARGUS-BENCH prompt into a model, paste its answer, and watch it run and get graded in seconds: WGSL kernels compiled by WebGPU, Zig themes as wasm through the harness's 8 gates.">
+<meta name="description" content="Copy the ARGUS-BENCH prompt into a model, paste its answer, and watch it run and get graded in seconds: WGSL kernels compiled by WebGPU, Zig themes compiled in the page by Zig 0.17.0 as WebAssembly and graded by the harness's 8 gates.">
 <link rel="canonical" href="https://gke0op.github.io/argus/bench/">
 <meta name="theme-color" content="#050608">
 <meta property="og:type" content="website">
@@ -29,7 +29,7 @@
   "@type": "WebApplication",
   "name": "ARGUS-BENCH in the browser",
   "url": "https://gke0op.github.io/argus/bench/",
-  "description": "Grades an Argus theme written by a model: WGSL kernels compiled by WebGPU and checked as the Metal harness checks them; Zig themes compiled to wasm and run through the harness's 8 gates.",
+  "description": "Grades an Argus theme written by a model: WGSL kernels compiled by WebGPU and checked as the Metal harness checks them; Zig themes compiled in the page by the Zig 0.17.0 compiler built to WebAssembly and run through the harness's 8 gates.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Any browser with WebGPU or WebAssembly SIMD",
   "isAccessibleForFree": true,
@@ -57,7 +57,7 @@
     <ol class="steps">
       <li>Copy the prompt (and the contract it refers to) into any model.</li>
       <li>The model answers with one file: a Zig theme or a WGSL kernel.</li>
-      <li>Paste the answer below, or upload its wasm build.</li>
+      <li>Drop or paste the answer anywhere on this page. A <code>.zig</code> is compiled here by Zig 0.17.0 itself, as WebAssembly.</li>
       <li>Watch it run, and read the gates: PASS or FAIL, and why.</li>
     </ol>
     <div id="env" class="note small" hidden></div>
@@ -82,7 +82,8 @@
       </div>
 
       <h2 class="step-h"><span class="n" aria-hidden="true">2</span>Grade a Zig theme</h2>
-      <div class="note info small"><b>Zig is compiled ahead of time, not in this page.</b> Compiling Zig 0.17 here would need the compiler itself built to WebAssembly; without LLVM in it, it cannot produce the ReleaseFast code the harness times. So a pasted <code>.zig</code> is graded natively (a pull request runs the harness on GitHub Actions and posts the verdict, or run it yourself), and a <code>.wasm</code> built from it runs through all 8 gates right here. One difference to know: on wasm32 a <code>usize</code> is 32 bits, so the leaderboard’s most common compile error (<code>expected type 'u32', found 'usize'</code>) does not fire in a wasm build. The native harness’s Gate 1 is the verdict.</div>
+      <div class="note info small"><b>Zig compiles in this page.</b> Drop or paste a <code>.zig</code> theme anywhere here. The Zig 0.17.0 compiler, built to WebAssembly, type-checks and builds it in your browser, and the harness’s gates grade it; nothing is uploaded. The first compile downloads the compiler and the part of the standard library a compile reads (<span id="zigcSize">4.6 MB</span>), kept for the next visit.
+        Two things differ from the native harness. <b>Gate 1</b> is type-checked for wasm64, not the app’s aarch64-macos (this compiler has no aarch64 backend). Its <code>usize</code> is 64 bits too, so <code>expected type 'u32', found 'usize'</code>, the leaderboard’s most common compile error, fails here as it does natively. Code that needs macOS or libc is not covered. <b>Gate 8</b>: the module comes from Zig’s own wasm backend, without LLVM, SIMD or threads. Scalar code runs at up to a few times the native harness’s frame time; <code>@Vector</code> code is tens of times slower (Tutorial_Tides: about 60× LLVM’s wasm in Chrome). The frame time here is this build’s, and the official Gate 8 is the native harness’s: submit a pull request below.</div>
 
       <h3 class="sub-h">Try the gates on a prebuilt theme</h3>
       <div class="row-btns toolbar">
@@ -110,28 +111,31 @@
         <input id="zigName" class="field" value="Model_Theme" spellcheck="false">
         <span class="small mute">.zig, saved as <code>bench/submissions/<span id="zigNameEcho">Model_Theme</span>.zig</code></span>
       </div>
-      <textarea id="zigSrc" spellcheck="false" placeholder="Paste the model's .zig answer here." aria-label="Zig theme source"></textarea>
+      <textarea id="zigSrc" spellcheck="false" placeholder="Paste the model's .zig answer here, or drop a .zig file anywhere on the page. Ctrl+Enter compiles." aria-label="Zig theme source"></textarea>
       <div class="row-btns">
-        <button class="primary" type="button" id="zigPR">Submit as a pull request</button>
+        <button class="primary" type="button" id="zigCompile">Compile and grade here</button>
+        <button type="button" id="zigPR">Submit as a pull request (the official verdict)</button>
         <button type="button" id="zigCmd">Copy the local commands</button>
-        <span class="small mute" id="zigHint">Opens GitHub’s new-file page with the name filled in and the source on your clipboard; the bench workflow runs the native harness on the pull request and comments the verdict.</span>
       </div>
+      <p class="small mute" id="zigHint">The pull request opens GitHub’s new-file page with the name filled in and the source on your clipboard; the bench workflow runs the native harness on it and comments the verdict, including the official Gate 8.</p>
       <div class="drop" id="drop">
-        Built it already? <code>make web-wasm THEME=themes/<span class="nameEcho">Model_Theme</span>.zig</code> writes <code>web/wasm/build/<span class="nameEcho">Model_Theme</span>.st.wasm</code> (one thread) and <code>.mt.wasm</code> (threads).
-        <div class="row-btns drop-btns"><label class="btn" for="wasmFile">Upload the .wasm</label><input type="file" id="wasmFile" accept=".wasm,application/wasm" hidden></div>
-        <div class="small">or drop it here; it runs through the 8 gates in this page.</div>
+        Drop a <code>.zig</code> here or anywhere on the page, or
+        <div class="row-btns drop-btns"><label class="btn" for="zigFile">open a .zig</label><input type="file" id="zigFile" accept=".zig,text/plain" hidden><label class="btn" for="wasmFile">upload a .wasm you built</label><input type="file" id="wasmFile" accept=".wasm,application/wasm" hidden></div>
+        <div class="small">A <code>.wasm</code> from <code>make web-wasm THEME=themes/<span class="nameEcho">Model_Theme</span>.zig</code> (LLVM, SIMD128) runs through the 8 gates too; upload its <code>.st.wasm</code> unless this page is cross-origin isolated.</div>
       </div>
 
       <div class="result" id="zigResult">
-        <div class="verdict"><span class="badge run" id="zigBadge">RUNNING</span><span id="zigTitle"></span><span class="progress" id="zigPhase"></span></div>
+        <div class="verdict"><span class="badge run" id="zigBadge">RUNNING</span><span id="zigTitle"></span><span class="progress" id="zigPhase" role="status" aria-live="polite"></span><span class="progress" id="zigElapsed" aria-hidden="true"></span><button type="button" id="zigCancel" hidden>Cancel</button></div>
+        <div class="diag" id="zigDiag" hidden></div>
+        <div class="row-btns" id="zigMore" hidden><button type="button" id="zigGatesAnyway"></button></div>
         <div class="gatewrap"><table class="gates" id="zigGates"><tbody></tbody></table></div>
         <div class="views">
-          <figure><canvas id="zigFinal" width="1920" height="1200"></canvas><figcaption>Frame 120 at 1920×1200, as the gates saw it.</figcaption></figure>
-          <figure><div class="stage live" id="zigLive"></div><figcaption id="zigLiveCap">Live, after the gates.</figcaption></figure>
+          <figure><canvas id="zigFinal" width="1920" height="1200"></canvas><figcaption id="zigFinalCap">Frame 120 at 1920×1200, as the gates saw it.</figcaption></figure>
+          <figure><div class="stage live" id="zigLive"></div><figcaption><span id="zigLiveCap">Live, after the gates.</span> <button type="button" id="zigFull" hidden>View full-screen</button></figcaption></figure>
         </div>
         <h3 class="sub-h">Harness report</h3>
         <pre class="report" id="zigReport"></pre>
-        <p class="small mute">Gate 8 here times this browser’s wasm on this machine; leaderboard times come from the native harness on an M3. Near the 16.7 ms line, judge on a quiet machine.</p>
+        <p class="small mute" id="zigNote8">Gate 8 here times this browser’s wasm on this machine; leaderboard times come from the native harness on an M3. Near the 16.7 ms line, judge on a quiet machine.</p>
       </div>
     </section>
 
@@ -194,6 +198,7 @@
     </nav>
   </div>
 </footer>
+<div class="dropall" id="dropAll" aria-hidden="true">Drop a .zig theme to compile and grade it here<br><span class="small mute">or the .wasm you built from one</span></div>
 <script type="module" src="../assets/bench.js"></script>
 </body>
 </html>
