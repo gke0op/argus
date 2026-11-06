@@ -13,9 +13,10 @@ size, on every display frame.
 | `web/themes/*.wgsl` | Theme translations; `.bin` data files sit next to them (byte-identical copies of `themes/*.bin`) |
 | `web/host/argus_gpu.js` | The engine: compile, directives, state, data, stats, present, timing |
 | `web/host/frame.js` | `ArgusFrame`: the 4 h-wrapped f64 clock, the 30 Hz tick, the J2000 date fields |
-| `web/host/stats.js` | `ArgusStats`: the harness's synthetic feed, and what a browser can read live |
+| `web/host/stats.js` | `ArgusStats`: the harness's synthetic feed; `ArgusVitals`: what a browser page really knows about itself |
 | `web/host/directives.js` | `// @argus` parsing, as `parseDirectives` in `metal_theme.zig` |
-| `web/host/verify.html`, `web/host/tools/verify.mjs` | The Metal harness's check in the browser, and a headless driver that compares against the harness PNG |
+| `web/host/verify.html`, `web/host/tools/verify.mjs` | The Metal harness's check in the browser, and a driver that compares against the harness PNG (headless Chrome, or any browser with `--browser`) |
+| `web/host/compile.html` | Builds every theme in this browser and checks a few frames for NaN (the portability check) |
 
 Serve `web/` over `http://localhost` (WebGPU needs a secure context; `file://` won't do), e.g.
 `python3 -m http.server -d web 8000`, then open `http://localhost:8000/`.
@@ -32,7 +33,7 @@ const engine = await create(canvas, { theme: 'Night_Tide' });
 // engine.name                    'Night_Tide'
 // engine.frame(timeSec, dtSec)   draw one display frame; dtSec = time since the previous frame
 // engine.resize(w, h)            output size in device pixels (followed automatically by default)
-// engine.stats()                 { gpuMs?, cpuMs?, wasmKB? } (this engine: gpuMs, cpuMs; medians of the last 240 frames)
+// engine.stats()                 { gpuMs?, cpuMs?, wasmKB? } (this engine: gpuMs, drawMs, cpuMs; medians of the last 240 frames)
 // engine.destroy()
 const stop = runLoop(engine);   // requestAnimationFrame at the display's refresh rate
 ```
@@ -46,7 +47,7 @@ const stop = runLoop(engine);   // requestAnimationFrame at the display's refres
 | `seed` | random per load | `f.seed` (the harness uses `0x5EED`) |
 | `date` | `'system'` | Or `'YYYY-MM-DDTHH:MM:SSZ'`: pinned, advancing with the theme's clock, as the harness's `--date` |
 | `utcOffset` | `0` | `f.utc_offset_s` with a pinned date (the system date uses the browser's time zone) |
-| `stats` | `'browser'` | For `@argus stats` themes: `'browser'` (live where a browser can tell, see below) or `'synthetic'` (the harness feed) |
+| `stats` | `'browser'` | For `@argus stats` themes: `'browser'` (only real readings, see below) or `'synthetic'` (the harness feed) |
 | `pixelRatio` | `devicePixelRatio` | Canvas pixels per CSS pixel |
 | `autoResize` | `true` | Follow the canvas's displayed size (`ResizeObserver`, device-pixel box) |
 | `offscreen` | — | `{ width, height, format }`: render into a texture instead of a canvas (the verify page; `engine.readback()`) |
@@ -74,23 +75,47 @@ benchmark can hand them back to the model that wrote the theme.
 - **Present.** The draw kernel writes straight into the canvas's texture (`bgra8unorm` with the
   `bgra8unorm-storage` feature, else `rgba8unorm`), opaque.
 - **Timing.** With `timestamp-query`, `stats().gpuMs` is the GPU time of the whole frame
-  (init, steps and draw), read back asynchronously so it never stalls the frame.
+  (init, steps and draw) and `stats().drawMs` that of `argus_draw` alone (the frame is encoded as
+  two compute passes, each with its own pair of timestamps), read back asynchronously so it never
+  stalls the frame.
 
 ### Stats in a browser
 
-A web page can't read the machine the way Argus does. `stats: 'browser'` fills what a browser can
-honestly tell and keeps the rest on the harness's synthetic feed; `engine.statsSources()` says
-which is which, and `index.html` shows it:
+A web page can't read the machine's CPU load, memory size or use, disks, network traffic,
+processes or thermal state, so a browser page gets none of them and nothing synthetic stands in
+for them. With `stats: 'browser'` (the default), an `@argus stats` theme gets:
 
-| Field | Source |
-|---|---|
-| `seq`, `sample_dt` | live: a new sample about once a second |
-| `cpu_count` | live: `navigator.hardwareConcurrency` (P/E split unknown: 0; per-core loads synthetic) |
-| `thermal` | live where available: the Compute Pressure API's CPU pressure state (Chromium) |
-| `battery_*`, `on_ac` | live where available: the Battery Status API (Chromium) |
-| `gpu_busy` | live: this page's own GPU time / frame interval |
-| `uptime_s` | live: the page's uptime, not the machine's |
-| everything else (per-core load, memory size and use, network, disk, processes) | synthetic (`navigator.deviceMemory` is capped at 8 GB, so it isn't used) |
+- `s` (`ArgusStats`) with only the fields that have a real source filled, every other field 0;
+- `argus_vitals` (`ArgusVitals`, web only, binding 10) with `mode = 1`, the page's own vitals,
+  and a `has` bit for each optional reading this browser offers. A reading without its bit is
+  absent, not zero, and a theme must not show it as a reading. `mode = 0` (the verify page, the
+  harness feed) means `s` is a machine's stats.
+
+`engine.statsSources()` names the source of each reading, and `index.html` lists them. These are
+all the readings a browser page gets; nothing else is real:
+
+| Reading | Field | Source | Where it exists |
+|---|---|---|---|
+| Sample count, interval | `s.seq`, `s.sample_dt` | the page samples once a second | everywhere |
+| Frame interval (mean, worst) | `frame_ms`, `frame_worst_ms` | `requestAnimationFrame` intervals of this page | everywhere |
+| GPU time per frame, and `argus_draw`'s | `gpu_ms`, `draw_ms`; `s.gpu_busy` = `gpu_ms / frame_ms` | WebGPU timestamp queries around this page's two passes | with `timestamp-query` (Chrome, Safari 26 here) |
+| JavaScript time per frame | `js_ms` | `performance.now()` around encoding and submitting the frame | everywhere (Safari's clock has 1 ms steps, so it reads 0 or 1 ms there) |
+| Logical processors | `threads`, `s.cpu_count` (no per-core loads: `s.cpu_core` stays 0) | `navigator.hardwareConcurrency` | Chrome, Safari |
+| Device memory | `device_mem_gb` | `navigator.deviceMemory`: rounded down to a power of two and capped (8 in Chrome), so the machine has *at least* that; Phosphor shows "8+ GB" | Chromium |
+| JS heap used, allocated, limit | `heap_*_mb` | `performance.memory` (this page's heap, in coarse buckets) | Chromium |
+| Battery | `s.battery_*`, `s.on_ac` | Battery Status API | Chromium |
+| Network type, downlink, RTT, save-data | `net_*` | Network Information API: the browser's estimates, not this page's traffic | Chromium |
+| CPU pressure | `pressure` | Compute Pressure API (a coarse state, not a load) | Chromium, where enabled |
+| Canvas size, pixel ratio, GPU adapter | `canvas_w`, `canvas_h`, `dpr`, `adapter` | the canvas, `devicePixelRatio`, `GPUAdapterInfo` vendor and architecture | everywhere |
+| Uptime | `s.uptime_s` | this tab's uptime (`performance.now()`), not the machine's | everywhere |
+| Date and time | `f.days_j2000`, `f.day_frac`, `f.utc_offset_s` | the system clock and time zone | everywhere |
+
+Phosphor_Terminal shows exactly these in a browser page as a browser-vitals screen on the same
+tube: frame rate and frame time, GPU and draw ms, JS ms, the thread count as empty blocks ("per-thread
+load is not visible to a web page"), device memory, the JS heap, battery, network estimates, CPU
+pressure, the canvas, the GPU adapter, the tab's uptime and the date; a reading this browser lacks
+says N/A. With the harness feed (the verify page) it shows the Mac screen, so it still compares
+against the Metal PNG.
 
 ## Writing or translating a theme in WGSL
 
@@ -146,6 +171,11 @@ Language traps when translating from Metal:
 - `as_type<uint>(x)` is `bitcast<u32>(x)`; Metal's `half` is translated to `f32`.
 - `workgroupBarrier()` must be in uniform control flow: don't `return` early before it (compute an
   `inside` flag instead).
+- **Portability:** no nested `const` arrays (`const T = array<array<f32, 15>, 13>(...)`).
+  Chrome accepts them; Safari 26.6 rejects them ("cannot use override value in constant
+  expression", pointing at the inner array's length). Flatten the table to one dimension and
+  index it as `T[r * 15 + c]`. Run `tools/verify.mjs --browser Safari --page compile` after
+  translating.
 - Some identifiers are reserved in WGSL (`smooth`, `sample`, `filter`, `target`, `common`,
   `module`, `static`, ...): rename them.
 - Keep the theme's header and its `// @argus` lines verbatim, so the directives and the honest
@@ -168,6 +198,17 @@ seed `0x5EED`, the date pinned to 2026-10-20T12:00:00Z), and reports:
 - the difference from the Metal PNG of the same frame (mean and max per channel in 0..255, PSNR,
   the share of pixels within 0, 1, 2, 4, 8... levels), with `<Theme>_web.png` and
   `<Theme>_diff.png` (the difference x 8) written to `--out`.
+
+Other browsers, without a driver: `--browser Safari` opens the same page with `open -a Safari`, and
+the page POSTs its result back to the driver's server. `--page compile` builds every theme there
+instead (`web/host/compile.html`); `--shot Phosphor_Terminal` also runs that theme live with the
+browser's own stats and saves the frame. A Chromium-based browser can also run the default
+headless path with `CHROME=<path to its binary>`.
+
+```sh
+node web/host/tools/verify.mjs --browser Safari --theme Night_Tide --ref /tmp/ref/Night_Tide.png --out /tmp/verify
+node web/host/tools/verify.mjs --browser Safari --page compile --out /tmp/verify
+```
 
 ## Verified on this branch
 
@@ -199,18 +240,56 @@ behind finite-difference normals); they do not persist. Lizard_Island, Roulette_
 Night_Tide come close to the 8.33 ms budget of a 120 Hz frame at 5.4 million pixels and drop
 some frames there; their simulations stay on the 30 Hz tick, so motion is unaffected.
 
+### Re-checked in Chrome and Safari (2026-11-06, after the portability fix)
+
+The same check, frame 120 against the Metal PNG, in Chrome 157 (headless) and Safari 26.6
+(`--browser Safari`), on the same Apple M3. Chrome's results are identical to the table above.
+Safari's are below. GPU ms come from one run each on a busy machine: Orion_Nebula measured
+2.55 ms and 3.82 ms in two Safari runs.
+
+| Theme | Chrome max diff | Safari max diff | Safari pixels exact | Safari pixels within 3 | Safari GPU ms |
+|---|---|---|---|---|---|
+| Tutorial_Tides | 1 | 1 | 99.9998% | all | 1.26 |
+| Tutorial_Reef | 1 | 1 | 100% | all | 1.49 |
+| Night_Tide | 3 | 3 | 99.9855% | all | 3.02 |
+| Roulette_Chrome | 1 | 1 | 99.9992% | all | 1.84 |
+| Ebru_Studio | 1 | 6 | 99.7558% | all but 10 | 1.40 |
+| Orion_Nebula | 1 | 1 | 99.9945% | all | 3.82 |
+| Lizard_Island | 3 | 91 | 99.9851% | all but 17 | 3.79 |
+| Aventurine_Horoscope | 2 | 2 | 99.9993% | all | 1.79 |
+| Phosphor_Terminal | 1 | 1 | 99.9993% | all | 1.33 |
+
+Every theme passes the harness gates in Safari, with the same distinct and animated counts as in
+Chrome (within 3 pixels; Ebru_Studio's animated count within 72 of 1.28 million).
+
+The two outliers have different causes:
+- **Lizard_Island:** 17 isolated pixels out of 2.3 million sit on the hard edges of the potato
+  cod's spots (`du*du + ds*ds < r*r`). There, a last-bit difference in Safari's compiled maths
+  flips a whole pixel. They differ from Chrome already at frame 2, so they come from the draw,
+  not from the simulation.
+- **Ebru_Studio:** at frame 2 it matches Chrome exactly; by frame 120 its paint simulation has
+  drifted by up to 6 levels on 10 pixels.
+
+Chrome's compiler happens to agree with Metal's bit for bit at those spots and Safari's doesn't.
+Matching them would mean changing the theme itself, for example anti-aliasing the spots, which
+would change the Metal look too.
+
 ## Browser notes
 
-Tested here: Chrome 157 on macOS (Apple M3), headed and headless. The Safari and Firefox lines
-come from the vendors' release notes, not from runs on this branch.
+Tested here: Chrome 157 (headed and headless) and Safari 26.6 (through `--browser Safari`) on
+macOS 26.6, Apple M3. Not tested: Chrome Canary, Firefox (neither is installed on this machine),
+non-Apple GPUs. The Firefox line comes from Mozilla's release notes.
 
 - **Chrome / Edge (113+) on macOS, Windows, ChromeOS; Android 121+:** supported. Chrome rounds
   timestamp queries to 100 µs unless `--enable-webgpu-developer-features` is set, so `gpuMs` is
   coarse in a normal profile. `bgra8unorm-storage` is present on Apple GPUs, so the draw writes
   the canvas in its preferred format.
-- **Safari (26+ on macOS / iOS), untested here:** WebGPU is on by default. If `timestamp-query`
-  is missing, `stats().gpuMs` is undefined and the page shows CPU-side ms only; without
-  `bgra8unorm-storage` the canvas is configured as `rgba8unorm`.
+- **Safari 26.6 on macOS, tested:** all 9 themes build and pass. It has `timestamp-query`,
+  `bgra8unorm-storage` and `float32-filterable`. It rejects nested `const` arrays, which Chrome
+  accepts (see the portability trap above). It has no `deviceMemory`, `performance.memory`, Battery,
+  Network Information or Compute Pressure APIs, so Phosphor's browser screen shows N/A there.
+  It pauses `requestAnimationFrame`, and slows timers to about 1 Hz, in a tab that isn't on
+  screen.
 - **Firefox, untested here:** WebGPU ships on Windows; on macOS it was behind a flag when this
   was written.
 - Themes with `@argus state ... float32` that sample their state with a linear filter need the

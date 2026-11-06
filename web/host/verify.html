@@ -11,7 +11,7 @@
 </head>
 <body>
 <p>The Metal harness, in the browser: <code>?theme=Name&amp;frames=120&amp;width=1920&amp;height=1200&amp;seed=0x5EED&amp;date=2026-10-20T12:00:00Z</code>.
-Renders the frames at dt = 1/30 s (a step every frame), then runs the gates on the first and last frame. <code>web/host/tools/verify.mjs</code> drives this page headless and compares the last frame with the Metal harness PNG.</p>
+<code>&amp;report=1</code> POSTs the result to <code>/__report</code>. Renders the frames at dt = 1/30 s (a step every frame), then runs the gates on the first and last frame. <code>web/host/tools/verify.mjs</code> drives this page headless and compares the last frame with the Metal harness PNG.</p>
 <canvas id="view"></canvas>
 <pre id="log">running…</pre>
 <script type="module">
@@ -99,6 +99,10 @@ try {
 } catch (err) {
   window.__verify = { status: 'error', error: String(err && err.message || err) };
   log.textContent = `ERROR\n${window.__verify.error}`;
+}
+// ?report=1: POST the result to the driver (tools/verify.mjs --browser, for browsers without CDP).
+if (q.has('report')) {
+  await fetch('/__report', { method: 'POST', body: JSON.stringify({ verify: window.__verify, pixels: window.__pixels ?? null }) }).catch(() => {});
 }
 </script>
 </body>

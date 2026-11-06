@@ -9,6 +9,12 @@
 // the last frame with the Metal harness PNG (`make harness THEME=themes/X.metal OUT=ref.png`).
 // Writes <out>/<Theme>_web.png, <Theme>_diff.png (|web - metal| x 8) and <Theme>.json.
 // Node 22+, no dependencies. Exit 0 when the gates pass (and, with --max-mean, the diff is within it).
+//
+//   --browser Safari [--page compile [--theme X] [--shot X [--seconds 6]]]
+// Any other browser, without a driver: opens the page with `open -a <App>` and the page POSTs its
+// result back to this server (/__report). `--page compile` builds every theme (web/host/compile.html)
+// instead of verifying one; --shot also runs X live with the browser's own stats and saves the
+// frame. Chromium-based browsers can also run the CDP path with CHROME=<binary>.
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -120,9 +126,34 @@ function compare(web, ref, w, h) {
   return { meanAbs: +(sum / (n * 3)).toFixed(4), rmse: +Math.sqrt(mse).toFixed(4), psnr: mse === 0 ? Infinity : +(10 * Math.log10(255 * 255 / mse)).toFixed(2), maxAbs: max, pixelsPct: pct, diff };
 }
 
+// Saves <Theme>_web.png, compares it with --ref and writes <Theme>.json; returns the verdict.
+function finish(result, b64, ok) {
+  const web = Buffer.from(b64, 'base64');
+  const w = +args.width, h = +args.height;
+  fs.writeFileSync(path.join(args.out, `${args.theme}_web.png`), encodePNG(w, h, web));
+  if (args.ref) {
+    const ref = decodePNG(fs.readFileSync(args.ref));
+    if (ref.w !== w || ref.h !== h) throw new Error(`reference is ${ref.w}x${ref.h}, render is ${w}x${h}`);
+    const c = compare(web, ref.rgba, w, h);
+    fs.writeFileSync(path.join(args.out, `${args.theme}_diff.png`), encodePNG(w, h, c.diff));
+    delete c.diff;
+    result.compare = { ref: args.ref, ...c };
+    if (args['max-mean'] !== undefined && c.meanAbs > +args['max-mean']) ok = false;
+  }
+  fs.writeFileSync(path.join(args.out, `${args.theme}.json`), JSON.stringify(result, null, 2));
+  return ok;
+}
+
 // ---- static server -------------------------------------------------------------------------
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.wgsl': 'text/plain', '.json': 'application/json', '.png': 'image/png', '.bin': 'application/octet-stream', '.css': 'text/css' };
+let onReport = null;
 const server = http.createServer((req, res) => {
+  if (req.method === 'POST' && req.url === '/__report') {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => { res.writeHead(204); res.end(); onReport?.(Buffer.concat(chunks).toString('utf8')); });
+    return;
+  }
   const p = path.normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
   const file = path.join(WEB, p);
   if (!file.startsWith(WEB)) { res.writeHead(403); res.end(); return; }
@@ -134,6 +165,39 @@ const server = http.createServer((req, res) => {
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
+
+// ---- --browser <App>: no driver; the page reports back --------------------------------------------
+if (args.browser) {
+  const report = new Promise((r) => { onReport = r; });
+  const page = args.page === 'compile'
+    ? `host/compile.html?report=1${process.argv.includes('--theme') ? `&theme=${encodeURIComponent(args.theme)}` : ''}${args.shot ? `&shot=${encodeURIComponent(args.shot)}&seconds=${args.seconds ?? 6}` : ''}`
+    : `host/verify.html?report=1&${new URLSearchParams({ theme: args.theme, frames: args.frames, width: args.width, height: args.height, seed: args.seed, date: args.date, timing: args.timing })}`;
+  const url = `http://127.0.0.1:${port}/${page}`;
+  spawn('open', ['-a', args.browser, url], { stdio: 'ignore' });
+  const timer = setTimeout(() => { console.error(`no report from ${args.browser} after ${args.timeout} s (${url})`); process.exit(2); }, args.timeout * 1000);
+  const body = JSON.parse(await report);
+  clearTimeout(timer);
+  let ok;
+  if (args.page === 'compile') {
+    ok = body.status === 'done' && body.themes.every((t) => t.ok);
+    if (body.shot) {
+      const tag = `${body.shot.name}_${args.browser.replace(/\W+/g, '_')}_live.png`;
+      fs.writeFileSync(path.join(args.out, tag), encodePNG(body.shot.width, body.shot.height, Buffer.from(body.shot.rgba, 'base64')));
+      body.shot.rgba = `(saved as ${tag})`;
+    }
+    fs.writeFileSync(path.join(args.out, `compile_${args.browser.replace(/\W+/g, '_')}.json`), JSON.stringify(body, null, 2));
+    console.log(JSON.stringify(body, null, 2));
+  } else {
+    const result = body.verify;
+    result.browser = args.browser;
+    ok = result.status === 'done' && result.gates.pass;
+    if (result.status === 'done') ok = finish(result, body.pixels, ok);
+    else fs.writeFileSync(path.join(args.out, `${args.theme}.json`), JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(result, null, 2));
+  }
+  server.close();
+  process.exit(ok ? 0 : 1);
+}
 
 // ---- Chrome over CDP ------------------------------------------------------------------------
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'argus-verify-chrome-'));
@@ -231,20 +295,8 @@ if (result.status === 'done') {
     if (typeof part !== 'string') throw new Error('pixel transfer failed');
     b64 += part;
   }
-  const web = Buffer.from(b64, 'base64');
-  const w = +args.width, h = +args.height;
-  fs.writeFileSync(path.join(args.out, `${args.theme}_web.png`), encodePNG(w, h, web));
-  if (args.ref) {
-    const ref = decodePNG(fs.readFileSync(args.ref));
-    if (ref.w !== w || ref.h !== h) throw new Error(`reference is ${ref.w}x${ref.h}, render is ${w}x${h}`);
-    const c = compare(web, ref.rgba, w, h);
-    fs.writeFileSync(path.join(args.out, `${args.theme}_diff.png`), encodePNG(w, h, c.diff));
-    delete c.diff;
-    result.compare = { ref: args.ref, ...c };
-    if (args['max-mean'] !== undefined && c.meanAbs > +args['max-mean']) ok = false;
-  }
-}
-fs.writeFileSync(path.join(args.out, `${args.theme}.json`), JSON.stringify(result, null, 2));
+  ok = finish(result, b64, ok);
+} else fs.writeFileSync(path.join(args.out, `${args.theme}.json`), JSON.stringify(result, null, 2));
 console.log(JSON.stringify(result, null, 2));
 cleanup();
 process.exit(ok ? 0 : 1);

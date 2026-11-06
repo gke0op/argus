@@ -52,9 +52,12 @@ struct ArgusFrame {
 }
 
 // Live system stats, for themes that ask with `// @argus stats` (and only them). Same layout as
-// Metal's ArgusStats (428 bytes, every field 4 bytes). In the browser the host fills what the
-// browser can tell (web/host/stats.js marks each field live or synthetic); the verify page feeds
-// the harness's fixed synthetic stats (a new seq every 30 ticks).
+// Metal's ArgusStats (428 bytes, every field 4 bytes). A web page can't read the machine's CPU,
+// memory, disks or processes, so in a browser page the host fills only the fields it really
+// knows (seq, sample_dt, uptime_s = the tab's, cpu_count = navigator.hardwareConcurrency,
+// gpu_busy = this page's GPU share, battery_* from the Battery Status API) and leaves the rest 0;
+// argus_vitals.mode says which it is (web/README.md, "Stats in a browser"). The verify page
+// feeds the harness's synthetic stats (a new seq every 30 ticks) with argus_vitals.mode = 0.
 const ARGUS_STATS_MAX_CORES: u32 = 32u;
 const ARGUS_STATS_TOP: u32 = 5u;
 
@@ -102,6 +105,43 @@ struct ArgusStats {
     procs: array<ArgusProc, 5>,
 }
 
+// Web only (no Metal twin): what a browser page can honestly tell about itself, for `@argus stats`
+// themes. mode 0: s is a machine's stats (the harness feed; the Argus app); mode 1: a browser page,
+// s holds only the real fields above and these are the page's own vitals. `has` says which of the
+// optional readings exist in this browser (ARGUS_HAS_*); a missing one is 0 and must not be shown
+// as a reading. 208 bytes.
+const ARGUS_HAS_GPU_TIME: u32 = 1u;     // timestamp-query
+const ARGUS_HAS_THREADS: u32 = 2u;      // navigator.hardwareConcurrency
+const ARGUS_HAS_DEVICE_MEM: u32 = 4u;   // navigator.deviceMemory (Chromium)
+const ARGUS_HAS_HEAP: u32 = 8u;         // performance.memory (Chromium)
+const ARGUS_HAS_BATTERY: u32 = 16u;     // navigator.getBattery() (Chromium)
+const ARGUS_HAS_NETWORK: u32 = 32u;     // navigator.connection (Chromium)
+const ARGUS_HAS_PRESSURE: u32 = 64u;    // PressureObserver 'cpu' (Chromium)
+struct ArgusVitals {
+    mode: u32,              // 0 machine stats, 1 browser page
+    has: u32,               // ARGUS_HAS_* bits
+    frame_ms: f32,          // mean display-frame interval over the last sample (requestAnimationFrame)
+    frame_worst_ms: f32,    // the longest frame interval in it
+    gpu_ms: f32,            // this page's GPU time per frame (timestamp queries), median of the sample
+    draw_ms: f32,           // of which argus_draw
+    js_ms: f32,             // JavaScript time per frame (encoding and submitting it), median
+    threads: u32,           // navigator.hardwareConcurrency: logical processors
+    device_mem_gb: f32,     // navigator.deviceMemory: rounded down to a power of two, capped (8 in Chrome)
+    heap_used_mb: f32,      // performance.memory, MB (2^20 bytes): used, allocated, limit (coarse buckets)
+    heap_total_mb: f32,
+    heap_limit_mb: f32,
+    net_type: u32,          // navigator.connection.effectiveType: 1 slow-2g, 2 2g, 3 3g, 4 4g
+    net_downlink_mbps: f32, // its downlink estimate (rounded to 25 kbit/s) and round-trip estimate
+    net_rtt_ms: f32,        // (rounded to 25 ms); both are estimates, not measurements of this page
+    net_save_data: u32,
+    pressure: u32,          // PressureObserver CPU state: 1 nominal, 2 fair, 3 serious, 4 critical
+    canvas_w: u32,          // the canvas in device pixels, and devicePixelRatio
+    canvas_h: u32,
+    dpr: f32,
+    adapter: array<u32, 32>, // the GPU adapter's vendor and architecture (GPUAdapterInfo), one ASCII
+                             // code per entry, 0-padded
+}
+
 // ---- Bindings (fixed; the host builds one layout per kernel kind) ---------------------------
 @group(0) @binding(0) var<uniform> f: ArgusFrame;
 @group(0) @binding(1) var<storage, read> s: ArgusStats;          // `@argus stats` themes only
@@ -115,6 +155,7 @@ struct ArgusStats {
 @group(0) @binding(7) var argus_linear_repeat_s: sampler;
 @group(0) @binding(8) var argus_linear_repeat_t: sampler;
 @group(0) @binding(9) var argus_nearest_clamp: sampler;
+@group(0) @binding(10) var<storage, read> argus_vitals: ArgusVitals; // `@argus stats` themes only (web)
 @group(1) @binding(0) var argus_out: texture_storage_2d<ARGUS_OUT_FORMAT, write>; // draw only
 
 // Days since J2000.0 as one float. LOSSY: a float near 9800 days resolves only ~84 s.

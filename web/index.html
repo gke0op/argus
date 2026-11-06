@@ -78,9 +78,9 @@ setInterval(() => {
   const s = engine.stats();
   const sources = engine.statsSources?.();
   if (sources && Object.keys(sources).length) {
-    const pick = (p) => Object.entries(sources).filter(([, v]) => p(String(v))).map(([k]) => k).join(', ') || '—';
+    const pick = (p) => Object.entries(sources).filter(([k, v]) => k !== 'machine' && p(String(v))).map(([k]) => k).join(', ') || '—';
     $('src').textContent = sources.all ? `stats: ${sources.all}` :
-      `stats live: ${pick((v) => v.startsWith('live'))}. Synthetic: ${pick((v) => v.startsWith('synthetic'))}`;
+      `stats, real: ${pick((v) => v.startsWith('live'))}. Not in this browser: ${pick((v) => v.startsWith('not available'))}. Never readable by a page: machine CPU, memory, disks, network traffic, processes`;
   }
   const interval = med(frameTimes);
   const hz = 1000 / interval;
