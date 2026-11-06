@@ -6,7 +6,7 @@ THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: icon quasars all app desktop kronos harness linux web-wasm web-wasm-all web-wasm-serve check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
+.PHONY: icon quasars all app desktop kronos harness linux web-wasm web-wasm-all web-wasm-refs web-wasm-serve check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
 
 all: app kronos
 
@@ -53,7 +53,7 @@ web-wasm:
 
 # Every theme the dev page lists, the BENCHMARK.md skeleton and the gate fixtures. A theme that
 # fails to compile is recorded (Gate 1) in build/NAME.compile.txt, not fatal. Then the manifest.
-WEB_WASM_THEMES ?= themes/cpu/Tutorial_Tides.zig themes/Cygnus_A.zig tests/fixtures/Fixture_Stateful.zig tests/fixtures/Fixture_Stateless.zig $(sort $(wildcard tests/fixtures/Gate*.zig))
+WEB_WASM_THEMES ?= themes/cpu/Tutorial_Tides.zig themes/Cygnus_A.zig tests/fixtures/Fixture_Stateful.zig tests/fixtures/Fixture_Stateless.zig tests/fixtures/Fixture_Hang.zig $(sort $(wildcard tests/fixtures/Gate*.zig))
 web-wasm-all:
 	@mkdir -p $(WEB_WASM_OUT)/stage
 	@awk '/^### Minimal Working Skeleton/{s=1} s&&/^```zig/{c=1;next} c&&/^```/{exit} c' BENCHMARK.md > $(WEB_WASM_OUT)/stage/Bench_Skeleton.zig
@@ -65,6 +65,15 @@ web-wasm-all:
 	@cd $(WEB_WASM_OUT) && { printf '['; sep=''; for f in *.compile.txt; do n=$${f%.compile.txt}; \
 		if [ -f $$n.st.wasm ]; then ok=true; else ok=false; fi; \
 		printf '%s{"name":"%s","compiled":%s}' "$$sep" "$$n" "$$ok"; sep=','; done; printf ']\n'; } > manifest.json
+
+# Native harness reports and final frames for the dev page's comparison (build/NAME.native.*).
+# Fixture_Hang is left out: the native harness has no time limit and would never return.
+web-wasm-refs: web-wasm-all
+	@for t in $(filter-out tests/fixtures/Fixture_Hang.zig,$(WEB_WASM_THEMES)) $(WEB_WASM_OUT)/stage/Bench_Skeleton.zig; do \
+		n=$$(basename $$t .zig); \
+		$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $$t --frames 120 --out $(WEB_WASM_OUT)/$$n.native.png > $(WEB_WASM_OUT)/$$n.native.txt 2>&1; \
+		echo "  native $$n: $$(grep -o 'Verdict *: [A-Z]*' $(WEB_WASM_OUT)/$$n.native.txt || echo 'did not compile')"; \
+	done
 
 # The dev page needs cross-origin isolation for threads; this server sends the COOP/COEP headers
 # (GitHub Pages cannot; there coi-serviceworker.js adds them, see web/wasm/README.md).

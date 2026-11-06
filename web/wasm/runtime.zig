@@ -135,7 +135,7 @@ export fn web_abi() u32 {
 // wasi_thread_start does for wasi threads.
 
 export fn web_tls_size() usize {
-    if (!threaded) return 0;
+    if (comptime !threaded) return 0;
     return asm volatile (
         \\ .globaltype __tls_size, i32, immutable
         \\ global.get __tls_size
@@ -145,7 +145,7 @@ export fn web_tls_size() usize {
 }
 
 export fn web_tls_align() usize {
-    if (!threaded) return 1;
+    if (comptime !threaded) return 1;
     return asm volatile (
         \\ .globaltype __tls_align, i32, immutable
         \\ global.get __tls_align
@@ -158,10 +158,11 @@ extern fn __wasm_init_tls(memory: [*]u8) void;
 
 /// Called first by a helper Worker: switch to `stack_top` and its own TLS block.
 export fn web_thread_init(stack_top: usize, tls: usize) void {
-    if (!threaded) return;
+    if (comptime !threaded) return;
     asm volatile (
-        \\local.get %[sp]
-        \\global.set __stack_pointer
+        \\ .globaltype __stack_pointer, i32
+        \\ local.get %[sp]
+        \\ global.set __stack_pointer
         :
         : [sp] "r" (stack_top),
     );
