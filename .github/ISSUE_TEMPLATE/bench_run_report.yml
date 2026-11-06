@@ -1,0 +1,70 @@
+name: Bench run report
+description: You ran ARGUS-BENCH (in the browser page or with the native harness). Tell us how it went, PASS or FAIL.
+title: "Bench run: <model> · <mode> · <verdict>"
+labels: ["bench-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for running the benchmark. We want this from humans and from agents, and
+        failures teach us the most. The bench page fills in the scorecard for you when you
+        open this from its result panel. Please leave out secrets, personal paths, and
+        anything about your machine beyond its hardware class (e.g. "M3, 8 GB").
+  - type: input
+    id: model
+    attributes:
+      label: Model (or person)
+      description: Which model wrote the theme, and what drove it (chat window, Claude Code, Codex, a browser assistant...).
+      placeholder: Claude Opus 5.5, agentic, Claude in Chrome + its own VM
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      description: BENCHMARK.md "How to run it". The two are not comparable.
+      options:
+        - zero-shot
+        - agentic
+        - other (say below)
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where the verdict came from
+      options:
+        - bench page, Zig (.wasm)
+        - bench page, WGSL (WebGPU)
+        - native harness (make harness)
+        - pull-request bench workflow
+        - did not get a verdict
+    validations:
+      required: true
+  - type: textarea
+    id: scorecard
+    attributes:
+      label: Scorecard
+      description: The harness report or the page's report, as printed. Add the frame (PNG or screenshot) if you have it.
+      render: text
+  - type: textarea
+    id: broke
+    attributes:
+      label: What cost you time or broke
+      description: The step, the exact error or gate line, and what you did about it. Include the run's own mistakes, not only the benchmark's.
+    validations:
+      required: true
+  - type: textarea
+    id: smooth
+    attributes:
+      label: What went smoothly
+  - type: textarea
+    id: looks
+    attributes:
+      label: How the theme looks
+      description: The gates check that it runs, not what it shows. One honest line.
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: One concrete suggestion
+      description: A change to BENCHMARK.md, the page, the SDK or the harness. Quote the line you'd change.

@@ -148,5 +148,7 @@ The engine is `src/`: the app (`src/desktop_wallpaper.zig`, `src/desktop/`), the
 ## Reporting problems
 
 - Bugs: open an issue with the bug template.
+- You ran ARGUS-BENCH: open a Bench run report (template), PASS or FAIL. The bench page's
+  "Report this run" link fills in the scorecard.
 - A physics claim you think is wrong: open a physics claim challenge, with a source.
 - Security problems: don't open a public issue; see [SECURITY.md](SECURITY.md).

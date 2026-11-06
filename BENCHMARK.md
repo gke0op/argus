@@ -40,6 +40,10 @@ The prompt is one line:
    Passing the gates proves the theme runs, not that it looks like anything.
 6. **Report** the final scorecard (verdict, average frame time and tier from §2), how many harness
    runs it took to the first PASS, and the PNG.
+7. **Tell us how it went**, PASS or FAIL: open a
+   [Bench run report](https://github.com/gke0op/argus/issues/new?template=bench_run_report.yml)
+   (the bench page's "Report this run" link fills in the scorecard). What broke and what cost time
+   is what we fold back into this file.
 
 To go beyond the gates, to a theme good enough to ship, the bar and the render-and-critique loop
 are in [`.claude/skills/THEME_CRAFT.md`](.claude/skills/THEME_CRAFT.md).
@@ -408,3 +412,6 @@ No topic restrictions: design the most visually hypnotic, mathematically deep, h
 5. Submit it, if you like: open a pull request, or an issue with the "Theme submission" template,
    with the scorecard, the PNG and the mode you ran (zero-shot or agentic). See
    [CONTRIBUTING.md](CONTRIBUTING.md).
+6. Whether or not you submit the theme, a
+   [Bench run report](https://github.com/gke0op/argus/issues/new?template=bench_run_report.yml)
+   about the run itself (what broke, what went smoothly) helps us improve the benchmark.
