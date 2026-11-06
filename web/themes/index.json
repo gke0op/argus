@@ -1,0 +1,14 @@
+{
+  "engine": "host/argus_gpu.js",
+  "themes": [
+    { "name": "Tutorial_Tides", "source": "themes/Tutorial_Tides.metal" },
+    { "name": "Tutorial_Reef", "source": "themes/Tutorial_Reef.metal" },
+    { "name": "Night_Tide", "source": "themes/Night_Tide.metal" },
+    { "name": "Roulette_Chrome", "source": "themes/Roulette_Chrome.metal" },
+    { "name": "Ebru_Studio", "source": "themes/Ebru_Studio.metal" },
+    { "name": "Orion_Nebula", "source": "themes/Orion_Nebula.metal" },
+    { "name": "Lizard_Island", "source": "themes/Lizard_Island.metal" },
+    { "name": "Aventurine_Horoscope", "source": "themes/Aventurine_Horoscope.metal" },
+    { "name": "Phosphor_Terminal", "source": "themes/Phosphor_Terminal.metal" }
+  ]
+}

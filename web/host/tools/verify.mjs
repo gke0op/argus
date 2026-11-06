@@ -141,7 +141,7 @@ const chrome = spawn(CHROME, [
   ...(args.headed ? [] : ['--headless=new']), '--enable-unsafe-webgpu', '--enable-webgpu-developer-features',
   '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
   '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
-  'about:blank',
+  ...(args.headed ? ['--window-size=1512,945', '--window-position=0,0'] : []), 'about:blank',
 ], { stdio: ['ignore', 'ignore', 'pipe'] });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let cleaned = false;
@@ -187,6 +187,26 @@ ws.onmessage = (ev) => { onEvent(ev); if (JSON.parse(ev.data).method === 'Page.l
 
 await send('Runtime.enable');
 await send('Page.enable');
+// --live N: the dev page itself (canvas, requestAnimationFrame, the browser's pacing) for N
+// seconds; reports the engine's stats and the display interval, and saves a screenshot.
+if (args.live) {
+  const vw = +(args.vw ?? 1512), vh = +(args.vh ?? 982), dpr = +(args.dpr ?? 2);
+  // Headless has no real display: emulate a 14" MacBook Pro's. Headed (--headed) uses the real window.
+  if (!args.headed) await send('Emulation.setDeviceMetricsOverride', { width: vw, height: vh, deviceScaleFactor: dpr, mobile: false });
+  await send('Page.navigate', { url: `http://127.0.0.1:${port}/index.html?theme=${encodeURIComponent(args.theme)}${args.seed ? `&seed=${args.seed}` : ''}` });
+  for (let i = 0; i < 300 && !loaded; i++) await sleep(50);
+  await sleep(+args.live * 1000);
+  const v = await evaluate(`JSON.stringify((() => { const e = window.__engine && window.__engine(); if (!e) return { error: document.getElementById('err').textContent || 'no engine' };
+    const cv = document.getElementById('c'); return { theme: e.name, dpr: devicePixelRatio, css: [cv.clientWidth, cv.clientHeight], canvasPx: [cv.width, cv.height], stats: e.stats(), info: e.info, hud: document.getElementById('read').innerText, err: document.getElementById('err').textContent, sources: e.statsSources() }; })())`, 10000);
+  const shot = await send('Page.captureScreenshot', { format: 'png' }, 30000);
+  if (shot.result?.data) fs.writeFileSync(path.join(args.out, `${args.theme}_live.png`), Buffer.from(shot.result.data, 'base64'));
+  const r = v ? JSON.parse(v) : { error: 'evaluate failed' };
+  if (consoleLines.length) r.console = consoleLines.slice(0, 40);
+  console.log(JSON.stringify(r, null, 2));
+  cleanup();
+  process.exit(r.error || r.err ? 1 : 0);
+}
+
 const q = new URLSearchParams({ theme: args.theme, frames: args.frames, width: args.width, height: args.height, seed: args.seed, date: args.date, timing: args.timing });
 await send('Page.navigate', { url: `http://127.0.0.1:${port}/host/verify.html?${q}` });
 

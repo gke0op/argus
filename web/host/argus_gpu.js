@@ -449,9 +449,14 @@ export async function create(canvas, opts = {}) {
   if (!offscreen && opts.autoResize !== false && typeof ResizeObserver !== 'undefined' && canvas instanceof HTMLCanvasElement) {
     observer = new ResizeObserver((entries) => {
       const e = entries[entries.length - 1];
+      // The device-pixel box is exact (no rounding at fractional positions); trust it when it
+      // agrees with CSS size x ratio (emulated ratios, e.g. DevTools, report CSS pixels there).
+      const ratio = opts.pixelRatio ?? (globalThis.devicePixelRatio || 1);
+      const ew = Math.round(e.contentRect.width * ratio), eh = Math.round(e.contentRect.height * ratio);
       const box = e.devicePixelContentBoxSize?.[0];
-      const w = box ? box.inlineSize : Math.round(e.contentRect.width * dpr);
-      const h = box ? box.blockSize : Math.round(e.contentRect.height * dpr);
+      const exact = box && Math.abs(box.inlineSize - ew) <= 2 && Math.abs(box.blockSize - eh) <= 2;
+      const w = exact ? box.inlineSize : ew;
+      const h = exact ? box.blockSize : eh;
       if (w > 0 && h > 0) engine.resize(w, h);
     });
     try { observer.observe(canvas, { box: 'device-pixel-content-box' }); } catch { observer.observe(canvas); }
