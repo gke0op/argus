@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Argus WebGPU — verify a theme like the harness</title>
+<style>
+  body { background: #0b0d10; color: #cfd6de; font: 13px/1.45 ui-monospace, Menlo, monospace; margin: 16px; }
+  canvas { width: 960px; max-width: 100%; image-rendering: auto; border: 1px solid #222; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<p>The Metal harness, in the browser: <code>?theme=Name&amp;frames=120&amp;width=1920&amp;height=1200&amp;seed=0x5EED&amp;date=2026-10-20T12:00:00Z</code>.
+Renders the frames at dt = 1/30 s (a step every frame), then runs the gates on the first and last frame. <code>web/host/tools/verify.mjs</code> drives this page headless and compares the last frame with the Metal harness PNG.</p>
+<canvas id="view"></canvas>
+<pre id="log">running…</pre>
+<script type="module">
+import { create, getDevice, HARNESS_SEED, HARNESS_DATE } from './argus_gpu.js';
+
+const q = new URLSearchParams(location.search);
+const theme = q.get('theme') ?? 'Tutorial_Tides';
+const frames = Math.max(2, parseInt(q.get('frames') ?? '120', 10));
+const width = parseInt(q.get('width') ?? '1920', 10);
+const height = parseInt(q.get('height') ?? '1200', 10);
+const seed = parseInt(q.get('seed') ?? String(HARNESS_SEED), q.get('seed')?.startsWith('0x') ? 16 : 10);
+const date = q.get('date') ?? HARNESS_DATE;
+const timingFrames = parseInt(q.get('timing') ?? '60', 10);
+const log = document.getElementById('log');
+window.__verify = { status: 'running' };
+
+// The harness's packFloat: round(clamp(x, 0, 1) * 255) per channel.
+function pack(fl) {
+  const n = fl.length / 4;
+  const out = new Uint8ClampedArray(n * 4);
+  for (let i = 0; i < n * 4; i += 4) {
+    out[i] = Math.round(Math.min(Math.max(fl[i], 0), 1) * 255);
+    out[i + 1] = Math.round(Math.min(Math.max(fl[i + 1], 0), 1) * 255);
+    out[i + 2] = Math.round(Math.min(Math.max(fl[i + 2], 0), 1) * 255);
+    out[i + 3] = 255;
+  }
+  return out;
+}
+
+function toBase64(u8) {
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+try {
+  const device = await getDevice();
+  const t0 = performance.now();
+  const e = await create(null, { theme, seed, date, stats: 'synthetic', offscreen: { width, height, format: 'rgba32float' } });
+  const compileMs = performance.now() - t0;
+  let first = null;
+  for (let i = 0; i < frames; i++) {
+    e.harnessFrame();
+    if (i === 0) first = await e.readback();
+    else await device.queue.onSubmittedWorkDone();
+  }
+  const last = await e.readback();
+
+  // Gates, as src/theme_harness.zig runs them on frame 0 and the last frame.
+  let nan = 0, alphaMin = Infinity, alphaMax = -Infinity;
+  for (const buf of [first, last]) for (let i = 0; i < buf.length; i++) if (!Number.isFinite(buf[i])) nan++;
+  for (let i = 3; i < last.length; i += 4) { alphaMin = Math.min(alphaMin, last[i]); alphaMax = Math.max(alphaMax, last[i]); }
+  const L = pack(last), F = pack(first);
+  let distinct = 0, animated = 0;
+  for (let i = 0; i < L.length; i += 4) {
+    if (L[i] !== L[0] || L[i + 1] !== L[1] || L[i + 2] !== L[2]) distinct++;
+    const d = Math.abs(L[i] - F[i]) + Math.abs(L[i + 1] - F[i + 1]) + Math.abs(L[i + 2] - F[i + 2]);
+    if (d >= 4) animated++;
+  }
+
+  // GPU time per frame, timestamp queries around the whole pass (init/steps/draw), one frame at a
+  // time like the harness's Avg GPU Frame.
+  for (let i = 0; i < timingFrames; i++) {
+    e.harnessFrame();
+    await device.queue.onSubmittedWorkDone();
+  }
+  // Let the last timestamp read-backs land (map callbacks run after the work is done).
+  for (let i = 0; i < 20 && e.gpuSamples().length < Math.min(timingFrames, 4); i++) await device.queue.onSubmittedWorkDone();
+  const g = e.gpuSamples().slice(-timingFrames);
+  const sorted = [...g].sort((a, b) => a - b);
+  const gpu = g.length ? { n: g.length, avgMs: g.reduce((a, b) => a + b, 0) / g.length, medianMs: sorted[sorted.length >> 1], worstMs: sorted[sorted.length - 1] } : null;
+
+  const view = document.getElementById('view');
+  view.width = width; view.height = height;
+  view.getContext('2d').putImageData(new ImageData(L, width, height), 0, 0);
+
+  const gates = {
+    nanInf: nan, alphaMin, alphaMax, distinct, animated, total: width * height,
+    pass: nan === 0 && distinct > 100 && animated >= 2000,
+  };
+  window.__verify = { status: 'done', theme: e.name, frames, width, height, seed: e.info.seed, date, adapter: e.info.adapter, compileMs, gates, gpu, info: e.info };
+  window.__pixels = toBase64(L);
+  log.textContent = JSON.stringify(window.__verify, null, 2);
+  e.destroy();
+} catch (err) {
+  window.__verify = { status: 'error', error: String(err && err.message || err) };
+  log.textContent = `ERROR\n${window.__verify.error}`;
+}
+</script>
+</body>
+</html>
