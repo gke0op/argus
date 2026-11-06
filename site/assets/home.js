@@ -17,7 +17,10 @@ new IntersectionObserver(([e]) => document.body.classList.toggle('solid', !e.isI
 let gpu = { ok: false, why: 'checking' };
 let current = null;   // the mounted handle
 let loading = null;   // id being loaded
-let half = q.get('res') === 'half';
+// Phones start at half resolution: native is 2.5-3 million pixels a frame there, which heats a
+// phone GPU and throttles it. ?res=native or the button switches back.
+const PHONE = matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 600;
+let half = q.has('res') ? q.get('res') === 'half' : PHONE;
 let note = '', err = '', errShown = false;
 let firstFrameMs = null;
 
@@ -144,7 +147,7 @@ $('resBtn').addEventListener('click', () => {
   half = !half;
   $('resBtn').textContent = half ? 'half res' : 'native res';
   const u = new URL(location.href);
-  half ? u.searchParams.set('res', 'half') : u.searchParams.delete('res');
+  if (half === PHONE) u.searchParams.delete('res'); else u.searchParams.set('res', half ? 'half' : 'native');
   history.replaceState(null, '', u);
   const id = current?.theme.id;
   if (id) { loading = null; select(id, { replace: true }); }

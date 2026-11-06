@@ -46,7 +46,7 @@ export function probeWebGPU() {
       if (!navigator.gpu) return { ok: false, why: 'this browser has no WebGPU (navigator.gpu is missing)' };
       try {
         const a = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-        if (!a) return { ok: false, why: 'WebGPU is present but found no GPU adapter' };
+        if (!a) return { ok: false, why: 'WebGPU is present but found no GPU adapter (after a GPU crash the browser turns it off for the page: reopen the tab)' };
         return { ok: true, adapter: a };
       } catch (e) {
         return { ok: false, why: `WebGPU: ${e.message ?? e}` };

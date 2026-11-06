@@ -35,7 +35,7 @@ export const name = 'Cygnus A';
 export async function getDevice() {
   if (!navigator.gpu) throw new Error('WebGPU is not available in this browser');
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-  if (!adapter) throw new Error('no WebGPU adapter');
+  if (!adapter) throw new Error('WebGPU found no GPU adapter. After a GPU crash, the browser turns WebGPU off for the page: close this tab and open the page again, or restart the browser.');
   const features = adapter.features.has('timestamp-query') ? ['timestamp-query'] : [];
   const lim = adapter.limits;
   return adapter.requestDevice({
@@ -94,6 +94,10 @@ class PassTimer {
 export async function create(canvas, opts = {}) {
   const device = opts.device ?? (await getDevice());
   const ownDevice = !opts.device;
+  // A driver that gives up shows only as a lost device or an uncaptured error: keep both for stats().
+  let gpuError = null;
+  device.lost.then((info) => { if (info.reason !== "destroyed") gpuError ??= `the GPU device was lost (${info.reason || "unknown"})${info.message ? `: ${info.message}` : ""}`; });
+  device.addEventListener("uncapturederror", (e) => { gpuError ??= `GPU error: ${e.error.message}`; });
   const [code, wasm] = await Promise.all([fetch(new URL('cygnus.wgsl', HERE)).then((r) => r.text()), loadWasm()]);
   const X = wasm.x;
   const mem = () => X.memory.buffer;
@@ -465,6 +469,7 @@ export async function create(canvas, opts = {}) {
       exposure: eng?.exposure ?? null,
       simTimeM: X.cyg_time_m(),
       timestamps: timer.ok,
+      error: gpuError ?? undefined,
     };
   }
 

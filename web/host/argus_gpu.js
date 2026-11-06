@@ -28,7 +28,7 @@ export async function getDevice() {
     devicePromise = (async () => {
       if (!navigator.gpu) throw new Error('WebGPU is not available in this browser (navigator.gpu is missing)');
       const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-      if (!adapter) throw new Error('WebGPU: no GPU adapter');
+      if (!adapter) throw new Error('WebGPU found no GPU adapter. After a GPU crash, the browser turns WebGPU off for the page: close this tab and open the page again, or restart the browser.');
       const want = ['timestamp-query', 'float32-filterable', 'bgra8unorm-storage'];
       const requiredFeatures = want.filter((x) => adapter.features.has(x));
       const L = adapter.limits;
@@ -64,6 +64,7 @@ export async function getDevice() {
       device.argusAdapter = `${ai.vendor ?? ''} ${ai.architecture ?? ''} ${ai.description ?? ''}`.trim();
       return device;
     })();
+    devicePromise.catch(() => { devicePromise = null; });   // a failed attempt is not cached: the next theme asks again
   }
   return devicePromise;
 }
