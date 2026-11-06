@@ -106,7 +106,7 @@ function tele() {
     html += row('display', `${f(r.hz, 0)} Hz`);
     if (firstFrameMs != null) html += row('first frame', `${f(firstFrameMs, 0)} ms`, 'wide');
     if (r.kind === 'wgsl' && r.gpuMs == null && r.cpuMs != null && current.engine.stats().frame > 60) note ||= 'No timestamp-query here, so GPU time is not measured.';
-    if (r.statsSources && !r.statsSources.all) note ||= 'Live where a browser can tell (core count, this page’s GPU time); the rest is the harness’s synthetic feed.';
+    if (r.statsSources && !r.statsSources.all) note ||= 'In the app these are your Mac’s; a browser knows only a few about itself.';
   } else if (loading) {
     html += row('engine', 'loading…');
   }

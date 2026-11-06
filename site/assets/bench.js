@@ -34,7 +34,7 @@ if (location.hash === '#wgsl') showTab('tab-wgsl', false);
 // ---- environment ------------------------------------------------------------------------------
 const gpu = await probeWebGPU();
 const envNotes = [];
-if (!crossOriginIsolated) envNotes.push('This page is not cross-origin isolated (the service worker that adds the headers is not active yet, or was bypassed by a hard reload), so wasm runs on one thread: kernel themes are slower here than on every core.');
+if (!crossOriginIsolated) envNotes.push('This page isn’t cross-origin isolated yet (a normal reload usually fixes it), so wasm runs on one thread.');
 if (!gpu.ok) envNotes.push(`No WebGPU here (${esc(gpu.why)}), so the WGSL tab cannot run; the Zig gates can.`);
 if (envNotes.length) { $('env').innerHTML = envNotes.join('<br>'); $('env').hidden = false; }
 
@@ -107,8 +107,8 @@ let gatesMod = null;
 const gatesLib = async () => (gatesMod ??= await import(new URL('wasm/gates.js', WEB)));
 const MB = (b) => `${(b / 1048576).toFixed(1)} MB`;
 const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
-const NOTE8_PREBUILT = 'Gate 8 here times this browser’s wasm on this machine; leaderboard times come from the native harness on an M3. Near the 16.7 ms line, judge on a quiet machine.';
-const NOTE8_INPAGE = 'Gates 1–7 give the native harness’s verdict. Gate 8 here times a build from Zig’s self-hosted wasm backend (no LLVM, no SIMD, one thread), which is slower than the native harness’s ReleaseFast build: the official Gate 8 is the native harness’s, on a pull request.';
+const NOTE8_PREBUILT = 'Gate 8 here times this browser on this machine; leaderboard times are the native harness on an M3.';
+const NOTE8_INPAGE = 'Gates 1–7 match the native harness. Gate 8 here times a build without LLVM, SIMD or threads, so it is slower; the official Gate 8 is a pull request.';
 const COMPILE_LIMIT_MS = 60000;
 
 let run = null;
@@ -372,7 +372,7 @@ async function compileAndGrade(name, source, title) {
       if (cancelled(r)) return;
       const kind = { timeout: 'compiler-timeout', load: 'load-error', worker: 'compiler-crash' }[e.kind] || 'compiler-crash';
       const why = e.kind === 'timeout'
-        ? `The compiler did not finish in ${COMPILE_LIMIT_MS / 1000} s, so it was stopped. Heavy comptime work can take that long here: this compiler runs well below native speed. Gate 1 is not decided here; the native harness (a pull request) has no such limit. The next compile starts a fresh compiler.`
+        ? `The compiler did not finish in ${COMPILE_LIMIT_MS / 1000} s, so it was stopped; heavy comptime work is slow here. Gate 1 is not decided: a pull request has no such limit. The next compile starts fresh.`
         : e.kind === 'load' ? `${e.message[0].toUpperCase()}${e.message.slice(1)}. Check the connection and compile again: the next try loads it afresh.`
         : `${e.message}. The next compile starts a fresh compiler.`;
       compilerTrouble(r, name, kind, why, e.log, { compile: { wallMs: Math.round(e.wallMs || 0) } });
@@ -404,7 +404,7 @@ async function compileAndGrade(name, source, title) {
     if (!c.ok) {
       const gates = GATES.map((g) => ({ ...g, pass: g.id === 1 ? true : null, detail: g.id === 1 ? sema : 'not run: this page’s compiler could not build it (see above)' }));
       renderGates($('zigGates').tBodies[0], gates);
-      showDiagnostics(`This theme passes Gate 1, but Zig’s self-hosted wasm backend, the only one in this page’s compiler, could not build it. That is a limit of the browser build, not a verdict: the native harness (a pull request) builds it with LLVM.\n\n${c.build.log}`, name, 'warn');
+      showDiagnostics(`This theme passes Gate 1, but this page’s compiler (Zig’s wasm backend, no LLVM) could not build it. That is a limit of the browser build, not a verdict: a pull request builds it with LLVM.\n\n${c.build.log}`, name, 'warn');
       badge($('zigBadge'), 'RUN'); $('zigBadge').textContent = 'NOT GRADED HERE';
       endRun(r, `Gate 1 passed; gates 2–8 need the native harness for this theme · ${secs(performance.now() - t0)}`);
       $('zigReport').textContent = c.build.log;
@@ -437,7 +437,7 @@ async function compileAndGrade(name, source, title) {
       renderGates($('zigGates').tBodies[0], gates);
       badge($('zigBadge'), 'RUN'); $('zigBadge').textContent = 'GATE 1 PASS';
       endRun(r, `this build draws 320×200 in ${ms320.toFixed(0)} ms, so the gates’ 120 frames at 1920×1200 would take about ${mins} min here`);
-      showDiagnostics(`Gates 2–8 are not run yet. This build draws a 320×200 frame in ${ms320.toFixed(0)} ms; the gates need 120 frames at 1920×1200, about ${mins} min here. Zig’s self-hosted wasm backend turns @Vector code into slow scalar code (Tutorial_Tides runs about 60× slower than LLVM’s wasm in Chrome), and natively this theme is far faster. The native harness grades it in seconds: submit a pull request, or run the gates here anyway.`, name, 'warn');
+      showDiagnostics(`Gates 2–8 are not run yet. This build draws a 320×200 frame in ${ms320.toFixed(0)} ms; the gates need 120 frames at 1920×1200, about ${mins} min here. This build turns @Vector code into slow scalar code (Tutorial_Tides: about 60× slower); natively it is far faster. Submit a pull request for a verdict in seconds, or run the gates here anyway.`, name, 'warn');
       $('zigMore').hidden = false;
       $('zigGatesAnyway').textContent = `Run the gates here anyway (about ${mins} min)`;
       $('zigGatesAnyway').onclick = async () => {
@@ -470,7 +470,7 @@ $('zigSrc').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctr
 $('zigSrc').addEventListener('input', () => {
   if (!$('zigResult').classList.contains('on') || $('zigHint').dataset.stale) return;
   $('zigHint').dataset.stale = '1';
-  $('zigHint').textContent = 'The source changed since the result below: press Compile and grade here (or Ctrl+Enter) for a new one.';
+  $('zigHint').textContent = 'The source changed: compile again (Ctrl+Enter) for a new result.';
 });
 
 /// A .zig file: into the editor, then compiled. A .wasm: graded as an upload. Anything else: said so.
@@ -544,7 +544,7 @@ $('zigPR').addEventListener('click', async (e) => {
   const u = new URL(`https://github.com/${REPO}/new/main`);
   u.searchParams.set('filename', `bench/submissions/${zigName()}.zig`);
   window.open(u.href, '_blank', 'noopener');
-  $('zigHint').textContent = 'The source is on your clipboard: paste it into GitHub’s editor, then “Propose changes”. GitHub forks the repository for you if needed.';
+  $('zigHint').textContent = 'The source is on your clipboard: paste it into GitHub’s editor, then “Propose changes”.';
 });
 $('zigCmd').addEventListener('click', (e) => {
   const n = zigName();

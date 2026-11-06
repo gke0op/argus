@@ -53,12 +53,12 @@
   <div class="wrap">
     <div class="eyebrow">ARGUS-BENCH</div>
     <h1 class="page-title">Run it in your browser</h1>
-    <p class="page-lede">A model writes one theme file; the harness says whether it runs. Here the harness runs in this page: you see the theme move and the gates’ verdict, worded as the native harness words it, in seconds.</p>
+    <p class="page-lede">A model writes one theme file. This page compiles it, runs it and grades it in seconds.</p>
     <ol class="steps">
-      <li>Copy the prompt (and the contract it refers to) into any model.</li>
-      <li>The model answers with one file: a Zig theme or a WGSL kernel.</li>
-      <li>Drop or paste the answer anywhere on this page. A <code>.zig</code> is compiled here by Zig 0.17.0 itself, as WebAssembly.</li>
-      <li>Watch it run, and read the gates: PASS or FAIL, and why.</li>
+      <li>Copy the prompt into any model.</li>
+      <li>It answers with one file: a Zig theme or a WGSL kernel.</li>
+      <li>Drop or paste it anywhere on this page.</li>
+      <li>Watch it run and read the gates.</li>
     </ol>
     <div id="env" class="note small" hidden></div>
 
@@ -70,7 +70,7 @@
     <!-- ================================================================ Zig ============== -->
     <section id="pane-zig" role="tabpanel" aria-labelledby="tab-zig">
       <h2 class="step-h"><span class="n" aria-hidden="true">1</span>The prompt</h2>
-      <p class="small mute">The zero-shot prompt from BENCHMARK.md. The benchmark gives the model this sentence and the whole of BENCHMARK.md.</p>
+      <p class="small mute">BENCHMARK.md’s zero-shot prompt. The benchmark sends it with the whole file.</p>
       <div class="doc">
       <div class="doc-k">Zero-shot prompt · BENCHMARK.md</div>
       <div class="prompt" id="zigPrompt"><!-- @PROMPT --></div>
@@ -82,8 +82,8 @@
       </div>
 
       <h2 class="step-h"><span class="n" aria-hidden="true">2</span>Grade a Zig theme</h2>
-      <div class="note info small"><b>Zig compiles in this page.</b> Drop or paste a <code>.zig</code> theme anywhere here. The Zig 0.17.0 compiler, built to WebAssembly, type-checks and builds it in your browser, and the harness’s gates grade it; nothing is uploaded. The first compile downloads the compiler and the part of the standard library a compile reads (<span id="zigcSize">4.6 MB</span>), kept for the next visit.
-        Two things differ from the native harness. <b>Gate 1</b> is type-checked for wasm64, not the app’s aarch64-macos (this compiler has no aarch64 backend). Its <code>usize</code> is 64 bits too, so <code>expected type 'u32', found 'usize'</code>, the leaderboard’s most common compile error, fails here as it does natively. Code that needs macOS or libc is not covered. <b>Gate 8</b>: the module comes from Zig’s own wasm backend, without LLVM, SIMD or threads. Scalar code runs at up to a few times the native harness’s frame time; <code>@Vector</code> code is tens of times slower (Tutorial_Tides: about 60× LLVM’s wasm in Chrome). The frame time here is this build’s, and the official Gate 8 is the native harness’s: submit a pull request below.</div>
+      <div class="note info small"><b>Zig compiles in this page.</b> Zig 0.17.0, built to WebAssembly, compiles your theme in the browser; nothing is uploaded. The first compile downloads <span id="zigcSize">4.6 MB</span>, cached after.
+        Two differences from the native harness: <b>Gate 1</b> type-checks for wasm64 (64-bit <code>usize</code>, so the leaderboard’s common <code>u32</code>/<code>usize</code> error still fails), and <b>Gate 8</b> times a build without LLVM or SIMD, so it runs slower. The official verdict is a pull request.</div>
 
       <h3 class="sub-h">Try the gates on a prebuilt theme</h3>
       <div class="row-btns toolbar">
@@ -114,14 +114,14 @@
       <textarea id="zigSrc" spellcheck="false" placeholder="Paste the model's .zig answer here, or drop a .zig file anywhere on the page. Ctrl+Enter compiles." aria-label="Zig theme source"></textarea>
       <div class="row-btns">
         <button class="primary" type="button" id="zigCompile">Compile and grade here</button>
-        <button type="button" id="zigPR">Submit as a pull request (the official verdict)</button>
-        <button type="button" id="zigCmd">Copy the local commands</button>
+        <button type="button" id="zigPR">Submit a pull request (official verdict)</button>
+        <button type="button" id="zigCmd">Copy local commands</button>
       </div>
-      <p class="small mute" id="zigHint">The pull request opens GitHub’s new-file page with the name filled in and the source on your clipboard; the bench workflow runs the native harness on it and comments the verdict, including the official Gate 8.</p>
+      <p class="small mute" id="zigHint">Opens GitHub’s new-file page with your source on the clipboard; CI runs the native harness and comments the verdict.</p>
       <div class="drop" id="drop">
         Drop a <code>.zig</code> here or anywhere on the page, or
         <div class="row-btns drop-btns"><label class="btn" for="zigFile">open a .zig</label><input type="file" id="zigFile" accept=".zig,text/plain" hidden><label class="btn" for="wasmFile">upload a .wasm you built</label><input type="file" id="wasmFile" accept=".wasm,application/wasm" hidden></div>
-        <div class="small">A <code>.wasm</code> from <code>make web-wasm THEME=themes/<span class="nameEcho">Model_Theme</span>.zig</code> (LLVM, SIMD128) runs through the 8 gates too; upload its <code>.st.wasm</code> unless this page is cross-origin isolated.</div>
+        <div class="small">A <code>.wasm</code> from <code>make web-wasm THEME=themes/<span class="nameEcho">Model_Theme</span>.zig</code> (LLVM, SIMD128) runs the gates too; use its <code>.st.wasm</code> unless this page is cross-origin isolated.</div>
       </div>
 
       <div class="result" id="zigResult">
@@ -135,14 +135,14 @@
         </div>
         <h3 class="sub-h">Harness report</h3>
         <pre class="report" id="zigReport"></pre>
-        <p class="small mute" id="zigNote8">Gate 8 here times this browser’s wasm on this machine; leaderboard times come from the native harness on an M3. Near the 16.7 ms line, judge on a quiet machine.</p>
+        <p class="small mute" id="zigNote8">Gate 8 here times this browser on this machine; leaderboard times are the native harness on an M3.</p>
       </div>
     </section>
 
     <!-- ================================================================ WGSL ============= -->
     <section id="pane-wgsl" role="tabpanel" aria-labelledby="tab-wgsl" hidden>
       <h2 class="step-h"><span class="n" aria-hidden="true">1</span>The prompt</h2>
-      <p class="small mute">The GPU track, written for this page (BENCHMARK.md’s own prompt is the Zig one). The copy includes the WGSL contract from web/README.md, the prelude, and Tutorial_Tides.wgsl as a worked example.</p>
+      <p class="small mute">The GPU track, written for this page. The full copy adds the WGSL contract, the prelude and Tutorial_Tides.wgsl as an example.</p>
       <div class="doc">
       <div class="doc-k">GPU track prompt · written for this page</div>
       <div class="prompt" id="wgslPrompt">Write a single WGSL theme for Argus’s WebGPU runtime, following the contract below (the prelude is prepended to your file). The entry point is `@compute @workgroup_size(8, 8) fn argus_draw(@builtin(global_invocation_id) id: vec3u)`, writing every pixel with `textureStore(argus_out, gid, vec4f(colour, 1.0))`; add `argus_init` / `argus_step` and a `// @argus state WxH` line if your simulation needs persistent state. It must pass the Argus Metal harness’s checks, as run in the browser: compiles, runs at 320x200, no NaN or Inf, more than 100 distinct pixels, at least 2,000 pixels visibly animated between frame 1 and frame 120 (dt = 1/30 s), and under 8,333 µs average GPU time per frame at 1920x1200. Simulate a real physical or mathematical system. Output ONLY the complete .wgsl source file.</div>
@@ -182,7 +182,7 @@
         </div>
         <h3 class="sub-h">Harness report</h3>
         <pre class="report" id="wgslReport"></pre>
-        <p class="small mute">These are the Metal harness’s checks (<code>make harness THEME=themes/X.metal</code>), run on WebGPU: compilation, the 320×200 watchdog, NaN/Inf, pixel variance, temporal motion and the 8,333 µs GPU budget. The Metal harness does not gate alpha, so the alpha range is shown, not gated. Chrome rounds GPU timestamps to 100 µs.</p>
+        <p class="small mute">The Metal harness’s checks (<code>make harness THEME=themes/X.metal</code>) on WebGPU. Alpha is shown, not gated, as in the Metal harness. Chrome rounds GPU timestamps to 100 µs.</p>
       </div>
     </section>
   </div>
