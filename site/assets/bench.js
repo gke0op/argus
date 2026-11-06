@@ -55,6 +55,16 @@ $('copyWgslFull').addEventListener('click', async (e) => {
   copyText(`${wgslPrompt}\n\n----- The contract (web/README.md) -----\n\n${contract}\n\n----- web/prelude.wgsl (prepended to your file) -----\n\n${prelude}\n\n----- Example: web/themes/Tutorial_Tides.wgsl -----\n\n${tides}`, e.currentTarget);
 });
 
+// "Report this run": a GitHub issue form (bench_run_report.yml) pre-filled from the result.
+function reportLink(el, where, name, res) {
+  const u = new URL(`https://github.com/${REPO}/issues/new`);
+  u.searchParams.set('template', 'bench_run_report.yml');
+  u.searchParams.set('title', `Bench run: ${name} · ${where} · ${res.pass ? 'PASS' : 'FAIL'}`);
+  u.searchParams.set('where', where);
+  u.searchParams.set('scorecard', (res.text || '').slice(0, 6000));
+  el.href = u.toString();
+}
+
 // ---- shared result rendering -----------------------------------------------------------------
 function renderGates(tbody, gates) {
   tbody.innerHTML = gates.map((g) => {
@@ -118,6 +128,7 @@ async function gradeZig(name, opts = {}) {
     badge($('zigBadge'), res.pass ? 'PASS' : 'FAIL');
     $('zigPhase').textContent = `graded in ${secs} s · ${res.threads || 1} thread${res.threads === 1 ? '' : 's'} (${res.variant || '–'})`;
     $('zigReport').textContent = res.text;
+    reportLink($('zigReportLink'), 'bench page, Zig (.wasm)', name, res);
     drawFinal($('zigFinal'), res.pixels, res.width, res.height);
     window.__bench = { kind: 'zig', name, pass: res.pass, gates: res.gates.map((g) => g.pass), text: res.text, secs: Number(secs) };
     if (res.pixels && !res.timedOut) await runLive($('zigLive'), $('zigLiveCap'), { id: `bench:${name}`, label: name, kind: 'wasm', build: name }, { module: opts.module });
@@ -207,6 +218,7 @@ $('runWgsl').addEventListener('click', async () => {
     badge($('wgslBadge'), res.pass ? 'PASS' : 'FAIL');
     $('wgslPhase').textContent = `graded in ${secs} s${res.runError ? ` · run failed: ${res.runError}` : ''}`;
     $('wgslReport').textContent = res.text;
+    reportLink($('wgslReportLink'), 'bench page, WGSL (WebGPU)', name, res);
     drawFinal($('wgslFinal'), res.last, res.width, res.height);
     window.__bench = { kind: 'wgsl', name, pass: res.pass, gates: res.gates.map((g) => g.pass), text: res.text, secs: Number(secs), gpu: res.gpu };
     if (res.gates[0]?.pass && !res.runError) {
