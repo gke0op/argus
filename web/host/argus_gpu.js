@@ -11,7 +11,7 @@
 
 import { parseDirectives, dataBytes } from './directives.js';
 import { FrameState, Pacer, FRAME_BYTES, STEP_DT, parseIsoUtc } from './frame.js';
-import { synthetic as syntheticStats, pack as packStats, BrowserStats, STATS_BYTES } from './stats.js';
+import { synthetic as syntheticStats, pack as packStats, BrowserVitals, STATS_BYTES, VITALS_BYTES, packVitals } from './stats.js';
 
 const HERE = new URL('.', import.meta.url);
 export const PRELUDE_URL = new URL('../prelude.wgsl', HERE);
@@ -118,8 +118,8 @@ function formatCompileMessages(msgs, label, preludeLines) {
  *   opts.seed       f.seed (default: random per load, as the app; the harness uses 0x5EED)
  *   opts.date       'system' (default) or 'YYYY-MM-DDTHH:MM:SSZ': pinned, advancing with the clock
  *   opts.utcOffset  f.utc_offset_s with a pinned date (default 0)
- *   opts.stats      'browser' (default: what the browser can read, the rest synthetic) or
- *                   'synthetic' (the harness feed: a new sample every 30 ticks)
+ *   opts.stats      'browser' (default: only readings a web page really has, as ArgusVitals mode 1;
+ *                   nothing synthetic) or 'synthetic' (the harness feed: a new sample every 30 ticks)
  *   opts.pixelRatio canvas pixels per CSS pixel (default devicePixelRatio)
  *   opts.autoResize follow the canvas's displayed size (default true for a DOM canvas)
  *   opts.offscreen  { width, height, format } render into a texture instead (the verify page)
@@ -207,7 +207,10 @@ export async function create(canvas, opts = {}) {
   const C = GPUShaderStage.COMPUTE;
   const samplerEntries = [5, 6, 7, 8, 9].map((b) => ({ binding: b, visibility: C, sampler: { type: 'filtering' } }));
   const frameEntry = { binding: 0, visibility: C, buffer: { type: 'uniform', minBindingSize: 48 } };
-  const statsEntry = dir.stats ? [{ binding: 1, visibility: C, buffer: { type: 'read-only-storage', minBindingSize: STATS_BYTES } }] : [];
+  const statsEntry = dir.stats ? [
+    { binding: 1, visibility: C, buffer: { type: 'read-only-storage', minBindingSize: STATS_BYTES } },
+    { binding: 10, visibility: C, buffer: { type: 'read-only-storage', minBindingSize: VITALS_BYTES } },
+  ] : [];
   const stateRead = { binding: 2, visibility: C, texture: { sampleType: stateFilterable ? 'float' : 'unfilterable-float' } };
   const stateWrite = { binding: 3, visibility: C, storageTexture: { access: 'write-only', format: stateFormat } };
   const dataEntry = dataBuf ? [{ binding: 4, visibility: C, texture: { sampleType: 'float' } }] : [];
@@ -248,6 +251,10 @@ export async function create(canvas, opts = {}) {
   const statsBuf = dir.stats ? device.createBuffer({ label: 'ArgusStats', size: 432, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST }) : null;
   const statsBytes = new ArrayBuffer(432);
   const statsView = new DataView(statsBytes);
+  // ArgusVitals (web only): zero = mode 0 (machine stats) until a browser page fills it.
+  const vitalsBuf = dir.stats ? device.createBuffer({ label: 'ArgusVitals', size: VITALS_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST }) : null;
+  const vitalsBytes = new ArrayBuffer(VITALS_BYTES);
+  const vitalsView = new DataView(vitalsBytes);
 
   const mk = (o) => device.createSampler(o);
   const samplers = [
@@ -259,7 +266,7 @@ export async function create(canvas, opts = {}) {
   ];
   const samplerBinds = samplers.map((sm, i) => ({ binding: 5 + i, resource: sm }));
   const frameBind = (buf) => ({ binding: 0, resource: { buffer: buf } });
-  const statsBind = statsBuf ? [{ binding: 1, resource: { buffer: statsBuf, size: STATS_BYTES } }] : [];
+  const statsBind = statsBuf ? [{ binding: 1, resource: { buffer: statsBuf, size: STATS_BYTES } }, { binding: 10, resource: { buffer: vitalsBuf } }] : [];
 
   let dataTex = null;
   if (dataBuf) {
@@ -305,15 +312,16 @@ export async function create(canvas, opts = {}) {
   const wall = (!opts.date || opts.date === 'system') ? { kind: 'system' } : { kind: 'fixed', unixS: parseIsoUtc(opts.date), utcOffsetS: opts.utcOffset ?? 0 };
   const fr = new FrameState({ width: outW, height: outH, stateW: stateful ? dir.stateW : 0, stateH: stateful ? dir.stateH : 0, seed, wall });
   const pacer = new Pacer();
-  const browserStats = dir.stats && opts.stats !== 'synthetic' ? new BrowserStats() : null;
+  const vitals = dir.stats && opts.stats !== 'synthetic' ? new BrowserVitals(device.argusAdapter ?? '') : null;
 
-  const timing = { gpuMs: null, cpuMs: null, gpuHist: [], cpuHist: [] };
+  const timing = { gpuMs: null, cpuMs: null, drawMs: null, gpuHist: [], cpuHist: [], drawHist: [] };
   let ts = null;
   if (device.features.has('timestamp-query')) {
     ts = {
-      set: device.createQuerySet({ type: 'timestamp', count: 2 }),
-      resolve: device.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }),
-      free: [0, 1, 2, 3].map(() => device.createBuffer({ size: 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST })),
+      // two passes, two pairs: [0, 1] init and steps, [2, 3] argus_draw
+      set: device.createQuerySet({ type: 'timestamp', count: 4 }),
+      resolve: device.createBuffer({ size: 32, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }),
+      free: [0, 1, 2, 3].map(() => device.createBuffer({ size: 32, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST })),
     };
   }
   const pushHist = (h, v) => { h.push(v); if (h.length > 240) h.shift(); };
@@ -337,45 +345,56 @@ export async function create(canvas, opts = {}) {
     fr.pack(frameView, Math.fround(clockDt));
     device.queue.writeBuffer(frameBufDraw, 0, frameBytes);
     if (statsBuf) {
-      const st = browserStats ? browserStats.sample(performance.now()) : syntheticStats(Math.floor(fr.frame / 30) + 1);
-      packStats(st, statsView);
+      if (vitals) {
+        vitals.sample(performance.now(), outW, outH, opts.pixelRatio ?? (globalThis.devicePixelRatio || 1));
+        packStats(vitals.stats, statsView);
+        packVitals(vitals.vitals, vitalsView);
+        device.queue.writeBuffer(vitalsBuf, 0, vitalsBytes);
+      } else packStats(syntheticStats(Math.floor(fr.frame / 30) + 1), statsView);
       device.queue.writeBuffer(statsBuf, 0, statsBytes);
     }
 
     const out = offscreen ? offGroup : device.createBindGroup({ layout: L.out, entries: [{ binding: 0, resource: ctx.getCurrentTexture().createView() }] });
     const enc = device.createCommandEncoder();
-    const pass = enc.beginComputePass(ts ? { timestampWrites: { querySet: ts.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } } : undefined);
+    // Two passes, so the draw's own GPU time is known: init and steps, then argus_draw.
+    const tsw = (b) => (ts ? { timestampWrites: { querySet: ts.set, beginningOfPassWriteIndex: b, endOfPassWriteIndex: b + 1 } } : undefined);
+    const simPass = enc.beginComputePass(tsw(0));
     if (stateful) {
       if (needsInit) {
         needsInit = false;
-        dispatch(pass, initP ?? clearP, dir.stateW, dir.stateH, groups.init[cur]);
+        dispatch(simPass, initP ?? clearP, dir.stateW, dir.stateH, groups.init[cur]);
       }
       if (stepP && stepDt !== null) {
         for (let i = 0; i < dir.steps; i++) {
-          dispatch(pass, stepP, dir.stateW, dir.stateH, groups.step[cur]);
+          dispatch(simPass, stepP, dir.stateW, dir.stateH, groups.step[cur]);
           cur ^= 1;
         }
       }
-      dispatch(pass, drawP, outW, outH, groups.draw[cur], out);
-    } else {
-      dispatch(pass, drawP, outW, outH, groups.draw[0], out);
     }
-    pass.end();
+    simPass.end();
+    const drawPass = enc.beginComputePass(tsw(2));
+    dispatch(drawPass, drawP, outW, outH, stateful ? groups.draw[cur] : groups.draw[0], out);
+    drawPass.end();
     let rb = null;
     if (ts && ts.free.length) {
       rb = ts.free.pop();
-      enc.resolveQuerySet(ts.set, 0, 2, ts.resolve, 0);
-      enc.copyBufferToBuffer(ts.resolve, 0, rb, 0, 16);
+      enc.resolveQuerySet(ts.set, 0, 4, ts.resolve, 0);
+      enc.copyBufferToBuffer(ts.resolve, 0, rb, 0, 32);
     }
     device.queue.submit([enc.finish()]);
     if (rb) {
       rb.mapAsync(GPUMapMode.READ).then(() => {
-        const q = new BigInt64Array(rb.getMappedRange());
-        const ms = Number(q[1] - q[0]) / 1e6;
+        const q = new BigUint64Array(rb.getMappedRange());
+        const sim = Number(q[1] - q[0]) / 1e6, draw = Number(q[3] - q[2]) / 1e6;
         rb.unmap();
         if (destroyed) { rb.destroy(); return; }
         ts.free.push(rb);
-        if (ms > 0 && ms < 1000) { pushHist(timing.gpuHist, ms); timing.gpuMs = ms; if (browserStats) browserStats.gpuMs = ms; }
+        const ms = sim + draw;
+        if (sim >= 0 && draw >= 0 && ms > 0 && ms < 1000) {
+          pushHist(timing.gpuHist, ms); pushHist(timing.drawHist, draw);
+          timing.gpuMs = ms; timing.drawMs = draw;
+          vitals?.gpuTime(ms, draw);
+        }
       }, () => {});
     }
     fr.advanceClock(clockDt);
@@ -395,8 +414,8 @@ export async function create(canvas, opts = {}) {
     // interval); timeSec is the caller's clock, unused: f.time is the theme's own wrapped clock.
     frame(timeSec, dtSec) {
       const { clockDt, stepDt } = pacer.advance(dtSec);
-      if (browserStats) browserStats.frameMs = dtSec * 1000;
       encodeTimes(clockDt, stepDt);
+      vitals?.frame(dtSec * 1000, timing.cpuMs);
     },
     // The harness's fixed step: clock and state step both advance by dt (1/30 s), every call.
     harnessFrame(dt = STEP_DT) { encodeTimes(Math.fround(dt), Math.fround(dt)); },
@@ -412,10 +431,10 @@ export async function create(canvas, opts = {}) {
       if (stateFollowsOutput) { dir.stateW = w; dir.stateH = h; fr.stateW = w; fr.stateH = h; makeState(); }
     },
     stats() {
-      return { gpuMs: median(timing.gpuHist), cpuMs: median(timing.cpuHist), width: outW, height: outH, frame: fr.frame, time: fr.time };
+      return { gpuMs: median(timing.gpuHist), drawMs: median(timing.drawHist), cpuMs: median(timing.cpuHist), width: outW, height: outH, frame: fr.frame, time: fr.time };
     },
     gpuSamples() { return [...timing.gpuHist]; },
-    statsSources() { return browserStats ? browserStats.sources : (dir.stats ? { all: 'synthetic (the Metal harness feed)' } : null); },
+    statsSources() { return vitals ? vitals.sources : (dir.stats ? { all: 'synthetic (the Metal harness feed)' } : null); },
     // The verify page: the output texture's texels (rgba32float -> Float32Array, else Uint8Array).
     async readback() {
       if (!offscreen) throw new Error('readback needs opts.offscreen');
@@ -436,10 +455,10 @@ export async function create(canvas, opts = {}) {
       if (destroyed) return;
       destroyed = true;
       observer?.disconnect();
-      browserStats?.destroy();
+      vitals?.destroy();
       for (const t of tex) t?.destroy();
       offTex?.destroy(); dataTex?.destroy();
-      frameBufStep.destroy(); frameBufDraw.destroy(); statsBuf?.destroy();
+      frameBufStep.destroy(); frameBufDraw.destroy(); statsBuf?.destroy(); vitalsBuf?.destroy();
       if (ts) { ts.set.destroy(); ts.resolve.destroy(); for (const b of ts.free) b.destroy(); }
       if (ctx) ctx.unconfigure();
     },

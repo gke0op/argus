@@ -1,9 +1,8 @@
 // web/host/stats.js — ArgusStats for `// @argus stats` themes.
 //
 // `synthetic(seq)` is src/gpu/argus_stats.zig's harness feed, ported in f32 arithmetic, so the
-// verify page shows the same readings as the Metal harness PNG. `BrowserStats` is what a web page
-// can honestly read about the machine; every other field stays synthetic, and `sources` says
-// which is which so a page can label them (web/README.md lists them).
+// verify page shows the same readings as the Metal harness PNG. `BrowserVitals` is what a browser
+// page gets instead: only readings with a real source, nothing synthetic (see below).
 
 export const STATS_BYTES = 428;
 const MAX_CORES = 32;
@@ -94,67 +93,153 @@ export function pack(s, view) {
   }
 }
 
-// What the browser can tell about the machine. Fields not listed in `sources` as 'live' keep the
-// synthetic values. Sampled about once a second, like the app.
-export class BrowserStats {
-  constructor() {
+// ---- a browser page ----------------------------------------------------------------------------
+// A web page can't read the machine's CPU load, memory, disks, network traffic or processes. So a
+// browser page gets no synthetic stand-ins: ArgusStats carries only the fields with a real source,
+// the rest stay 0, and ArgusVitals (web only, mode 1) carries the page's own vitals. `sources`
+// names the source of every reading, or says it isn't available; web/README.md has the table.
+export const VITALS_BYTES = 208;
+export const HAS = { gpuTime: 1, threads: 2, deviceMem: 4, heap: 8, battery: 16, network: 32, pressure: 64 };
+const NET_TYPES = { 'slow-2g': 1, '2g': 2, '3g': 3, '4g': 4 };
+const PRESSURE = { nominal: 1, fair: 2, serious: 3, critical: 4 };
+
+export function emptyStats() {
+  return {
+    seq: 0, sample_dt: 0, uptime_s: 0, thermal: 0,
+    cpu_total: 0, cpu_count: 0, cpu_p_cores: 0, cpu_e_cores: 0, cpu_core: new Array(MAX_CORES).fill(0),
+    mem_total_gb: 0, mem_used_gb: 0, mem_compressed_gb: 0, mem_wired_gb: 0, swap_used_gb: 0, mem_pressure: 0,
+    gpu_busy: 0, battery_present: 0, battery_charge: 0, battery_charging: 0, on_ac: 0, battery_minutes: 0,
+    net_rx_bps: 0, net_tx_bps: 0, disk_free_gb: 0, disk_total_gb: 0, proc_count: 0, procs: [],
+  };
+}
+
+export function emptyVitals(mode = 0) {
+  return {
+    mode, has: 0, frame_ms: 0, frame_worst_ms: 0, gpu_ms: 0, draw_ms: 0, js_ms: 0, threads: 0, device_mem_gb: 0,
+    heap_used_mb: 0, heap_total_mb: 0, heap_limit_mb: 0, net_type: 0, net_downlink_mbps: 0, net_rtt_ms: 0,
+    net_save_data: 0, pressure: 0, canvas_w: 0, canvas_h: 0, dpr: 0, adapter: '',
+  };
+}
+
+// The 208 bytes of the prelude's ArgusVitals.
+export function packVitals(v, view) {
+  const u = (o, x) => view.setUint32(o, x >>> 0, true);
+  const fl = (o, x) => view.setFloat32(o, x, true);
+  u(0, v.mode); u(4, v.has); fl(8, v.frame_ms); fl(12, v.frame_worst_ms); fl(16, v.gpu_ms); fl(20, v.draw_ms);
+  fl(24, v.js_ms); u(28, v.threads); fl(32, v.device_mem_gb); fl(36, v.heap_used_mb); fl(40, v.heap_total_mb);
+  fl(44, v.heap_limit_mb); u(48, v.net_type); fl(52, v.net_downlink_mbps); fl(56, v.net_rtt_ms); u(60, v.net_save_data);
+  u(64, v.pressure); u(68, v.canvas_w); u(72, v.canvas_h); fl(76, v.dpr);
+  for (let j = 0; j < 32; j++) {
+    let c = j < Math.min(v.adapter.length, 31) ? v.adapter.charCodeAt(j) : 0;
+    if (c !== 0 && (c < 0x20 || c >= 0x7f)) c = 0x3f; // '?'
+    u(80 + 4 * j, c);
+  }
+}
+
+const median = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
+const MB = 1024 * 1024;
+
+export class BrowserVitals {
+  constructor(adapter = '') {
     this.seq = 0;
     this.lastSample = -Infinity;
-    this.pressure = null;     // Compute Pressure API state, Chromium only
-    this.battery = null;      // Battery Status API, Chromium only
-    this.gpuMs = null;        // set by the host: this page's own GPU time per frame
-    this.frameMs = null;
+    this.frames = [];          // display-frame intervals (ms) since the last sample
+    this.gpu = [];             // GPU ms per frame (whole frame, argus_draw) since the last sample
+    this.draw = [];
+    this.js = [];
+    this.pressure = null;      // Compute Pressure API state (Chromium)
+    this.battery = null;       // Battery Status API (Chromium)
+    this.adapter = adapter.toUpperCase().replace(/[^\x20-\x7e]/g, '?').split(/\s+/).filter((w, i, a) => w && a.indexOf(w) === i).join(' ').slice(0, 31);
     this.sources = {};
-    this.current = synthetic(0);
-    this.current.seq = 0;
+    this.stats = emptyStats();
+    this.vitals = emptyVitals(1);
     if (typeof PressureObserver !== 'undefined') {
       try {
-        const map = { nominal: 0, fair: 1, serious: 2, critical: 3 };
-        this.observer = new PressureObserver((recs) => { this.pressure = map[recs[recs.length - 1].state] ?? null; });
+        this.observer = new PressureObserver((recs) => { this.pressure = PRESSURE[recs[recs.length - 1].state] ?? null; });
         this.observer.observe('cpu', { sampleInterval: 1000 }).catch(() => { this.observer = null; });
       } catch { this.observer = null; }
     }
     if (navigator.getBattery) navigator.getBattery().then((b) => { this.battery = b; }, () => {});
   }
 
-  // Returns the stats to bind now; a new sample (seq + 1) about once a second.
-  sample(nowMs) {
-    if (nowMs - this.lastSample < 1000) return this.current;
-    const dt = this.lastSample === -Infinity ? 1 : (nowMs - this.lastSample) / 1000;
+  frame(intervalMs, jsMs) { this.frames.push(intervalMs); this.js.push(jsMs); }
+  gpuTime(totalMs, drawMs) { this.gpu.push(totalMs); this.draw.push(drawMs); }
+
+  // The stats and vitals to bind now; a new sample (seq + 1) about once a second.
+  // The first one comes a second after the first frame, once there is something measured: until
+  // then seq is 0 and the theme shows that it is waiting.
+  sample(nowMs, canvasW, canvasH, dpr) {
+    if (this.lastSample === -Infinity) { this.lastSample = nowMs; return this; }
+    if (nowMs - this.lastSample < 1000) return this;
+    const dt = (nowMs - this.lastSample) / 1000;
     this.lastSample = nowMs;
     this.seq += 1;
-    const cores = navigator.hardwareConcurrency ? Math.min(navigator.hardwareConcurrency, MAX_CORES) : 10;
-    const s = synthetic(this.seq, cores);
+    const s = emptyStats();
+    const v = emptyVitals(1);
     const src = {};
-    for (const k of Object.keys(s)) src[k] = 'synthetic';
-    s.seq = this.seq; src.seq = 'live';
-    s.sample_dt = Math.fround(dt); src.sample_dt = 'live';
-    if (navigator.hardwareConcurrency) {
-      // The count is live; the per-core loads stay synthetic (the same formula, one per core).
-      s.cpu_p_cores = 0; s.cpu_e_cores = 0; // the browser doesn't say
-      src.cpu_count = 'live (navigator.hardwareConcurrency)';
-      src.cpu_p_cores = src.cpu_e_cores = 'unknown in a browser (0)';
+    const no = 'not available in this browser';
+
+    s.seq = this.seq; s.sample_dt = Math.fround(dt);
+    s.uptime_s = Math.floor(performance.now() / 1000);
+    src.sample = 'live: a new sample about once a second';
+    src.uptime = "live: this tab's uptime (performance.now), not the machine's";
+
+    if (this.frames.length) {
+      v.frame_ms = this.frames.reduce((a, b) => a + b, 0) / this.frames.length;
+      v.frame_worst_ms = Math.max(...this.frames);
     }
-    // navigator.deviceMemory is rounded and capped (8 in Chrome), so it would misreport most Macs:
-    // mem_total_gb stays synthetic.
-    if (this.pressure !== null) { s.thermal = this.pressure; src.thermal = 'live (Compute Pressure API: CPU pressure state)'; }
+    v.js_ms = median(this.js);
+    src.frame = 'live: requestAnimationFrame intervals of this page';
+    src.js = 'live: JavaScript time per frame of this page';
+    if (this.gpu.length) {
+      v.has |= HAS.gpuTime;
+      v.gpu_ms = median(this.gpu); v.draw_ms = median(this.draw);
+      s.gpu_busy = v.frame_ms > 0 ? Math.min(v.gpu_ms / v.frame_ms, 1) : 0;
+      src.gpu = "live: this page's GPU time per frame (timestamp queries); gpu_busy = that / frame interval";
+    } else src.gpu = `${no} (no timestamp-query)`;
+    this.frames.length = 0; this.gpu.length = 0; this.draw.length = 0; this.js.length = 0;
+
+    if (navigator.hardwareConcurrency) {
+      v.has |= HAS.threads; v.threads = navigator.hardwareConcurrency;
+      s.cpu_count = Math.min(v.threads, MAX_CORES); // per-core loads stay 0: not readable
+      src.threads = 'live: navigator.hardwareConcurrency (logical processors; no loads)';
+    } else src.threads = no;
+    if (navigator.deviceMemory) {
+      v.has |= HAS.deviceMem; v.device_mem_gb = navigator.deviceMemory;
+      src.deviceMemory = 'live: navigator.deviceMemory (rounded down to a power of two, capped: 8 in Chrome)';
+    } else src.deviceMemory = no;
+    const pm = performance.memory;
+    if (pm && pm.jsHeapSizeLimit) {
+      v.has |= HAS.heap;
+      v.heap_used_mb = pm.usedJSHeapSize / MB; v.heap_total_mb = pm.totalJSHeapSize / MB; v.heap_limit_mb = pm.jsHeapSizeLimit / MB;
+      src.heap = 'live: performance.memory (this page\'s JS heap, coarse buckets)';
+    } else src.heap = no;
     if (this.battery) {
       const b = this.battery;
+      v.has |= HAS.battery;
       s.battery_present = 1; s.battery_charge = b.level; s.battery_charging = b.charging ? 1 : 0;
       s.on_ac = b.charging || (b.level === 1 && b.chargingTime === 0) ? 1 : 0;
       const t = b.charging ? b.chargingTime : b.dischargingTime;
       s.battery_minutes = Number.isFinite(t) ? (b.charging && b.level === 1 ? 0 : t / 60) : -1;
-      for (const k of ['battery_present', 'battery_charge', 'battery_charging', 'on_ac', 'battery_minutes']) src[k] = 'live (Battery Status API)';
-    }
-    if (this.gpuMs !== null && this.frameMs) {
-      s.gpu_busy = Math.min(this.gpuMs / this.frameMs, 1);
-      src.gpu_busy = "live (this page's own GPU time / frame interval)";
-    }
-    s.uptime_s = Math.floor(performance.now() / 1000);
-    src.uptime_s = 'live (page uptime, not machine uptime)';
-    this.current = s;
-    this.sources = src;
-    return s;
+      src.battery = 'live: Battery Status API';
+    } else src.battery = no;
+    const c = navigator.connection;
+    if (c && c.effectiveType) {
+      v.has |= HAS.network;
+      v.net_type = NET_TYPES[c.effectiveType] ?? 0; v.net_downlink_mbps = c.downlink ?? 0; v.net_rtt_ms = c.rtt ?? 0;
+      v.net_save_data = c.saveData ? 1 : 0;
+      src.network = 'live: Network Information API (effective type, downlink and RTT estimates)';
+    } else src.network = no;
+    if (this.pressure !== null) {
+      v.has |= HAS.pressure; v.pressure = this.pressure;
+      src.pressure = 'live: Compute Pressure API (CPU pressure state)';
+    } else src.pressure = no;
+    v.canvas_w = canvasW; v.canvas_h = canvasH; v.dpr = dpr; v.adapter = this.adapter;
+    src.display = 'live: canvas size, devicePixelRatio, GPU adapter info';
+    src.machine = 'not readable by a web page: CPU load, memory use, disks, network traffic, processes, thermal state';
+
+    this.stats = s; this.vitals = v; this.sources = src;
+    return this;
   }
 
   destroy() { try { this.observer?.disconnect(); } catch { /* already gone */ } }

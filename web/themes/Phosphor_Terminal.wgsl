@@ -15,6 +15,9 @@
 // Nothing is bright while all is well: only abnormal states (memory pressure, thermal state, low
 // battery) go to reverse video, and the serious ones blink.
 //
+// In a browser page (web only: argus_vitals.mode 1) the screen shows the page's own vitals instead, with the
+// same tube: a web page can't read this machine's CPU, memory, disks or processes ("the browser page" below).
+// The verify page feeds the harness's synthetic stats (mode 0) and gets the machine screen, as the Metal harness.
 // Readings (all from `@argus stats`, sampled by Argus ~1/s while this Space is on screen):
 //   CPU LOAD / per-core blocks: cpu_total, cpu_core[] (busy fraction; efficiency cores numbered first,
 //     split by cpu_e_cores / cpu_p_cores; "C1.." when the Mac doesn't say). GPU block: gpu_busy
@@ -248,7 +251,7 @@ fn block_label(b: ptr<function, Buf>, i_in: i32) -> i32 {
     var i = i_in;
     let n = i32(min(s.cpu_count, 32u)); var k = 0;
     if (i >= n) { (*b)[0] = 71u; (*b)[1] = 80u; (*b)[2] = 85u; return 3; }   // "GPU"
-    if (!typed_cores()) { (*b)[k] = 67u; k++; }                                // 'C'
+    if (!typed_cores()) { (*b)[k] = select(67u, 84u, web()); k++; }            // 'C' ('T': a browser's threads)
     else if (i < i32(s.cpu_e_cores)) { (*b)[k] = 69u; k++; }                    // 'E'
     else { (*b)[k] = 80u; k++; i -= i32(s.cpu_e_cores); }                       // 'P'
     return k + fmt(b, k, f32(i + 1), 0, 1);
@@ -424,6 +427,7 @@ fn head_g(t_arr: f32) -> f32 {
 fn col_age(u: f32, h: f32, N: f32) -> f32 { return (h - u * N + 4.0 * N) % N; }
 
 fn content(m: Meta, S: vec2f) -> vec2f {
+    if (web()) { return content_web(m, S); }   // a browser page: its own vitals (below)
     var a = vec2f(0.0);
     let B = 1.0; let M = 0.42; let Dm = 0.24;
     let live = s.seq > 0u;
@@ -704,6 +708,374 @@ fn compose_msg(b: ptr<function, Buf>, mi: u32) -> i32 {
     return min(n, 63);
 }
 
+// ---------------------------------------------------------------------------------- the browser page (web only)
+// In a browser page (argus_vitals.mode 1) the screen shows the page's own vitals instead of the machine's:
+// a web page can't read this Mac's CPU load, memory, disks, network traffic or processes, so nothing here
+// stands in for them. Shown: the display's frame rate and frame time (requestAnimationFrame), this page's
+// GPU time and the theme's draw share of it (timestamp queries), the JavaScript time per frame, the
+// logical processor count (navigator.hardwareConcurrency, drawn as empty blocks: their loads are not
+// visible), navigator.deviceMemory, the JS heap (performance.memory), battery (Battery Status API), the
+// network estimates (Network Information API), CPU pressure (Compute Pressure API), the canvas, the GPU
+// adapter, the tab's uptime and the date. A reading this browser doesn't offer says N/A. Same tube,
+// beam, persistence, repaint and bezel as the machine screen above.
+const W_TITLE = vec2u(532u, 20u);   // "ARGUS BROWSER VITALS"
+const W_THREADS = vec2u(552u, 8u);   // " THREADS"
+const W_NOTHR = vec2u(560u, 11u);   // "THREADS N/A"
+const W_THISPG = vec2u(571u, 9u);   // "THIS PAGE"
+const W_NL1 = vec2u(580u, 15u);   // "PER-THREAD LOAD"
+const W_NL2 = vec2u(595u, 14u);   // "IS NOT VISIBLE"
+const W_NL3 = vec2u(609u, 13u);   // "TO A WEB PAGE"
+const W_GBPLUS = vec2u(622u, 4u);   // "+ GB"
+const W_NA = vec2u(626u, 3u);   // "N/A"
+const W_HEAP = vec2u(629u, 8u);   // "JS HEAP "
+const W_MB = vec2u(637u, 3u);   // " MB"
+const W_FRATE = vec2u(640u, 10u);   // "FRAME RATE"
+const W_HZ = vec2u(650u, 2u);   // "HZ"
+const W_FRAME = vec2u(652u, 5u);   // "FRAME"
+const W_JS = vec2u(657u, 2u);   // "JS"
+const W_MS = vec2u(659u, 3u);   // " MS"
+const W_FTC = vec2u(662u, 17u);   // "FRAME TIME  120 S"
+const W_FS50 = vec2u(679u, 16u);   // "FULL SCALE 50 MS"
+const W_GTC = vec2u(695u, 14u);   // "GPU TIME  60 S"
+const W_GPUE = vec2u(709u, 4u);   // "GPU "
+const W_DRAWE = vec2u(713u, 8u);   // "   DRAW "
+const W_NOTS = vec2u(721u, 33u);   // "NO GPU TIMESTAMPS IN THIS BROWSER"
+const W_HEAPH = vec2u(754u, 7u);   // "JS HEAP"
+const W_HEAPNA = vec2u(761u, 27u);   // "NOT EXPOSED BY THIS BROWSER"
+const W_LIMIT = vec2u(788u, 6u);   // "LIMIT "
+const W_USED = vec2u(794u, 4u);   // "USED"
+const W_ALLOC = vec2u(798u, 9u);   // "ALLOCATED"
+const W_TOLIM = vec2u(807u, 13u);   // "FREE TO LIMIT"
+const W_PMEM = vec2u(820u, 18u);   // "PERFORMANCE.MEMORY"
+const W_CANVAS = vec2u(838u, 6u);   // "CANVAS"
+const W_X = vec2u(844u, 3u);   // " X "
+const W_PX = vec2u(847u, 3u);   // " PX"
+const W_DPR = vec2u(850u, 11u);   // "PIXEL RATIO"
+const W_ADAPT = vec2u(861u, 11u);   // "GPU ADAPTER"
+const W_NET = vec2u(872u, 7u);   // "NETWORK"
+const W_UTC = vec2u(879u, 9u);   // "TIME ZONE"
+const W_UTCP = vec2u(888u, 3u);   // "UTC"
+const W_NT1 = vec2u(891u, 7u);   // "SLOW-2G"
+const W_NT2 = vec2u(898u, 2u);   // "2G"
+const W_NT3 = vec2u(900u, 2u);   // "3G"
+const W_NT4 = vec2u(902u, 2u);   // "4G"
+const W_MBPS = vec2u(904u, 5u);   // " MBPS"
+const W_RTT = vec2u(909u, 6u);   // "  RTT "
+const W_SAVE = vec2u(915u, 11u);   // "  SAVE-DATA"
+const W_THR = vec2u(926u, 8u);   // "THREADS "
+const W_PRES = vec2u(934u, 13u);   // "CPU PRESSURE "
+const W_TABUP = vec2u(947u, 7u);   // "TAB UP "
+const W_APIS = vec2u(954u, 18u);   // "BROWSER APIS ONLY."
+const W_L1 = vec2u(972u, 60u);   // "> A WEB PAGE CAN'T READ THIS MACHINE'S CPU, MEMORY OR DISKS."
+const W_LGPU = vec2u(1032u, 6u);   // "> GPU "
+const W_LAF = vec2u(1038u, 18u);   // " MS A FRAME, DRAW "
+const W_LJS = vec2u(1056u, 8u);   // " MS, JS "
+const W_DOTMS = vec2u(1064u, 4u);   // " MS."
+const W_LNET = vec2u(1068u, 11u);   // "> NETWORK: "
+const W_LNETNA = vec2u(1079u, 43u);   // "> NETWORK INFORMATION: NOT IN THIS BROWSER."
+const W_LDISP = vec2u(1122u, 11u);   // "> DISPLAY: "
+const W_LHZ = vec2u(1133u, 5u);   // " HZ, "
+
+fn web() -> bool { return argus_vitals.mode == 1u; }
+fn vhas(bit: u32) -> bool { return (argus_vitals.has & bit) != 0u; }
+// "8.33 MS", "16.7 MS", "120 MS"
+fn fmt_ms(b: ptr<function, Buf>, n_in: i32, ms: f32) -> i32 {
+    let dec = select(select(0, 1, ms < 100.0), 2, ms < 10.0);
+    let n = n_in + fmt(b, n_in, ms, dec, 1);
+    return cat(b, n, W_MS);
+}
+fn cat_na(b: ptr<function, Buf>, n: i32) -> i32 { return cat(b, n, W_NA); }
+fn cat_adapter(b: ptr<function, Buf>, n_in: i32) -> i32 {
+    var n = n_in;
+    for (var i = 0; i < 31 && n < 63; i++) { let c = argus_vitals.adapter[i]; if (c == 0u) { break; } (*b)[n] = c; n++; }
+    return n;
+}
+fn net_word(t: u32) -> vec2u { return select(select(select(W_NT4, W_NT3, t == 3u), W_NT2, t == 2u), W_NT1, t == 1u); }
+// "4G  10.0 MBPS  RTT 50 MS"
+fn cat_net(b: ptr<function, Buf>, n_in: i32) -> i32 {
+    var n = cat(b, n_in, net_word(argus_vitals.net_type));
+    (*b)[n] = 32u; n++; (*b)[n] = 32u; n++;
+    n += fmt(b, n, argus_vitals.net_downlink_mbps, 1, 1); n = cat(b, n, W_MBPS);
+    n = cat(b, n, W_RTT); n += fmt(b, n, argus_vitals.net_rtt_ms, 0, 1); n = cat(b, n, W_MS);
+    if (argus_vitals.net_save_data != 0u) { n = cat(b, n, W_SAVE); }
+    return n;
+}
+
+fn content_web(m: Meta, S: vec2f) -> vec2f {
+    var a = vec2f(0.0);
+    let B = 1.0; let M = 0.42; let Dm = 0.24;
+    let live = s.seq > 0u;
+    let blink = select(0.0, 1.0, fract(f.time) < 0.6);
+    let gpu_ok = vhas(ARGUS_HAS_GPU_TIME);
+    // ---- header: the line steps up around the title, like a tab
+    put_text(&a, text_sd_c(S, vec2f(150, 114), EM_N, W_TITLE, slen(W_TITLE), 0, 2.0), EM_N, B);   // double width
+    if (S.y > 80 && S.y < 120 && S.x > 1100) { var b: Buf; let n = fmt_datetime(&b); TBR(&a, S, &b, n, 1785, 114, EM_N, M); }
+    if (S.x > 120 && S.x < 1800 && S.y > 70 && S.y < 140) {
+        let gx0 = 138.0; let gx1 = 162.0 + 2.0 * tw(20, EM_N);
+        if (S.x < gx0 || S.x > gx1) { put_line(&a, abs(S.y - 130.5), 1.0, M); } else { put_line(&a, abs(S.y - 76.5), 1.0, M * 0.8); }
+        put_line(&a, length(vec2f(min(abs(S.x - gx0), abs(S.x - gx1)), max(abs(S.y - 103.5) - 27.0, 0.0))), 1.0, M * 0.8);
+    }
+    // ---- the machine as far as a page can see it: logical processors (no loads), this page's GPU share,
+    // device memory and the JS heap in the two packages
+    if (S.x < 800 && S.y > 150 && S.y < 800) {
+        let co = sd_box(S, vec2f(445, 475), vec2f(300, 290), 14.0);
+        put_line(&a, abs(co), 1.2, M);
+        if (co < -3.0 && (S.x - 145.0) + (S.y - 185.0) < 34.0) { put_fill(&a, -1.0, Dm); }
+        put_line(&a, abs(sd_box(S, vec2f(447, 400), vec2f(275, 172), 6.0)), 0.8, Dm);
+        {   // "10 THREADS"
+            var b: Buf; var n = 0;
+            if (vhas(ARGUS_HAS_THREADS)) { n = fmt(&b, 0, f32(argus_vitals.threads), 0, 1); n = cat(&b, n, W_THREADS); }
+            else { n = cat(&b, 0, W_NOTHR); }
+            if (live) { TB(&a, S, &b, n, 150, 174, EM_N, Dm); }
+        }
+        let nb = i32(min(s.cpu_count, 32u)) + 1;
+        for (var i = 0; i < nb; i++) {
+            let k = block(i);
+            if (abs(S.x - k.c.x) > k.h.x + 10.0 || abs(S.y - k.c.y) > k.h.y + 30.0) { continue; }
+            put_line(&a, abs(sd_box(S, k.c, k.h, 3.0)), 1.0, M);
+            var b: Buf; let n = block_label(&b, i);
+            let lby = gbase_at_or_below(k.c.y - k.h.y + 21.0);
+            if (lby > k.c.y + k.h.y - 2.0) { continue; }
+            if (k.h.x >= 40.0) {
+                TB(&a, S, &b, n, 15.0 * ceil((k.c.x - k.h.x + 5.0) / 15.0), lby, EM_N, B);
+                if (i == nb - 1) {   // the GPU block: this page's share of it
+                    var p: Buf; var np = 0;
+                    if (gpu_ok) { np = fmt(&p, 0, s.gpu_busy * 100.0, 0, 1); np = cat(&p, np, T_PCT); } else { np = cat_na(&p, 0); }
+                    if (live) { TBR(&a, S, &p, np, 15.0 * floor((k.c.x + k.h.x - 4.0) / 15.0), lby, EM_N, M); }
+                    TX(&a, S, W_THISPG, 15.0 * ceil((k.c.x - k.h.x + 5.0) / 15.0), lby + 30.0, EM_N, Dm);   // under the label, above the fill's scale
+                }
+            } else if (k.h.x >= 0.5 * tw(n, EM_N) + 2.0) { TB(&a, S, &b, n, gx(k.c.x - 0.5 * tw(n, EM_N)), lby, EM_N, M); }
+        }
+        if (S.x > 465.0 && S.x < 725.0 && S.y > 475.0 && S.y < 572.0) {   // in the die's free corner
+            TX(&a, S, W_NL1, 480, 504, EM_N, Dm); TX(&a, S, W_NL2, 480, 534, EM_N, Dm); TX(&a, S, W_NL3, 480, 564, EM_N, Dm);
+        }
+        if (S.y > 595.0 && S.y < 750.0) {
+            for (var pk = 0; pk < 2; pk++) {
+                let mc = vec2f(select(587.0, 307.0, pk == 0), 672.0); let mh = vec2f(130.0, 64.0);
+                let md = sd_box(S, mc, mh, 3.0);
+                if (md > 8.0) { continue; }
+                put_line(&a, abs(md), 1.0, M);
+                var b: Buf; var n = 0;
+                if (pk == 0) {   // navigator.deviceMemory rounds down (and caps), so the machine has at least that
+                    n = cat(&b, 0, T_MEM); b[n] = 32u; n++;
+                    if (vhas(ARGUS_HAS_DEVICE_MEM)) { n += fmt(&b, n, argus_vitals.device_mem_gb, select(0, 2, argus_vitals.device_mem_gb < 1.0), 1); n = cat(&b, n, W_GBPLUS); }
+                    else { n = cat_na(&b, n); }
+                } else {
+                    n = cat(&b, 0, W_HEAP);
+                    if (vhas(ARGUS_HAS_HEAP)) {
+                        n += fmt(&b, n, argus_vitals.heap_used_mb, 0, 1); n = cat(&b, n, W_MB);
+                        let u = (S.x - (mc.x - mh.x)) / (2.0 * mh.x) * max(argus_vitals.heap_limit_mb, 1.0);
+                        if (live && md < -4.0 && S.y > mc.y - 6.0) {
+                            if (u < argus_vitals.heap_used_mb) { put_fill(&a, -1.0, 0.75); }
+                            else if (u < argus_vitals.heap_total_mb) { if (floor(S.y / PITCH) % 2.0 < 1.0) { put_fill(&a, -1.0, 0.45); } }
+                        }
+                    } else { n = cat_na(&b, n); }
+                }
+                if (live) { TB(&a, S, &b, n, 15.0 * ceil((mc.x - mh.x + 6.0) / 15.0), 654.0, EM_N, M); }
+            }
+        }
+    }
+    // ---- big frame-rate readout; the bar is the GPU's share of the frame
+    if (S.x < 840 && S.y > 805 && S.y < 1020) {
+        TX(&a, S, W_FRATE, 150, 834, EM_N, M);
+        let fms = argus_vitals.frame_ms;
+        if (live && fms > 0.0) { var b: Buf; var n = fmt(&b, 0, 1000.0 / fms, 0, 1); n = cat(&b, n, W_HZ); TB(&a, S, &b, n, 150, 954, EM_B, B); }
+        seg_bar(&a, S, 150, 1001, 20, 30, 21, select(0.0, s.gpu_busy, live && gpu_ok), B);
+        if (live && S.x > 540.0) {
+            for (var r = 0; r < 3; r++) {
+                let y = 894.0 + 30.0 * f32(r);
+                if (abs(S.y - y + 8.0) > 22.0) { continue; }
+                var p: Buf; var np = 0;
+                if (r == 0) { TX(&a, S, W_FRAME, 555, y, EM_N, M); np = fmt_ms(&p, 0, fms); }
+                else if (r == 1) {
+                    TX(&a, S, T_GPU, 555, y, EM_N, M);
+                    if (gpu_ok) { np = fmt_ms(&p, 0, argus_vitals.gpu_ms); p[np] = 32u; np++; np += fmt(&p, np, s.gpu_busy * 100.0, 0, 1); np = cat(&p, np, T_PCT); }
+                    else { np = cat_na(&p, 0); }
+                } else { TX(&a, S, W_JS, 555, y, EM_N, M); np = fmt_ms(&p, 0, argus_vitals.js_ms); }
+                TBR(&a, S, &p, np, 810.0, y, EM_N, B);
+            }
+        }
+    }
+    if (!live) { if (S.x > 850 && S.y > 150 && S.y < 250) { TX(&a, S, H_WAIT, CX0, 234, EM_N, B * blink); } return a; }
+    let h = head_g(m.t_arr);
+    let hi = m.hv; let lo = max(i32(s.seq) - 255, 1);
+    let hh = min(i32(floor(h)) + 1, hi);
+    // ---- frame-time chart (the CPU chart's sweep): the mean frame interval of each sample, 50 ms full scale
+    if (S.x > 820 && S.y > 145 && S.y < 440) {
+        TX(&a, S, W_FTC, CX0, 174, EM_N, M);
+        {   let pa = textureLoad(argus_state, vec2u(META_X + 5u, META_Y), 0);   // (peak, average) over the window
+            var b: Buf; var n = cat(&b, 0, T_PEAK); n = fmt_ms(&b, n, pa.x * 50.0);
+            n = cat(&b, n, T_AVG); n = fmt_ms(&b, n, pa.y * 50.0);
+            TBR(&a, S, &b, n, CX1, 174, EM_N, M); }
+        let bx = sd_box(S, vec2f(0.5 * (CX0 + CX1), 0.5 * (CPU_Y0 + CPU_Y1)), vec2f(0.5 * (CX1 - CX0), 0.5 * (CPU_Y1 - CPU_Y0)), 2.0);
+        put_line(&a, abs(bx), 0.8, Dm);
+        if (bx < 0.0) {
+            if ((S.x - CX0) % ((CX1 - CX0) / 10.0) < 1.5 && S.y % 9.0 < 3.0) { put_fill(&a, -1.0, 0.16); }
+            let gy = CPU_Y0 + 1.5 + 60.0 * mround((S.y - CPU_Y0 - 1.5) / 60.0);
+            if (abs(S.y - gy) < 0.5 && S.x % 8.0 < 3.0) { put_fill(&a, -1.0, 0.16); }
+            let u = (S.x - CX0) / (CX1 - CX0);
+            let age = col_age(u, h, CPU_N);
+            let g = h - age;
+            let dh = head_d(SER_CPU, S, h, CPU_N, CX0, CX1, CPU_Y0 + 2.0, CPU_Y1 - 2.0, 1.0, lo, hi);
+            if (age < CPU_N - 2.4 && g >= f32(lo)) {
+                let d = trace_d(SER_CPU, S, g, CPU_N, CX0, CX1, CPU_Y0 + 2.0, CPU_Y1 - 2.0, 1.0, lo, hh);
+                put_line(&a, min(d, dh), 1.2, 0.72 + 0.5 * exp(-age / 1.5));
+            } else { put_line(&a, dh, 1.2, 1.2); }
+            TX(&a, S, W_FS50, CX0 + 15.0, 234, EM_N, Dm);
+        }
+    }
+    // ---- GPU-time chart (the network chart's sweep): the page's GPU ms solid, argus_draw's dashed
+    if (S.x > 820 && S.y > 448 && S.y < 650) {
+        TX(&a, S, W_GTC, CX0, 474, EM_N, M);
+        if (gpu_ok) {
+            var b: Buf; var n = cat(&b, 0, W_GPUE); n = fmt_ms(&b, n, argus_vitals.gpu_ms); n = cat(&b, n, W_DRAWE); n = fmt_ms(&b, n, argus_vitals.draw_ms);
+            TBR(&a, S, &b, n, CX1, 474, EM_N, B);
+        }
+        let bx = sd_box(S, vec2f(0.5 * (CX0 + CX1), 0.5 * (NET_Y0 + NET_Y1)), vec2f(0.5 * (CX1 - CX0), 0.5 * (NET_Y1 - NET_Y0)), 2.0);
+        put_line(&a, abs(bx), 0.8, Dm);
+        if (!gpu_ok) { TX(&a, S, W_NOTS, CX0 + 15.0, 534, EM_N, M); }
+        else {
+            {   var c: Buf; var nc = cat(&c, 0, T_FS); nc += fmt(&c, nc, m.scale_net, select(0, 1, m.scale_net < 1.0), 1); nc = cat(&c, nc, W_MS); TB(&a, S, &c, nc, CX0 + 15.0, 534, EM_N, Dm); }
+            if (bx < 0.0) {
+                let u = (S.x - CX0) / (CX1 - CX0);
+                let age = col_age(u, h, NET_N);
+                let g = h - age;
+                if (age >= NET_N - 1.2) { put_line(&a, head_d(SER_RX, S, h, NET_N, CX0, CX1, NET_Y0 + 2.0, NET_Y1 - 2.0, m.scale_net, lo, hi), 1.2, 1.2); }
+                if (age < NET_N - 1.2 && g >= f32(lo)) {
+                    let fr = exp(-age / 1.5);
+                    put_line(&a, trace_d(SER_RX, S, g, NET_N, CX0, CX1, NET_Y0 + 2.0, NET_Y1 - 2.0, m.scale_net, lo, hh), 1.2, 0.7 + 0.5 * fr);
+                    let dt = trace_d(SER_TX, S, g, NET_N, CX0, CX1, NET_Y0 + 2.0, NET_Y1 - 2.0, m.scale_net, lo, hh);
+                    let bt = 0.45 + 0.3 * fr;
+                    a.x = max(a.x, bt * saturate(1.5 - dt) * select(0.0, 1.0, S.x % 10.0 < 6.0));
+                    a.y = max(a.y, 0.6 * bt * exp(-max(dt - 1.0, 0.0) / 6.0));
+                }
+            }
+        }
+    }
+    // ---- the JS heap (the memory panel): used | allocated | free up to the limit
+    if (S.x > 820 && S.y > 655 && S.y < 790) {
+        TX(&a, S, W_HEAPH, CX0, 684, EM_N, M);
+        if (!vhas(ARGUS_HAS_HEAP)) { TX(&a, S, W_HEAPNA, CX0 + 150.0, 684, EM_N, M); }
+        else {
+            var b: Buf; var n = fmt(&b, 0, argus_vitals.heap_used_mb, 0, 1); n = cat(&b, n, T_OF); n += fmt(&b, n, argus_vitals.heap_total_mb, 0, 1); n = cat(&b, n, W_MB);
+            TB(&a, S, &b, n, CX0 + 150.0, 684, EM_N, B);
+            var l: Buf; var nl = cat(&l, 0, W_LIMIT); nl += fmt(&l, nl, argus_vitals.heap_limit_mb, 0, 1); nl = cat(&l, nl, W_MB);
+            TBR(&a, S, &l, nl, CX1, 684, EM_N, M);
+            if (S.y > 702 && S.y < 732 && S.x > CX0 && S.x < CX1) {
+                let cells = 40; let cw = (CX1 - CX0) / f32(cells);
+                let cx = (S.x - CX0) / cw; let ci = i32(cx); let fx = cx - f32(ci);
+                let gq = (f32(ci) + 0.5) / f32(cells) * max(argus_vitals.heap_limit_mb, 1.0);
+                if (fx > 0.12 && fx < 0.88) {
+                    if (gq < argus_vitals.heap_used_mb) { put_fill(&a, -1.0, 0.95); }
+                    else if (gq < argus_vitals.heap_total_mb) { if (floor(S.y / PITCH) % 2.0 < 1.0) { put_fill(&a, -1.0, 0.6); } }
+                    else { put_line(&a, min(min(fx - 0.12, 0.88 - fx) * cw, min(S.y - 702.0, 732.0 - S.y)), 0.7, 0.3); }
+                }
+            }
+            if (S.y > 750.0 && S.y < 785.0) {
+                var lw = array<vec2u, 3>(W_USED, W_ALLOC, W_TOLIM);
+                var x = CX0;
+                for (var i = 0; i < 3; i++) {
+                    let sw = sd_box(S, vec2f(x + 7.5, 763.5), vec2f(5.0, 7.5), 0.0);
+                    if (i == 0) { put_fill(&a, sw, 0.95); } else if (i == 1) { if (floor(S.y / PITCH) % 2.0 < 1.0) { put_fill(&a, sw, 0.6); } }
+                    else { put_line(&a, abs(sw), 0.7, 0.3); }
+                    let nw = slen(lw[i]); TBC(&a, S, lw[i], nw, x + 30.0, 774.0, EM_N, Dm); x += tw(nw + 4, EM_N);
+                }
+                TXR(&a, S, W_PMEM, CX1, 774, EM_N, Dm);
+            }
+        }
+    }
+    // ---- this page (the process table): canvas, pixel ratio, GPU adapter, network estimates, time zone
+    if (S.x > 820 && S.y > 800 && S.y < 1010) {
+        TX(&a, S, W_THISPG, CX0, 834, EM_N, M);
+        for (var r = 0; r < 5; r++) {
+            let y = 864.0 + 30.0 * f32(r);
+            if (abs(S.y - y + 8.0) > 22.0) { continue; }
+            var b: Buf; var n = 0;
+            if (r == 0) {
+                TX(&a, S, W_CANVAS, CX0, y, EM_N, M);
+                n = fmt(&b, 0, f32(argus_vitals.canvas_w), 0, 1); n = cat(&b, n, W_X); n += fmt(&b, n, f32(argus_vitals.canvas_h), 0, 1); n = cat(&b, n, W_PX);
+            } else if (r == 1) { TX(&a, S, W_DPR, CX0, y, EM_N, M); n = fmt(&b, 0, argus_vitals.dpr, 2, 1); }
+            else if (r == 2) { TX(&a, S, W_ADAPT, CX0, y, EM_N, M); n = cat_adapter(&b, 0); if (n == 0) { n = cat_na(&b, 0); } }
+            else if (r == 3) { TX(&a, S, W_NET, CX0, y, EM_N, M); if (vhas(ARGUS_HAS_NETWORK)) { n = cat_net(&b, 0); } else { n = cat_na(&b, 0); } }
+            else {
+                TX(&a, S, W_UTC, CX0, y, EM_N, M);
+                let o = f.utc_offset_s; let ao = abs(o) / 60;
+                n = cat(&b, 0, W_UTCP); b[n] = select(45u, 43u, o >= 0); n++; n = cat2(&b, n, ao / 60); b[n] = 58u; n++; n = cat2(&b, n, ao % 60);   // '+' / '-', ':'
+            }
+            TB(&a, S, &b, n, CX0 + 210.0, y, EM_N, B * 0.9);
+        }
+    }
+    // ---- footer: battery, threads, CPU pressure, the tab's uptime
+    if (S.x > 120 && S.x < 1800) { put_line(&a, abs(S.y - 1035.0), 0.8, Dm); }
+    if (S.y > 1043 && S.y < 1082) {
+        var b: Buf; var n = 0;
+        if (!vhas(ARGUS_HAS_BATTERY)) { n = cat(&b, 0, T_BATT); n = cat_na(&b, n); }
+        else {
+            n = cat(&b, 0, T_BATT); n += fmt(&b, n, s.battery_charge * 100.0, 0, 1); n = cat(&b, n, T_PCT);
+            if (s.battery_charging != 0u) { n = cat(&b, n, T_CHG); }
+            if (s.battery_minutes < 0.0) { n = cat(&b, n, T_CALC); }
+            else if (s.battery_minutes > 0.0) {
+                let mins = i32(s.battery_minutes); b[n] = 32u; n++; n += fmt(&b, n, f32(mins / 60), 0, 1); b[n] = 58u; n++; n = cat2(&b, n, mins % 60);
+                n = cat(&b, n, select(T_LEFT, T_TOFULL, s.battery_charging != 0u));
+            } else if (s.on_ac != 0u) { b[n] = 32u; n++; b[n] = 65u; n++; b[n] = 67u; n++; }   // " AC"
+        }
+        let low = vhas(ARGUS_HAS_BATTERY) && s.on_ac == 0u && s.battery_charge < 0.2;
+        if (low) { put_rev(&a, text_sd(S, vec2f(150, 1074), EM_N, &b, n, 0, 1.0), S, vec2f(150, 1074), n, EM_N, B * blink); }
+        else { TB(&a, S, &b, n, 150, 1074, EM_N, M); }
+        var d: Buf; var nd = cat(&d, 0, W_THR);
+        if (vhas(ARGUS_HAS_THREADS)) { nd += fmt(&d, nd, f32(argus_vitals.threads), 0, 1); } else { nd = cat_na(&d, nd); }
+        TB(&a, S, &d, nd, 690, 1074, EM_N, M);
+        TX(&a, S, W_PRES, 1065, 1074, EM_N, M);
+        let to = vec2f(1065.0 + tw(slen(W_PRES), EM_N), 1074.0);
+        if (!vhas(ARGUS_HAS_PRESSURE)) { TX(&a, S, W_NA, to.x, to.y, EM_N, M); }
+        else {
+            let p = argus_vitals.pressure - 1u; let nt = slen(therm_word(p));
+            if (p == 0u) { put_text(&a, text_sd_c(S, to, EM_N, therm_word(0u), nt, 0, 1.0), EM_N, M); }
+            else { put_rev(&a, text_sd_c(S, to, EM_N, therm_word(p), nt, 0, 1.0), S, to, nt, EM_N, B * select(1.0, blink, p > 1u)); }
+        }
+        var u: Buf; var nu = cat(&u, 0, W_TABUP); let up = s.uptime_s;
+        nu += fmt(&u, nu, f32(up / 86400u), 0, 1); nu = cat(&u, nu, T_D); nu = cat2(&u, nu, i32((up / 3600u) % 24u)); u[nu] = 58u; nu++; nu = cat2(&u, nu, i32((up / 60u) % 60u));
+        TBR(&a, S, &u, nu, 1785, 1074, EM_N, M);
+    }
+    // ---- the log line, as on the machine screen
+    if (S.y > 1080 && S.y < 1120 && S.x < 1800) {
+        let len = i32(textureLoad(argus_state, vec2u(META_X, MSG_Y), 0).y);
+        let t0 = floor(f.time / 10.0) * 10.0;
+        let vis = min(len, i32((f.time - t0) * 30.0));
+        var l: Buf; for (var i = 0; i < vis; i++) { l[i] = u32(i32(textureLoad(argus_state, vec2u(META_X + u32(i), MSG_Y), 0).x)); }
+        TB(&a, S, &l, vis, 150, 1104, EM_N, M);
+        let cx = 150.0 + tw(vis, EM_N) + 0.5 * ADV * EM_N;
+        if (vis < len || fract(f.time) < 0.5) { put_fill(&a, sd_box(S, vec2f(cx, 1107.0), vec2f(0.5 * ADV * EM_N - 1.0, 3.0), 0.0), B); }
+    }
+    return a;
+}
+
+// the log message for slot mi in a browser page
+fn compose_msg_web(b: ptr<function, Buf>, mi: u32) -> i32 {
+    var n = 0;
+    switch (mi % 5u) {
+    case 0u: { n = cat(b, 0, L_SAMPLE); n += fmt(b, n, f32(s.seq), 0, 6); n = cat(b, n, L_RECV); n = cat(b, n, W_APIS); }
+    case 1u: { n = cat(b, 0, W_L1); }
+    case 2u: {
+        n = cat(b, 0, W_LGPU);
+        if (vhas(ARGUS_HAS_GPU_TIME)) {
+            n += fmt(b, n, argus_vitals.gpu_ms, 2, 1); n = cat(b, n, W_LAF); n += fmt(b, n, argus_vitals.draw_ms, 2, 1);
+            n = cat(b, n, W_LJS); n += fmt(b, n, argus_vitals.js_ms, 2, 1); n = cat(b, n, W_DOTMS);
+        } else { n = cat(b, n, W_NA); n = cat(b, n, L_DOT); }
+    }
+    case 3u: {
+        if (vhas(ARGUS_HAS_NETWORK)) { n = cat(b, 0, W_LNET); n = cat_net(b, n); n = cat(b, n, L_DOT); }
+        else { n = cat(b, 0, W_LNETNA); }
+    }
+    default: {
+        n = cat(b, 0, W_LDISP);
+        if (argus_vitals.frame_ms > 0.0) { n += fmt(b, n, 1000.0 / argus_vitals.frame_ms, 0, 1); n = cat(b, n, W_LHZ); }
+        n += fmt(b, n, f32(argus_vitals.canvas_w), 0, 1); n = cat(b, n, W_X); n += fmt(b, n, f32(argus_vitals.canvas_h), 0, 1); n = cat(b, n, W_PX); n = cat(b, n, L_DOT);
+    }
+    }
+    return min(n, 63);
+}
+
 // ---------------------------------------------------------------------------------- kernels
 @compute @workgroup_size(16, 16)
 fn argus_init(@builtin(global_invocation_id) id: vec3u) {
@@ -764,6 +1136,8 @@ fn argus_step(@builtin(global_invocation_id) id: vec3u) {
         if (fresh && j == (s.seq & 255u)) {   // rates in MB/s; .y = 1: a recorded sample
             let sr = gid.y - HIST_Y;
             o.x = select(select(min(select(s.net_tx_bps, s.net_rx_bps, sr == SER_RX) * 1e-6, 6.0e4), s.gpu_busy, sr == SER_GPU), s.cpu_total, sr == SER_CPU);
+            // a browser page: frame interval / 50 ms, GPU share, GPU ms, argus_draw ms
+            if (web()) { o.x = select(select(select(argus_vitals.draw_ms, argus_vitals.gpu_ms, sr == SER_RX), s.gpu_busy, sr == SER_GPU), argus_vitals.frame_ms / 50.0, sr == SER_CPU); }
             o.y = 1.0;
         } else if (fresh && delta > 1u && ((j + 256u - ((prev + 1u) & 255u)) & 255u) < min(delta - 1u, 256u)) { o.y = 0.0; }   // skipped
         textureStore(argus_state_out, gid, o);
@@ -776,7 +1150,7 @@ fn argus_step(@builtin(global_invocation_id) id: vec3u) {
         else if (k == 2u) { o = split_time(f.time); }
         else if (k == 3u) {
             if (fresh || f.frame < 3u) {   // full scale: the last minute's peak (and this sample), on a 1-2-5 ladder
-                var pk = max(s.net_rx_bps, s.net_tx_bps) * 1e-6;
+                var pk = select(max(s.net_rx_bps, s.net_tx_bps) * 1e-6, max(argus_vitals.gpu_ms, argus_vitals.draw_ms), web());   // MB/s; a page: GPU ms
                 for (var i = 1; i < 60; i++) { let g = i32(s.seq) - i; if (g < 1) { break; }
                     if (histv(SER_CPU, g).y < 0.5) { continue; }
                     pk = max(pk, max(hist(SER_RX, g), hist(SER_TX, g))); }
@@ -787,7 +1161,8 @@ fn argus_step(@builtin(global_invocation_id) id: vec3u) {
         } else if (k == 4u) { o.x = floor(f.time / 10.0); }
         else if (k == 5u) {
             if (fresh || f.frame < 3u) {
-                var pk = s.cpu_total; var sum = s.cpu_total; var cnt = 1;
+                let cur = select(s.cpu_total, argus_vitals.frame_ms / 50.0, web());
+                var pk = cur; var sum = cur; var cnt = 1;
                 for (var i = 1; i < i32(CPU_N); i++) { let g = i32(s.seq) - i; if (g < 1) { break; }
                     let v = histv(SER_CPU, g); if (v.y < 0.5) { continue; } pk = max(pk, v.x); sum += v.x; cnt++; }
                 o.x = pk; o.y = sum / f32(cnt);
@@ -811,7 +1186,7 @@ fn argus_step(@builtin(global_invocation_id) id: vec3u) {
         let mi = u32(floor(f.time / 10.0));
         let last = textureLoad(argus_state, vec2u(META_X + 4u, META_Y), 0).x;
         if (f.frame < 3u || f32(mi) != last) {
-            var b: Buf; var n = 0; if (s.seq > 0u) { n = compose_msg(&b, mi); }
+            var b: Buf; var n = 0; if (s.seq > 0u) { if (web()) { n = compose_msg_web(&b, mi); } else { n = compose_msg(&b, mi); } }
             let i = i32(gid.x - META_X);
             o = vec4f(select(32.0, f32(i32(b[i])), i < n), f32(n), 0.0, 0.0);
         }
@@ -833,6 +1208,7 @@ fn block_fill(S: vec2f, tau: f32) -> f32 {
     if (s.seq == 0u || S.x < 160.0 || S.x > 720.0 || S.y < 190.0 || S.y > 600.0) { return 0.0; }
     let nb = i32(min(s.cpu_count, 32u)) + 1;
     for (var i = 0; i < nb; i++) {
+        if (web() && (i < nb - 1 || !vhas(ARGUS_HAS_GPU_TIME))) { continue; }   // a page sees no per-thread load
         let k = block(i);
         let bd = sd_box(S, k.c, k.h, 3.0);
         if (bd > -2.0) { continue; }
@@ -906,7 +1282,7 @@ fn argus_draw(@builtin(global_invocation_id) id: vec3u) {
 // ---------------------------------------------------------------------------------- the string table
 // Every constant string above (Metal's constant char arrays), concatenated as ASCII codes; each name is
 // (start, length) into it.
-const STR = array<u32, 532>(
+const STR = array<u32, 1138>(
     32, 75, 66, 47, 83,   // U_KBS
     32, 77, 66, 47, 83,   // U_MBS
     65, 82, 71, 85, 83, 32, 83, 89, 83, 84, 69, 77, 32, 77, 79, 78, 73, 84, 79, 82,   // H_TITLE
@@ -974,4 +1350,61 @@ const STR = array<u32, 532>(
     32, 71, 66, 32, 70, 82, 69, 69, 32, 79, 70, 32,   // L_OFT
     32, 71, 66, 46, 32, 85, 80, 32,   // L_UPT
     32, 68, 65, 89, 83, 46,   // L_DAYS
+    65, 82, 71, 85, 83, 32, 66, 82, 79, 87, 83, 69, 82, 32, 86, 73, 84, 65, 76, 83,   // W_TITLE
+    32, 84, 72, 82, 69, 65, 68, 83,   // W_THREADS
+    84, 72, 82, 69, 65, 68, 83, 32, 78, 47, 65,   // W_NOTHR
+    84, 72, 73, 83, 32, 80, 65, 71, 69,   // W_THISPG
+    80, 69, 82, 45, 84, 72, 82, 69, 65, 68, 32, 76, 79, 65, 68,   // W_NL1
+    73, 83, 32, 78, 79, 84, 32, 86, 73, 83, 73, 66, 76, 69,   // W_NL2
+    84, 79, 32, 65, 32, 87, 69, 66, 32, 80, 65, 71, 69,   // W_NL3
+    43, 32, 71, 66,   // W_GBPLUS
+    78, 47, 65,   // W_NA
+    74, 83, 32, 72, 69, 65, 80, 32,   // W_HEAP
+    32, 77, 66,   // W_MB
+    70, 82, 65, 77, 69, 32, 82, 65, 84, 69,   // W_FRATE
+    72, 90,   // W_HZ
+    70, 82, 65, 77, 69,   // W_FRAME
+    74, 83,   // W_JS
+    32, 77, 83,   // W_MS
+    70, 82, 65, 77, 69, 32, 84, 73, 77, 69, 32, 32, 49, 50, 48, 32, 83,   // W_FTC
+    70, 85, 76, 76, 32, 83, 67, 65, 76, 69, 32, 53, 48, 32, 77, 83,   // W_FS50
+    71, 80, 85, 32, 84, 73, 77, 69, 32, 32, 54, 48, 32, 83,   // W_GTC
+    71, 80, 85, 32,   // W_GPUE
+    32, 32, 32, 68, 82, 65, 87, 32,   // W_DRAWE
+    78, 79, 32, 71, 80, 85, 32, 84, 73, 77, 69, 83, 84, 65, 77, 80, 83, 32, 73, 78, 32, 84, 72, 73, 83, 32, 66, 82, 79, 87, 83, 69, 82,   // W_NOTS
+    74, 83, 32, 72, 69, 65, 80,   // W_HEAPH
+    78, 79, 84, 32, 69, 88, 80, 79, 83, 69, 68, 32, 66, 89, 32, 84, 72, 73, 83, 32, 66, 82, 79, 87, 83, 69, 82,   // W_HEAPNA
+    76, 73, 77, 73, 84, 32,   // W_LIMIT
+    85, 83, 69, 68,   // W_USED
+    65, 76, 76, 79, 67, 65, 84, 69, 68,   // W_ALLOC
+    70, 82, 69, 69, 32, 84, 79, 32, 76, 73, 77, 73, 84,   // W_TOLIM
+    80, 69, 82, 70, 79, 82, 77, 65, 78, 67, 69, 46, 77, 69, 77, 79, 82, 89,   // W_PMEM
+    67, 65, 78, 86, 65, 83,   // W_CANVAS
+    32, 88, 32,   // W_X
+    32, 80, 88,   // W_PX
+    80, 73, 88, 69, 76, 32, 82, 65, 84, 73, 79,   // W_DPR
+    71, 80, 85, 32, 65, 68, 65, 80, 84, 69, 82,   // W_ADAPT
+    78, 69, 84, 87, 79, 82, 75,   // W_NET
+    84, 73, 77, 69, 32, 90, 79, 78, 69,   // W_UTC
+    85, 84, 67,   // W_UTCP
+    83, 76, 79, 87, 45, 50, 71,   // W_NT1
+    50, 71,   // W_NT2
+    51, 71,   // W_NT3
+    52, 71,   // W_NT4
+    32, 77, 66, 80, 83,   // W_MBPS
+    32, 32, 82, 84, 84, 32,   // W_RTT
+    32, 32, 83, 65, 86, 69, 45, 68, 65, 84, 65,   // W_SAVE
+    84, 72, 82, 69, 65, 68, 83, 32,   // W_THR
+    67, 80, 85, 32, 80, 82, 69, 83, 83, 85, 82, 69, 32,   // W_PRES
+    84, 65, 66, 32, 85, 80, 32,   // W_TABUP
+    66, 82, 79, 87, 83, 69, 82, 32, 65, 80, 73, 83, 32, 79, 78, 76, 89, 46,   // W_APIS
+    62, 32, 65, 32, 87, 69, 66, 32, 80, 65, 71, 69, 32, 67, 65, 78, 39, 84, 32, 82, 69, 65, 68, 32, 84, 72, 73, 83, 32, 77, 65, 67, 72, 73, 78, 69, 39, 83, 32, 67, 80, 85, 44, 32, 77, 69, 77, 79, 82, 89, 32, 79, 82, 32, 68, 73, 83, 75, 83, 46,   // W_L1
+    62, 32, 71, 80, 85, 32,   // W_LGPU
+    32, 77, 83, 32, 65, 32, 70, 82, 65, 77, 69, 44, 32, 68, 82, 65, 87, 32,   // W_LAF
+    32, 77, 83, 44, 32, 74, 83, 32,   // W_LJS
+    32, 77, 83, 46,   // W_DOTMS
+    62, 32, 78, 69, 84, 87, 79, 82, 75, 58, 32,   // W_LNET
+    62, 32, 78, 69, 84, 87, 79, 82, 75, 32, 73, 78, 70, 79, 82, 77, 65, 84, 73, 79, 78, 58, 32, 78, 79, 84, 32, 73, 78, 32, 84, 72, 73, 83, 32, 66, 82, 79, 87, 83, 69, 82, 46,   // W_LNETNA
+    62, 32, 68, 73, 83, 80, 76, 65, 89, 58, 32,   // W_LDISP
+    32, 72, 90, 44, 32,   // W_LHZ
 );
