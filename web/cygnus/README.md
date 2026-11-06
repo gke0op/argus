@@ -89,13 +89,19 @@ points, 32 bisections): max 1.79e-5 M (off-axis 1.79e-5, polar band 7.62e-6), rm
 0 bracket failures. These are the same figures `gpu_bench` reports for the Metal kernel, and
 within the ledger's bounds (max 1e-2, rms 1e-3, off-axis max and rms 1e-4, 0 brackets).
 
-**Timing** (WebGPU timestamp queries, mean of the last 120 frames; Metal from
-`gpu_bench` on the same machine within minutes; the machine was shared with other work, and
-runs during heavy contention, which slowed native and web alike by 5-10x, are left out):
+**Timing** (WebGPU timestamp queries, mean of the last 120 of 240 frames; Metal from
+`gpu_bench` on the same machine minutes earlier; two web runs each, at 13:30-13:35 with the load
+average back under 15. Earlier runs during heavy contention from other work, which slowed native
+and web alike by 5-10x, are not used):
 
-| | WebGPU | Metal (`gpu_bench`) |
+| | WebGPU (Chromium 152) | Metal (`gpu_bench`) |
 |---|---|---|
-| trace 1920x1080 | 0.91 s GPU (0.95 s wall incl. meter) | 1.81 s |
-| trace 3024x1964 | 2.53 s GPU (2.60 s wall) | 3.86 s |
-| shade 1920x1080 | 0.81-1.02 ms/frame | 0.56 ms (unpaced) |
-| shade 3024x1964 | 1.47 ms/frame | 1.59 ms (unpaced), 2.68 ms paced at 30 FPS |
+| trace 1920x1080 | 0.82-0.85 s GPU (0.90 s wall incl. meter) | 1.91 s |
+| trace 2048x1536 (the browser pane's native canvas, 1024x768 at 2x) | 1.48-1.58 s GPU (1.61 s wall) | 2.74 s |
+| trace 3024x1964 (M3 MacBook Air native) | 2.55-2.60 s GPU (2.65 s wall) | 3.88 s |
+| shade 1920x1080 | 0.66-0.78 ms/frame | 0.62 ms unpaced, 0.79 ms paced at 30 FPS |
+| shade 2048x1536 | 0.69-1.28 ms/frame | 1.76 ms unpaced, 1.67 ms paced |
+| shade 3024x1964 | 1.33-1.61 ms/frame | 1.67 ms unpaced, 2.27 ms paced |
+
+Web frames were driven at ~100 Hz by a timer (the pane was hidden, so no rAF); CPU per frame
+(step + upload + encode) 0.05-0.14 ms. Earlier, visible, at 1920x1080: 120 fps.
