@@ -207,6 +207,23 @@ button:disabled { opacity: 0.45; cursor: default; }
   .lede-2 { font-size: 0.82rem; }
 }
 
+/* ---- hero controls: the leaderboard's hairlines, not soft pills ---------------------------
+   Thin outlines, a small radius and a faint fill; the active or primary one only gets a brighter line. */
+.hero .ctas .btn, .hero .chip, .hero .tele, .hero .tele .tools button { border-radius: 4px; }
+.hero .ctas .btn { background: rgba(0, 0, 0, 0.42); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; font-weight: 550; }
+.hero .ctas .btn:hover { background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.45); color: #fff; }
+.hero .ctas .btn.primary { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.62); }
+.hero .ctas .btn.primary:hover { background: rgba(255, 255, 255, 0.16); border-color: #fff; }
+.hero .chip { background: rgba(0, 0, 0, 0.42); border: 1px solid rgba(255, 255, 255, 0.13); color: rgba(255, 255, 255, 0.8); }
+.hero .chip:hover { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.32); color: #fff; }
+.hero .chip[aria-pressed="true"] { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.62); color: #fff; }
+.hero .chip[aria-pressed="true"] small { color: var(--mute); }
+.hero .tele { background: rgba(0, 0, 0, 0.55); border-color: rgba(255, 255, 255, 0.13); }
+.hero .tele .tools button { background: transparent; border-color: rgba(255, 255, 255, 0.13); }
+.hero .tele .tools button:hover { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.32); }
+.hero .tele.min, .hero .tele.min #teleBtn, .hero .tele.min .tools #bareBtn, .hero.bare .tele .tools #bareBtn { border-radius: 4px; }
+.hero .caption code { border-radius: 3px; }
+
 /* ---- direction A, below the hero: no cards, no frames; hairlines only where data needs them */
 /* Sections: no bands, no cards, no eyebrow rules. */
 [data-dir="a"] main section.band { border-top: 0; }
