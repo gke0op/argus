@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Argus — WebGPU dev page</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  #hud {
+    position: fixed; left: 12px; top: 12px; padding: 8px 10px; border-radius: 6px;
+    background: rgba(8, 10, 14, 0.72); color: #d6dde6; font: 12px/1.5 ui-monospace, Menlo, monospace;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); max-width: 46ch;
+  }
+  #hud select, #hud input, #hud button { font: inherit; background: #151a21; color: inherit; border: 1px solid #2a323d; border-radius: 4px; }
+  #hud .row { display: flex; gap: 6px; align-items: center; margin: 2px 0; }
+  #hud .k { color: #7f8b99; }
+  #err { color: #ff8a80; white-space: pre-wrap; }
+  #src { color: #7f8b99; font-size: 11px; }
+  #hud.min > :not(.row:first-child) { display: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="row">
+    <select id="theme" aria-label="Theme"></select>
+    <button id="hide" title="Hide the readout (h)">–</button>
+  </div>
+  <div class="row"><span class="k">seed</span><input id="seed" size="10" placeholder="random"><span class="k">date</span><input id="date" size="20" placeholder="system"></div>
+  <div id="read">…</div>
+  <div id="src"></div>
+  <div id="err"></div>
+</div>
+<script type="module">
+import { create, runLoop, getDevice } from './host/argus_gpu.js';
+
+const $ = (id) => document.getElementById(id);
+const canvas = $('c');
+const q = new URLSearchParams(location.search);
+const manifest = await (await fetch('themes/index.json')).json();
+for (const t of manifest.themes) $('theme').add(new Option(t.name, t.name));
+$('theme').value = q.get('theme') ?? 'Night_Tide';
+$('seed').value = q.get('seed') ?? '';
+$('date').value = q.get('date') ?? '';
+
+let engine = null, stop = null;
+const frameTimes = [];
+
+async function load() {
+  stop?.(); engine?.destroy(); engine = null;
+  $('err').textContent = ''; $('src').textContent = '';
+  const name = $('theme').value;
+  const seedTxt = $('seed').value.trim();
+  const opts = { theme: name };
+  if (seedTxt) opts.seed = Number(seedTxt) >>> 0;
+  if ($('date').value.trim()) opts.date = $('date').value.trim();
+  const u = new URL(location.href);
+  u.searchParams.set('theme', name);
+  seedTxt ? u.searchParams.set('seed', seedTxt) : u.searchParams.delete('seed');
+  opts.date ? u.searchParams.set('date', opts.date) : u.searchParams.delete('date');
+  history.replaceState(null, '', u);
+  try {
+    const t0 = performance.now();
+    engine = await create(canvas, opts);
+    const buildMs = performance.now() - t0;
+    frameTimes.length = 0;
+    stop = runLoop(engine, (now, dt) => { frameTimes.push(dt * 1000); if (frameTimes.length > 240) frameTimes.shift(); });
+    $('read').dataset.build = buildMs.toFixed(0);
+  } catch (e) {
+    $('err').textContent = String(e.message ?? e);
+  }
+}
+
+const med = (a) => { if (!a.length) return NaN; const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
+setInterval(() => {
+  if (!engine) return;
+  const s = engine.stats();
+  const sources = engine.statsSources?.();
+  if (sources && Object.keys(sources).length) {
+    const pick = (p) => Object.entries(sources).filter(([, v]) => p(String(v))).map(([k]) => k).join(', ') || '—';
+    $('src').textContent = sources.all ? `stats: ${sources.all}` :
+      `stats live: ${pick((v) => v.startsWith('live'))}. Synthetic: ${pick((v) => v.startsWith('synthetic'))}`;
+  }
+  const interval = med(frameTimes);
+  const hz = 1000 / interval;
+  $('read').innerHTML =
+    `<span class="k">GPU</span> ${s.gpuMs !== undefined ? s.gpuMs.toFixed(2) + ' ms' : 'n/a (no timestamp-query)'} ` +
+    `<span class="k">CPU</span> ${s.cpuMs?.toFixed(2)} ms<br>` +
+    `<span class="k">display</span> ${Number.isFinite(hz) ? hz.toFixed(0) : '–'} Hz (${interval.toFixed(2)} ms/frame) ` +
+    `<span class="k">size</span> ${s.width}x${s.height}<br>` +
+    `<span class="k">tick</span> ${s.frame} <span class="k">f.time</span> ${s.time.toFixed(2)} s ` +
+    `<span class="k">seed</span> 0x${engine.info.seed.toString(16)} <span class="k">build</span> ${$('read').dataset.build} ms<br>` +
+    `<span class="k">gpu</span> ${engine.info.adapter} · ${engine.info.outFormat}`;
+}, 250);
+
+$('theme').addEventListener('change', load);
+$('seed').addEventListener('change', load);
+$('date').addEventListener('change', load);
+$('hide').addEventListener('click', () => $('hud').classList.toggle('min'));
+addEventListener('keydown', (e) => { if (e.key === 'h' && e.target.tagName !== 'INPUT') $('hud').classList.toggle('min'); });
+try { await getDevice(); } catch (e) { $('err').textContent = String(e.message ?? e); }
+await load();
+window.__engine = () => engine;
+window.__frameTimes = () => [...frameTimes];
+</script>
+</body>
+</html>
