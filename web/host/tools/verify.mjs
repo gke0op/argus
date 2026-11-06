@@ -154,7 +154,7 @@ function cleanup() {
 process.on('exit', cleanup);
 
 let wsUrl = null;
-for (let i = 0; i < 100 && !wsUrl; i++) {
+for (let i = 0; i < 600 && !wsUrl; i++) {
   try {
     const [p] = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n');
     const list = await (await fetch(`http://127.0.0.1:${p}/json`)).json();
