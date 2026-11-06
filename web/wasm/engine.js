@@ -85,6 +85,23 @@ export async function loadModule(base, name, { threads = 'auto' } = {}) {
   return { module, threaded: wantThreads, bytes: bytes.byteLength, variant };
 }
 
+/// Compile a module from bytes the caller has (an uploaded NAME.mt.wasm or NAME.st.wasm). The
+/// threaded build imports a shared memory; it runs threaded only on an isolated page.
+export async function moduleFromBytes(bytes) {
+  const module = await WebAssembly.compile(bytes);
+  // Both builds import env.memory; only the threaded one needs it shared. Try a plain memory.
+  const env = (memory) => ({ env: { memory, web_phase() {}, web_now_us: () => 0 } });
+  let threaded = false;
+  try {
+    await WebAssembly.instantiate(module, env(new WebAssembly.Memory({ initial: MEM_PAGES, maximum: MEM_MAX_PAGES })));
+  } catch (plainErr) {
+    if (!canThread()) throw new Error(`cannot link this module single-threaded (${plainErr.message}); if it is NAME.mt.wasm, upload NAME.st.wasm: this page is not cross-origin isolated`);
+    await WebAssembly.instantiate(module, env(new WebAssembly.Memory({ initial: MEM_PAGES, maximum: MEM_MAX_PAGES, shared: true })));
+    threaded = true;
+  }
+  return { module, threaded, bytes: bytes.byteLength, variant: threaded ? 'mt' : 'st' };
+}
+
 /// Start an engine: { info, leader (Channel), threads, memory, onPhase(f), terminate() }.
 /// `threads`: 'auto' (every core) or a number of Workers in all (1 = no helpers).
 export async function startEngine({ module, threaded, threads = 'auto', makeWorker = defaultWorker, workerUrl = new URL('./worker.js', import.meta.url) }) {

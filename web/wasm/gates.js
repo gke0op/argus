@@ -45,10 +45,12 @@ export async function runGates(name, opts = {}) {
   const gate = (id, pass, detail) => out.gates.push({ ...GATES[id - 1], pass, detail });
 
   // Gate 1: the build's compile, then this browser's.
-  const compileLog = await readText(new URL(`${name}.compile.txt`, base));
+  // opts.module: a module the caller compiled (an uploaded .wasm, see moduleFromBytes); Gate 1 is
+  // then the uploader's build, and this browser's compile and link.
+  const compileLog = opts.module ? null : await readText(new URL(`${name}.compile.txt`, base));
   let m;
   try {
-    m = await loadModule(base, name, { threads: opts.threads ?? 'auto' });
+    m = opts.module ?? await loadModule(base, name, { threads: opts.threads ?? 'auto' });
   } catch (e) {
     const log = (compileLog || '').trim();
     gate(1, false, log ? `zig build-exe failed:\n${log}` : `no module: ${e.message}`);
@@ -58,7 +60,9 @@ export async function runGates(name, opts = {}) {
   }
   out.variant = m.variant;
   out.wasmKB = m.bytes / 1024;
-  gate(1, true, `zig build-exe -target wasm32-freestanding -O ReleaseFast (${m.variant}, ${(m.bytes / 1024).toFixed(1)} KB), compiled and linked here`);
+  gate(1, true, opts.module
+    ? `uploaded ${m.variant}.wasm (${(m.bytes / 1024).toFixed(1)} KB): built outside this page, compiled and linked here`
+    : `zig build-exe -target wasm32-freestanding -O ReleaseFast (${m.variant}, ${(m.bytes / 1024).toFixed(1)} KB), compiled and linked here`);
 
   const engine = await startEngine({ module: m.module, threaded: m.threaded, threads: opts.threads ?? 'auto' });
   out.threads = engine.threads;

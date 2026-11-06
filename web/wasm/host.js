@@ -116,7 +116,7 @@ export async function create(canvas, opts = {}) {
   const name = opts.theme || 'Tutorial_Tides';
   const base = opts.base || new URL('./build/', import.meta.url);
   const threads = opts.threads ?? 'auto';
-  const m = await loadModule(base, name, { threads });
+  const m = opts.module ?? await loadModule(base, name, { threads }); // opts.module: see engine.js moduleFromBytes
   const engine = await startEngine({ module: m.module, threaded: m.threaded, threads });
 
   let blitMode = opts.blit || 'auto';
