@@ -99,7 +99,7 @@ all the readings a browser page gets; nothing else is real:
 | Sample count, interval | `s.seq`, `s.sample_dt` | the page samples once a second | everywhere |
 | Frame interval (mean, worst) | `frame_ms`, `frame_worst_ms` | `requestAnimationFrame` intervals of this page | everywhere |
 | GPU time per frame, and `argus_draw`'s | `gpu_ms`, `draw_ms`; `s.gpu_busy` = `gpu_ms / frame_ms` | WebGPU timestamp queries around this page's two passes | with `timestamp-query` (Chrome, Safari 26 here) |
-| JavaScript time per frame | `js_ms` | `performance.now()` around encoding and submitting the frame | everywhere |
+| JavaScript time per frame | `js_ms` | `performance.now()` around encoding and submitting the frame | everywhere (Safari's clock has 1 ms steps, so it reads 0 or 1 ms there) |
 | Logical processors | `threads`, `s.cpu_count` (no per-core loads: `s.cpu_core` stays 0) | `navigator.hardwareConcurrency` | Chrome, Safari |
 | Device memory | `device_mem_gb` | `navigator.deviceMemory`: rounded down to a power of two and capped (8 in Chrome), so the machine has *at least* that; Phosphor shows "8+ GB" | Chromium |
 | JS heap used, allocated, limit | `heap_*_mb` | `performance.memory` (this page's heap, in coarse buckets) | Chromium |
