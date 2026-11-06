@@ -102,25 +102,42 @@ export async function create(canvas, opts = {}) {
   if (!X.cyg_init(16, 10)) throw new Error('Cygnus A: theme init failed');
   const incl = opts.incl != null ? (opts.incl * Math.PI) / 180 : -1;
 
-  const module = device.createShaderModule({ label: 'cygnus.wgsl', code });
+  // The shade writes the canvas's texture from a compute kernel (2.3x faster than the same
+  // shade as a fragment shader, measured at 3024x1964), so the canvas is rgba8unorm (SDR) or
+  // rgba16float (HDR) with storage usage. opts.fragment draws through fs_shade instead.
+  const hdr = !!opts.hdr;
+  const fragment = !!opts.fragment;
+  // Storage writes into Chrome's canvas texture measured 1.9x slower than into an ordinary
+  // texture (3.41 vs 1.84 ms at 3024x1964), so the shade goes to an offscreen texture that is
+  // then copied into the canvas; opts.direct writes the canvas texture itself.
+  const direct = !!opts.direct;
+  const format = hdr ? 'rgba16float' : fragment ? navigator.gpu.getPreferredCanvasFormat() : 'rgba8unorm';
+  const ctx = canvas.getContext('webgpu');
+  ctx.configure({
+    device,
+    format,
+    alphaMode: 'opaque',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | (fragment ? 0 : direct ? GPUTextureUsage.STORAGE_BINDING : GPUTextureUsage.COPY_DST),
+    ...(hdr ? { toneMapping: { mode: 'extended' } } : {}),
+  });
+
+  const src = code.replace('rgba8unorm /*CANVAS_FORMAT*/', hdr ? 'rgba16float' : 'rgba8unorm');
+  const module = device.createShaderModule({ label: 'cygnus.wgsl', code: src });
   const info = await module.getCompilationInfo();
   const errs = info.messages.filter((m) => m.type === 'error');
   if (errs.length) throw new Error('cygnus.wgsl: ' + errs.map((m) => `${m.lineNum}:${m.linePos} ${m.message}`).join('\n'));
-
-  const hdr = !!opts.hdr;
-  const format = hdr ? 'rgba16float' : navigator.gpu.getPreferredCanvasFormat();
-  const ctx = canvas.getContext('webgpu');
-  ctx.configure({ device, format, alphaMode: 'opaque', ...(hdr ? { toneMapping: { mode: 'extended' } } : {}) });
   const headroom = hdr ? Math.max(1, opts.headroom ?? 1) : 1;
 
   const cp = (entryPoint) => device.createComputePipelineAsync({ label: entryPoint, layout: 'auto', compute: { module, entryPoint } });
-  const [pMeter, pTrace, pFoot, pProbe, pShadeC, pShadeF] = await Promise.all([
+  const [pMeter, pTrace, pFoot, pProbe, pShadeC, pNop, pShadeK, pShadeF] = await Promise.all([
     cp('bh_meter'),
     cp('bh_trace'),
     cp('bh_footprint'),
     cp('bh_probe'),
     cp('bh_shade'),
-    device.createRenderPipelineAsync({
+    cp('bh_nop'),
+    fragment ? null : cp('bh_shade_canvas'),
+    !fragment ? null : device.createRenderPipelineAsync({
       label: 'fs_shade',
       layout: 'auto',
       vertex: { module, entryPoint: 'vs_full' },
@@ -208,7 +225,7 @@ export async function create(canvas, opts = {}) {
           { binding: 6, resource: B(viewBuf) }, ...extra,
         ],
       });
-      this.gShadeF = [g0(pShadeF), g1(pShadeF, [])];
+      this.gShade = fragment ? [g0(pShadeF), g1(pShadeF, [])] : [g0(pShadeK), g1(pShadeK, [])];
       this.g0ShadeC = g0(pShadeC);
       this.g1ShadeC = (tex) => g1(pShadeC, [{ binding: 7, resource: tex.createView() }]);
     }
@@ -337,6 +354,8 @@ export async function create(canvas, opts = {}) {
 
   // ---- presenting -----------------------------------------------------------------------------
   let eng = null;
+  let off = null; // offscreen shade target (see `direct`)
+  let offGroup = null;
   let pending = null; // resize waiting out its debounce
 
   function retrace(w, h, exposure, traceExposure) {
@@ -373,15 +392,45 @@ export async function create(canvas, opts = {}) {
     writeView(eng, tex.width, tex.height, hdr ? OUT_EXT_SRGB : OUT_SRGB, headroom);
     const t = timer.take();
     const enc = device.createCommandEncoder();
-    const pass = enc.beginRenderPass({
-      colorAttachments: [{ view: tex.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
-      ...(t ? { timestampWrites: t.writes } : {}),
-    });
-    pass.setPipeline(pShadeF);
-    pass.setBindGroup(0, eng.gShadeF[0]);
-    pass.setBindGroup(1, eng.gShadeF[1]);
-    pass.draw(3);
-    pass.end();
+    if (fragment) {
+      const pass = enc.beginRenderPass({
+        colorAttachments: [{ view: tex.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
+        ...(t ? { timestampWrites: t.writes } : {}),
+      });
+      pass.setPipeline(pShadeF);
+      pass.setBindGroup(0, eng.gShade[0]);
+      pass.setBindGroup(1, eng.gShade[1]);
+      pass.draw(3);
+      pass.end();
+    } else {
+      let target = tex;
+      if (!direct) {
+        if (!off || off.width !== tex.width || off.height !== tex.height) {
+          off?.destroy();
+          off = device.createTexture({ label: 'shade', size: [tex.width, tex.height], format, usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC });
+          offGroup = device.createBindGroup({ layout: pShadeK.getBindGroupLayout(2), entries: [{ binding: 0, resource: off.createView() }] });
+        }
+        target = off;
+      }
+      const out = direct ? device.createBindGroup({ layout: pShadeK.getBindGroupLayout(2), entries: [{ binding: 0, resource: tex.createView() }] }) : offGroup;
+      // Timed from the shade's start to the end of the copy (an empty pass after it).
+      const pass = enc.beginComputePass(t ? { timestampWrites: direct ? t.writes : { querySet: t.writes.querySet, beginningOfPassWriteIndex: 0 } } : {});
+      pass.setPipeline(pShadeK);
+      pass.setBindGroup(0, eng.gShade[0]);
+      pass.setBindGroup(1, eng.gShade[1]);
+      pass.setBindGroup(2, out);
+      pass.dispatchWorkgroups(Math.ceil(target.width / 16), Math.ceil(target.height / 8));
+      pass.end();
+      if (!direct) {
+        enc.copyTextureToTexture({ texture: off }, { texture: tex }, [tex.width, tex.height]);
+        if (t) {
+          const tail = enc.beginComputePass({ timestampWrites: { querySet: t.writes.querySet, endOfPassWriteIndex: 1 } });
+          tail.setPipeline(pNop);
+          tail.dispatchWorkgroups(1);
+          tail.end();
+        }
+      }
+    }
     if (t) t.resolve(enc);
     device.queue.submit([enc.finish()]);
     if (t) t.after((ms) => push(timing.gpu, ms));
@@ -453,6 +502,34 @@ export async function create(canvas, opts = {}) {
       buf.destroy();
       tex.destroy();
       return out;
+    },
+    // GPU ms per frame of the compute bh_shade into an rgba8unorm texture (n frames, one submit
+    // each), for comparison with frame()'s own pass (bh_shade_canvas, or fs_shade).
+    async timeComputeShade(n) {
+      const e = eng;
+      const tex = device.createTexture({ size: [e.w, e.h], format: 'rgba8unorm', usage: GPUTextureUsage.STORAGE_BINDING });
+      const g1 = e.g1ShadeC(tex);
+      const ms = [];
+      for (let i = 0; i < n; i++) {
+        X.cyg_step(0.004);
+        writeFrame();
+        writeView(e, e.w, e.h, OUT_SRGB, 1);
+        const t = timer.take();
+        const enc = device.createCommandEncoder();
+        const pass = enc.beginComputePass(t ? { timestampWrites: t.writes } : {});
+        pass.setPipeline(pShadeC);
+        pass.setBindGroup(0, e.g0ShadeC);
+        pass.setBindGroup(1, g1);
+        pass.dispatchWorkgroups(Math.ceil(e.w / 16), Math.ceil(e.h / 8));
+        pass.end();
+        if (t) t.resolve(enc);
+        device.queue.submit([enc.finish()]);
+        if (t) t.after((x) => ms.push(x));
+        await device.queue.onSubmittedWorkDone();
+      }
+      await new Promise((r) => setTimeout(r, 100));
+      tex.destroy();
+      return ms.length ? ms.reduce((a, b) => a + b, 0) / ms.length : null;
     },
     // Kinds (0 sky, 1 disk, 2 hole) of the first thing each (alpha, beta) ray meets, no disk.
     async probe(ab) {
@@ -556,6 +633,7 @@ export async function create(canvas, opts = {}) {
       clearTimeout(pending);
       eng?.destroy();
       eng = null;
+      off?.destroy();
       for (const b of [statBuf, ttabBuf, noiseBuf, frameBuf, viewBuf]) b.destroy();
       ctx.unconfigure();
       if (ownDevice) device.destroy();

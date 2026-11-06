@@ -25,6 +25,10 @@ const q = new URLSearchParams(location.search);
 const [W, H] = (q.get('size') ?? '1920x1080').split('x').map(Number);
 const skip = +(q.get('skip') ?? 300);
 const fps = +(q.get('fps') ?? 60);
+// Reference: applive_WxH.rgba = the offline renderer tracing with the metered exposure, as the live
+// app's presenter does; app_WxH.rgba = the offline renderer as committed (traces with exposure 1:
+// pair it with &texpo=1).
+const refName = q.get('ref') ?? (q.has('texpo') ? 'app' : 'applive');
 const log = document.getElementById('log');
 const out = [];
 const say = (s) => { out.push(s); log.textContent = out.join('\n'); };
@@ -34,7 +38,7 @@ canvas.height = H;
 const result = { size: [W, H], skip, fps };
 window.result = result;
 try {
-  const e = await create(canvas, { noTrace: true });
+  const e = await create(canvas, { noTrace: true, fragment: q.get('fragment') === '1', direct: q.get('direct') === '1' });
   window.cygnus = e;
   e.verify.step(skip, (0.008 * 30) / fps);
   const t0 = performance.now();
@@ -47,8 +51,8 @@ try {
   result.exposure = s.exposure;
   say(`trace ${W}x${H}: ${(result.traceWallMs / 1000).toFixed(3)} s wall (incl. meter), ${s.traceGpuMs == null ? '–' : (s.traceGpuMs / 1000).toFixed(3)} s GPU, ${s.traceTiles} tiles, exposure ${s.exposure.toFixed(4)}, t ${s.simTimeM.toFixed(3)} M`);
   const px = await e.verify.readRGBA();
-  await fetch(`out/web_${W}x${H}.rgba`, { method: 'PUT', body: px });
-  const ref = await fetch(`out/app_${W}x${H}.rgba`);
+  await fetch(`out/web_${refName}_${W}x${H}.rgba`, { method: 'PUT', body: px });
+  const ref = await fetch(`out/${refName}_${W}x${H}.rgba`);
   if (ref.ok) {
     const a = new Uint8Array(await ref.arrayBuffer());
     const n = W * H;
@@ -70,15 +74,15 @@ try {
       const v = Math.min(255, m * 32);
       diff[4 * i] = v; diff[4 * i + 1] = v; diff[4 * i + 2] = v; diff[4 * i + 3] = 255;
     }
-    await fetch(`out/diff_${W}x${H}.rgba`, { method: 'PUT', body: diff });
+    await fetch(`out/diff_${refName}_${W}x${H}.rgba`, { method: 'PUT', body: diff });
     Object.assign(result, {
       pixels: n, exactPct: (100 * exact) / n, within1Pct: (100 * within1) / n, within8Pct: (100 * within8) / n,
       maxLevel: maxd, worstAt: [worst % W, Math.floor(worst / W)], meanAbsLevel: sum / (3 * n),
       maxDiffHistLog2: hist,
     });
-    say(`vs app (offline_render_bh, same flags): ${result.exactPct.toFixed(4)}% pixels identical, ${result.within1Pct.toFixed(4)}% within 1 level, ${result.within8Pct.toFixed(4)}% within 8, max ${maxd} levels at (${result.worstAt}), mean |d| ${result.meanAbsLevel.toExponential(3)} levels/channel`);
+    say(`vs ${refName}_${W}x${H} (offline_render_bh, same flags): ${result.exactPct.toFixed(4)}% pixels identical, ${result.within1Pct.toFixed(4)}% within 1 level, ${result.within8Pct.toFixed(4)}% within 8, max ${maxd} levels at (${result.worstAt}), mean |d| ${result.meanAbsLevel.toExponential(3)} levels/channel`);
     say(`  max-channel diff histogram [0, 1, 2-3, 4-7, 8-15, 16-31, 32-63, 64-127, 128+]: ${hist.join(' ')}`);
-  } else say(`no out/app_${W}x${H}.rgba to compare against`);
+  } else say(`no out/${refName}_${W}x${H}.rgba to compare against`);
   if (q.get('contour') === '1') {
     const c = await e.verify.contour();
     result.contour = { ...c, offsets: undefined };
@@ -87,6 +91,15 @@ try {
   }
   const frames = +(q.get('frames') ?? 0);
   if (frames > 0) {
+    // rAF stops while the page (or the browser pane showing it) is hidden: then a 20 ms timer
+    // drives the frames. Whichever fires first wins; `timerFrames` counts the timer's.
+    let timerFrames = 0;
+    const next = (f) => {
+      let fired = false;
+      const go = (now, viaTimer) => { if (fired) return; fired = true; if (viaTimer) timerFrames++; f(now); };
+      requestAnimationFrame((now) => go(now, false));
+      setTimeout(() => go(performance.now(), true), 20);
+    };
     let last = performance.now();
     let k = 0;
     const t1 = performance.now();
@@ -94,16 +107,17 @@ try {
       const tick = (now) => {
         e.frame(now / 1000, (now - last) / 1000);
         last = now;
-        if (++k < frames) requestAnimationFrame(tick); else res();
+        if (++k < frames) next(tick); else res();
       };
-      requestAnimationFrame(tick);
+      next(tick);
     });
     await new Promise((r) => setTimeout(r, 300));
     const st = e.stats();
     result.shadeGpuMs = st.gpuMs;
     result.shadeCpuMs = st.cpuMs;
+    result.timerFrames = timerFrames;
     result.fps = frames / ((performance.now() - t1 - 300) / 1000);
-    say(`shade ${W}x${H}: GPU ${st.gpuMs?.toFixed(3)} ms/frame (mean of last 120), CPU ${st.cpuMs?.toFixed(3)} ms/frame, ${result.fps.toFixed(1)} fps over ${frames} frames`);
+    say(`shade ${W}x${H}: GPU ${st.gpuMs?.toFixed(3)} ms/frame (mean of last 120), CPU ${st.cpuMs?.toFixed(3)} ms/frame, ${result.fps.toFixed(1)} fps over ${frames} frames${timerFrames ? ` (${timerFrames} timer-driven: page not visible)` : ''}, ${q.get('fragment') === '1' ? 'fragment' : q.get('direct') === '1' ? 'compute into the canvas texture' : 'compute + copy to the canvas'} shade`);
   }
   result.done = true;
 } catch (err) {

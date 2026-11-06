@@ -195,6 +195,9 @@ struct View {
 @group(1) @binding(5) var<uniform> frw: array<vec4u, 83>;
 @group(1) @binding(6) var<uniform> v: View;
 @group(1) @binding(7) var shade_out: texture_storage_2d<rgba8unorm, write>;
+// The canvas's own texture, written by bh_shade_canvas every frame: rgba8unorm, or rgba16float for
+// an HDR canvas (cygnus.js substitutes the format at the marker).
+@group(2) @binding(0) var canvas_out: texture_storage_2d<rgba8unorm /*CANVAS_FORMAT*/, write>;
 
 // ---------------------------------------------------------------- helpers
 
@@ -1257,7 +1260,17 @@ fn bh_shade(@builtin(global_invocation_id) gid: vec3u) {
     textureStore(shade_out, gid.xy, shadeOut(gid.x, gid.y));
 }
 
-// The same shade as a fragment shader: one pass straight into the canvas's texture.
+// The same shade straight into the canvas texture (what frame() runs).
+@compute @workgroup_size(16, 8)
+fn bh_shade_canvas(@builtin(global_invocation_id) gid: vec3u) {
+    if (gid.x >= v.out_w || gid.y >= v.out_h) {
+        return;
+    }
+    textureStore(canvas_out, gid.xy, shadeOut(gid.x, gid.y));
+}
+
+// The same shade as a fragment shader (opts.fragment): measured 2.3x slower than the compute
+// kernel at 3024x1964 in Chrome on an M3, kept for canvases without storage usage.
 @vertex
 fn vs_full(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
     let q = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
@@ -1276,4 +1289,10 @@ fn bh_probe(@builtin(global_invocation_id) gid: vec3u) {
     }
     var ray = startRay(probe_ab[gid.x].x, probe_ab[gid.x].y);
     probe_kind[gid.x] = traceNext(&ray, false).kind;
+}
+
+// Does nothing: a non-empty pass after the canvas copy carries the end timestamp of a frame
+// (an empty pass's timestamps may be skipped).
+@compute @workgroup_size(1)
+fn bh_nop() {
 }
