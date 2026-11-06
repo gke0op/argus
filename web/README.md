@@ -169,6 +169,36 @@ seed `0x5EED`, the date pinned to 2026-10-20T12:00:00Z), and reports:
   the share of pixels within 0, 1, 2, 4, 8... levels), with `<Theme>_web.png` and
   `<Theme>_diff.png` (the difference x 8) written to `--out`.
 
+## Verified on this branch
+
+Chrome 157, Apple M3 (MacBook Pro 14", ProMotion), 2026-11-06. **Match:** the last of 120
+harness frames (1920x1200, dt = 1/30 s, seed `0x5EED`, date 2026-10-20T12:00:00Z) against the
+Metal harness PNG of the same frame; differences in 0..255 levels per channel; distinct and
+animated pixels are the harness's own gates (Metal's count in brackets where it differs).
+**GPU ms:** web median from timestamp queries and Metal's Avg GPU Frame, measured back to back
+per theme at 1920x1200. **Live:** `index.html` full screen in Chrome (3024x1786 device pixels,
+below the notch), 240 frames at 120 Hz; a late frame took over 1.5x the median interval.
+
+| Theme | Max diff | Pixels exact | Distinct | Animated | GPU web / Metal (ms) | Live GPU ms | Late frames |
+|---|---|---|---|---|---|---|---|
+| Tutorial_Tides | 1 | 99.9997% | 2,297,890 | 1,545,270 | 1.55 / 1.09 | 3.13 | 0/240 |
+| Tutorial_Reef | 1 | 100% | 2,254,731 | 965,553 | 1.82 / 1.95 | 1.44 | 0/240 |
+| Night_Tide | 3 | 99.9854% | 2,291,509 (2,291,508) | 268,083 (268,084) | 2.84 / 2.60 | 6.59 | 11/240 |
+| Roulette_Chrome | 1 | 99.9988% | 2,277,228 | 262,092 | 1.73 / 2.02 | 6.69 | 12/240 |
+| Ebru_Studio | 1 | 99.9942% | 2,298,489 | 1,279,707 (1,279,708) | 1.12 / 1.24 | 3.20 | 0/240 |
+| Orion_Nebula | 1 | 99.9965% | 2,303,800 | 1,017,011 (1,017,002) | 2.24 / 2.21 | 5.64 | 0/240 |
+| Lizard_Island | 3 | 99.9969% | 2,303,895 | 1,822,561 (1,822,562) | 3.37 / 3.11 | 7.87 | 49/240 |
+| Aventurine_Horoscope | 2 | 99.9993% | 2,282,194 | 94,860 | 1.52 / 1.56 | 3.05 | 0/240 |
+| Phosphor_Terminal | 1 | 99.9993% | 2,288,135 | 75,742 (75,741) | 1.60 / 1.24 | 3.61 | 0/240 |
+
+Every theme passes the gates (no NaN/Inf, opaque, animated). Every pixel of every theme is
+within 1 level except a handful in Night_Tide, Lizard_Island and Aventurine_Horoscope (at most
+3 levels): rounding flips where WGSL's transcendentals differ by an ulp from Metal's fast-math
+ones. At frame 2 Night_Tide has 7 isolated pixels up to 45 levels (reflected star points
+behind finite-difference normals); they do not persist. Lizard_Island, Roulette_Chrome and
+Night_Tide come close to the 8.33 ms budget of a 120 Hz frame at 5.4 million pixels and drop
+some frames there; their simulations stay on the 30 Hz tick, so motion is unaffected.
+
 ## Browser notes
 
 Tested here: Chrome 157 on macOS (Apple M3), headed and headless. The Safari and Firefox lines

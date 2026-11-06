@@ -24,7 +24,7 @@ const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/M
 const args = { theme: 'Tutorial_Tides', frames: 120, width: 1920, height: 1200, seed: '0x5EED', date: '2026-10-20T12:00:00Z', timing: 60, out: path.join(os.tmpdir(), 'argus-verify'), timeout: 600 };
 for (let i = 2; i < process.argv.length; i++) {
   const k = process.argv[i].replace(/^--/, '');
-  if (k === 'headed') { args.headed = true; continue; }
+  if (k === 'headed' || k === 'fullscreen') { args[k] = true; continue; }
   args[k] = process.argv[++i];
 }
 fs.mkdirSync(args.out, { recursive: true });
@@ -141,7 +141,7 @@ const chrome = spawn(CHROME, [
   ...(args.headed ? [] : ['--headless=new']), '--enable-unsafe-webgpu', '--enable-webgpu-developer-features',
   '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
   '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
-  ...(args.headed ? ['--window-size=1512,945', '--window-position=0,0'] : []), 'about:blank',
+  ...(args.headed ? (args.fullscreen ? ['--start-fullscreen'] : ['--window-size=1512,945', '--window-position=0,0']) : []), 'about:blank',
 ], { stdio: ['ignore', 'ignore', 'pipe'] });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let cleaned = false;
@@ -197,7 +197,7 @@ if (args.live) {
   for (let i = 0; i < 300 && !loaded; i++) await sleep(50);
   await sleep(+args.live * 1000);
   const v = await evaluate(`JSON.stringify((() => { const e = window.__engine && window.__engine(); if (!e) return { error: document.getElementById('err').textContent || 'no engine' };
-    const cv = document.getElementById('c'); return { theme: e.name, dpr: devicePixelRatio, css: [cv.clientWidth, cv.clientHeight], canvasPx: [cv.width, cv.height], stats: e.stats(), info: e.info, hud: document.getElementById('read').innerText, err: document.getElementById('err').textContent, sources: e.statsSources() }; })())`, 10000);
+    const cv = document.getElementById('c'); return { theme: e.name, dpr: devicePixelRatio, css: [cv.clientWidth, cv.clientHeight], canvasPx: [cv.width, cv.height], frames: (() => { const ft = window.__frameTimes ? window.__frameTimes() : []; const so = [...ft].sort((a, b) => a - b); const med = so[so.length >> 1] || 0; return { n: ft.length, medianMs: med, p95Ms: so[Math.floor(so.length * 0.95)] || 0, late: ft.filter((x) => x > med * 1.5).length }; })(), stats: e.stats(), info: e.info, hud: document.getElementById('read').innerText, err: document.getElementById('err').textContent, sources: e.statsSources() }; })())`, 10000);
   const shot = await send('Page.captureScreenshot', { format: 'png' }, 30000);
   if (shot.result?.data) fs.writeFileSync(path.join(args.out, `${args.theme}_live.png`), Buffer.from(shot.result.data, 'base64'));
   const r = v ? JSON.parse(v) : { error: 'evaluate failed' };

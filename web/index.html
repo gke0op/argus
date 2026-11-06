@@ -102,6 +102,7 @@ addEventListener('keydown', (e) => { if (e.key === 'h' && e.target.tagName !== '
 try { await getDevice(); } catch (e) { $('err').textContent = String(e.message ?? e); }
 await load();
 window.__engine = () => engine;
+window.__frameTimes = () => [...frameTimes];
 </script>
 </body>
 </html>
