@@ -127,6 +127,7 @@
 
       <div class="result" id="zigResult">
         <div class="verdict"><span class="badge run" id="zigBadge">RUNNING</span><span id="zigTitle"></span><span class="progress" id="zigPhase" role="status" aria-live="polite"></span><span class="progress" id="zigElapsed" aria-hidden="true"></span><button type="button" id="zigCancel" hidden>Cancel</button></div>
+        <div class="cmp" id="zigCmp" hidden></div>
         <div class="diag" id="zigDiag" hidden></div>
         <div class="row-btns" id="zigMore" hidden><button type="button" id="zigGatesAnyway"></button></div>
         <div class="gatewrap"><table class="gates" id="zigGates"><tbody></tbody></table></div>
@@ -137,6 +138,13 @@
         <h3 class="sub-h">Harness report</h3>
         <pre class="report" id="zigReport"></pre>
         <p class="small mute" id="zigNote8">Gate 8 here times this browser on this machine; leaderboard times are the native harness on an M3.</p>
+      </div>
+
+      <div id="live" class="live">
+        <h2 class="step-h"><span class="n" aria-hidden="true">3</span>Submissions, live</h2>
+        <p class="small mute">Every theme a pull request adds to <code>bench/submissions/</code>, by model, a few minutes after it is opened. The native harness on the pull request gives the official verdict. The reference is the same theme graded in CI by this page’s compiler; <b>Re-grade here</b> must reproduce its module (SHA-256) and gates 1–7 under the same ruler, so nobody has to take the board’s word for it.</p>
+        <div class="row-btns toolbar"><select id="liveModel" aria-label="Model" hidden></select><span class="small mute" id="liveStatus" role="status">loading the feed…</span></div>
+        <div class="tablewrap"><table class="live-t"><thead><tr><th>Model</th><th>Theme</th><th>Pull request</th><th>Status</th><th>Native</th><th>Reference</th><th>Your browser</th></tr></thead><tbody></tbody></table></div>
       </div>
     </section>
 

@@ -170,6 +170,7 @@ function resetZigResult(title) {
   $('zigLiveCap').textContent = 'Live, after the gates.';
   $('zigFinalCap').textContent = 'Frame 120 at 1920×1200, as the gates saw it.';
   $('zigNote8').textContent = NOTE8_PREBUILT;
+  $('zigCmp').hidden = true;
   $('zigHint').dataset.stale = '';
   drawFinal($('zigFinal'), null);
   $('zigResult').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -362,6 +363,10 @@ async function compileAndGrade(name, source, title) {
     if (cancelled(r)) return;
     const info = c.info || {};
     const extra = { compile: { semaMs: Math.round(c.gate1.ms || 0), buildMs: c.build ? Math.round(c.build.ms) : null, wallMs: Math.round(c.wallMs || 0), wasmKB: c.wasm ? Math.round(c.wasm.length / 1024) : null, cachedDownloads: info.cachedDownloads, downloadBytes: info.downloadBytes, restoredCacheFiles: info.restoredCacheFiles, cacheDropped: info.cacheDropped || null, retriedWithoutCache: !!c.retriedWithoutCache, memMB: Math.round((c.memBytes || 0) / 1048576), ok: c.ok, gate1: c.gate1.ok } };
+    // The module's SHA-256 and the ruler it was built under: two grades under the same ruler
+    // must give the same module (the live board compares them, live.js).
+    extra.compile.ruler = info.ruler || null;
+    extra.compile.moduleSha256 = c.wasm ? [...new Uint8Array(await crypto.subtle.digest('SHA-256', c.wasm))].map((b) => b.toString(16).padStart(2, '0')).join('') : null;
     window.__zigc = extra.compile;
     const cacheNote = info.cacheDropped ? ` · the saved compiler cache was dropped (${info.cacheDropped})` : c.retriedWithoutCache ? ' · retried without the saved compiler cache' : '';
     if (c.crash) {
@@ -614,6 +619,24 @@ $('zigShare').addEventListener('click', async (e) => {
     shared.source.then((src) => { $('wgslSrc').value = src; $('runWgsl').click(); }, () => {});
   }
 }
+
+// ---- The live board (live.js): submissions from pull requests, re-graded here on request ----
+import('./live.js').then((m) => m.mountLive({
+  root: $('live'),
+  /// Compile and grade `source` as `name` in this page, as a person would; resolves to the run's
+  /// result (window.__bench) and compile facts (window.__zigc).
+  grade: async (name, source, title) => {
+    showTab('tab-zig', false);
+    $('zigName').value = name;
+    $('zigName').dispatchEvent(new Event('input'));
+    $('zigSrc').value = source;
+    window.__bench = null; window.__zigc = null;
+    await compileAndGrade(name, source, title);
+    return { bench: window.__bench, zigc: window.__zigc };
+  },
+  /// The comparison with the reference, shown on the result too.
+  shown: (res) => { const el = $('zigCmp'); el.className = `cmp ${res.tone}`; el.textContent = `Live board: ${res.text}`; el.hidden = false; },
+})).catch((e) => { const el = $('liveStatus'); if (el) el.textContent = `The live board did not load: ${e.message ?? e}`; });
 
 // For web/zigc/verify.html, which drives this page in a frame.
 window.__benchReady = true;

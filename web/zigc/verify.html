@@ -22,6 +22,9 @@
   and last a reload and the skeleton again (the cached run). Every case has a time limit. The
   result is POSTed to /__report when web/zigc/verify.mjs serves the page.
   ?only=NAME runs one case (or one scenario); ?skip=pathological,scenarios leaves groups out.
+  ?live=FEED&expect=NAME:tone,... instead re-grades rows of the live board (site/assets/live.js) with
+  the bench page reading FEED (a same-origin path), and checks each comparison's tone (ok, bad,
+  info).
   ?extra=URL[,URL...] also runs these .zig files (same origin; kept outside the repo), each of
   which must pass gates 1-7, followed by the skeleton.
 -->
@@ -114,6 +117,36 @@ async function runCase(name, src, expect, limitS = 120, how = 'click') {
 }
 
 const out = { ua: navigator.userAgent, started: new Date().toISOString(), cases: [], cached: null };
+if (q.get('live')) {
+  // The live board: re-grade each expected row, check the comparison's tone.
+  try {
+    f.src = `../../bench/?feed=${encodeURIComponent(q.get('live'))}#live`;
+    await sleep(500);
+    await frameReady();
+    for (let i = 0; i < 100 && !w().__liveReady; i++) await sleep(100);
+    for (let i = 0; i < 100 && !d().querySelector('#live button.regrade'); i++) await sleep(100);
+    for (const pair of (q.get('expect') || '').split(',').filter(Boolean)) {
+      const [name, tone] = pair.split(':');
+      const tr = [...d().querySelectorAll('#live tbody tr')].find((t) => t.querySelector('code')?.textContent === name);
+      if (!tr) { out.cases.push({ name, ok: false, error: 'no such row' }); log(`BAD  ${name}: no such row`); continue; }
+      w().__live = null;
+      const t0 = performance.now();
+      tr.querySelector('button.regrade').click();
+      while (!(w().__live && w().__live.entry.name === name) && performance.now() - t0 < 120000) await sleep(100);
+      const res = w().__live?.result;
+      const ok = res?.tone === tone;
+      out.cases.push({ name, expect: tone, ok, tone: res?.tone ?? null, text: res?.text ?? 'no result', secs: Number(((performance.now() - t0) / 1000).toFixed(1)), module: w().__live?.mine?.moduleSha256 ?? null, ruler: w().__live?.mine?.ruler ?? null });
+      log(`${ok ? 'ok  ' : 'BAD '} ${name.padEnd(18)} expect ${tone.padEnd(5)} got ${String(res?.tone).padEnd(5)} | ${res?.text ?? ''}`);
+      await sleep(300);
+    }
+    out.pass = out.cases.length > 0 && out.cases.every((c) => c.ok);
+    log(out.pass ? 'ALL OK' : 'SOME BAD');
+  } catch (e) { out.error = String(e.stack || e); log('ERROR ' + out.error); }
+} else await runAll();
+window.__verify = out;
+fetch('/__report', { method: 'POST', body: JSON.stringify(out) }).catch(() => {});
+
+async function runAll() {
 const want = (n) => !only || only === n;
 try {
   await frameReady();
@@ -211,8 +244,7 @@ try {
   out.error = String(e.stack || e);
   log('ERROR ' + out.error);
 }
-window.__verify = out;
-fetch('/__report', { method: 'POST', body: JSON.stringify(out) }).catch(() => {});
+}
 </script>
 </body>
 </html>

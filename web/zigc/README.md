@@ -111,6 +111,16 @@ them differ from native Zig, and the page says why:
 
 200,000 nested parentheses crash native Zig too (stack overflow).
 
+## The ruler and the reference grade
+
+`build.sh` writes `ruler.txt` (the SHA-256 of zig.wasm, of the uncompressed std bundle and of
+every support source) and its SHA-256 as `ruler` in `manifest.json`. A compile is deterministic:
+under one ruler, the same source gives the same module byte for byte in Node, Chrome and Safari.
+`grade.mjs` grades files as the page does (the same speed probe and deferral, the gates in
+Workers, a 180 s limit per file) and records the module's SHA-256 and gates 1-7. The Bench
+workflow runs it on every pull request with the live site's ruler (`--site`), and the live
+board (`site/assets/live.js`, bench/submissions/README.md) compares a visitor's re-grade with it.
+
 ## The standard library bundle
 
 Zig runs AstGen on every file reachable through an `@import("x.zig")` string, analysed or not,
@@ -157,5 +167,6 @@ skipped: Gate 1's type-check goes from 1.2 s to under 0.1 s in Node.
 | `build.sh` | `web/zigc/build/`: `zig.wasm.gz`, `zig-lib.bin.gz`, support sources, `manifest.json` |
 | `node.mjs` | run zig.wasm in Node through `wasi.js` with any arguments |
 | `test.mjs` | the page's compile and gates on the fixtures and `cases.js`, in Node (`make web-zigc-test`) |
+| `grade.mjs` | the reference grade: files graded as the page does, under a site's or a build's ruler, to JSON |
 | `cases.js` | the pathological inputs; `test.mjs --extra FILE` and `verify.html?extra=URL` add themes kept outside the repo (each must pass gates 1-7, then the skeleton) |
-| `verify.html`, `verify.mjs` | drive the real bench page in a browser and collect the verdicts |
+| `verify.html`, `verify.mjs` | drive the real bench page in a browser and collect the verdicts (`?live=FEED&expect=NAME:tone,...`: the live board's comparisons) |

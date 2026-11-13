@@ -69,6 +69,7 @@ jobs:
           .toolchain/zig test site/tools/render.zig
           .toolchain/zig test site/tools/serve.zig
           .toolchain/zig test web/zigc/bundle.zig
+          .toolchain/zig test bench/feed.zig
 
       # make web-wasm-all: the wasm themes, the BENCHMARK.md skeleton and the gate fixtures, each
       # as NAME.mt.wasm (threads) and NAME.st.wasm; then the pages and the engines into _site/.
