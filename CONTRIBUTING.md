@@ -110,7 +110,26 @@ Purely artistic themes need no citations, just a header that says what you see.
 - **Code:** no third-party code is in the repository today. If you want to add some, ask in an
   issue first.
 
-### 7. Theme PR checklist
+### 7. On the website
+
+A theme in a pull request runs in the browser before anyone merges it, and on the home page
+<https://gke0op.github.io/argus/> after:
+
+- **Zig** (`themes/*.zig`, or `bench/submissions/*.zig` from the bench page's button): the Bench
+  workflow runs the native harness and comments the verdict with two links, one that runs the
+  theme on the home page and one that grades it on the bench. Once merged, the site builds it to
+  wasm and the home page's picker lists it. `make share THEME=...` prints the same links locally.
+- **Metal** (`themes/*.metal`): the workflow runs the harness on the runner's GPU. A browser
+  can't run Metal, so a Metal theme reaches the web through its WGSL port,
+  `web/themes/<Name>.wgsl` ([web/README.md](web/README.md) has the contract, and the nine shipped
+  ports are worked examples). Add the port to the same pull request and it gets the links and,
+  once merged, a place in the picker. Without one, the theme still ships in the app.
+- **WGSL** alone (`web/themes/*.wgsl`) runs on the website only.
+
+The picker's caption is the first sentence of the file's header comment, so make it say what
+the theme is.
+
+### 8. Theme PR checklist
 
 - [ ] One file in `themes/` (plus a data file, if any), named `<Author>_<Name>`.
 - [ ] `make harness THEME=...` passes; output pasted in the PR, including the paced cost for

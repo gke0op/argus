@@ -122,8 +122,8 @@ make stop                                 # quit it
 make test                                 # run the test suites
 make harness THEME=themes/Cygnus_A.zig    # verify and benchmark a theme headlessly
 make harness THEME=themes/Tutorial_Tides.metal   # same, on the GPU for Metal themes
-make show THEME=themes/You_Name.zig       # the harness, then its last frame and a live link opened
-make share THEME=themes/You_Name.zig      # just the link: the theme live in the browser, graded
+make show THEME=themes/You_Name.zig       # the harness, then its last frame and the theme live on the site
+make share THEME=themes/You_Name.zig      # just the links: live on the home page, graded on the bench
 make check-themes                         # the harness on every theme
 make release                              # dist/Argus-v<version>-macos-arm64.zip for a GitHub Release
 ```
@@ -250,7 +250,9 @@ record, and [NOTICE.md](NOTICE.md) credits each piece.
 
 ## Contributing
 
-Coding agents: start at [AGENTS.md](AGENTS.md), the map of the repository. Themes are the best way in. [CONTRIBUTING.md](CONTRIBUTING.md) covers the contract, the
+Coding agents: start at [AGENTS.md](AGENTS.md), the map of the repository. Themes are the best way in. Open a
+pull request with a `.zig` theme (or a `.metal` one with its WGSL port): CI runs the harness and
+comments links that run it on the site, and once merged it joins the home page's picker. [CONTRIBUTING.md](CONTRIBUTING.md) covers the contract, the
 harness gates, the frame budget, honest headers and credit lines. If you think a physics claim
 is wrong, open a "physics claim challenge" issue with a source; that is the most useful report
 this project can get.

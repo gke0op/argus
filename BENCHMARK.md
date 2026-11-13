@@ -50,9 +50,9 @@ shows the user what it made. The prompt is one line:
 5. **Look at it yourself.** `make harness THEME=... OUT=/tmp/<Name>.png` writes the last frame. Open
    it and judge it. Passing the gates proves the theme runs, not that it looks like anything.
 6. **Show it to the user. Required.** Run `make show THEME=themes/<Model>_<Name>.zig`. It runs the
-   harness, opens the last frame in the image viewer, and opens a link that plays the theme live in
-   the browser, compiled and graded there (the source rides in the link; nothing is uploaded).
-   `make share THEME=...` prints the link alone. Then put the render in front of the user wherever
+   harness, opens the last frame in the image viewer, and opens a link that plays the theme live on
+   the home page, full screen (the source rides in the link; nothing is uploaded). It also prints
+   a second link that grades it on the bench page. `make share THEME=...` prints both links alone. Then put the render in front of the user wherever
    they are talking to you: attach or display the PNG if your interface can show images, and give
    the live link. If nothing could open (a server, a container), say so and hand over the PNG path
    and the link. On a Mac with Argus, also tell them how to keep it: drop the file on a Space from

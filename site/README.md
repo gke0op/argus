@@ -13,7 +13,10 @@ Vanilla HTML, CSS and JavaScript (no framework, no npm), on top of the three eng
 | `assets/engines.js` | The theme list and `mount()`: any engine on a fresh canvas, sized to device pixels, on rAF |
 | `assets/home.js`, `assets/bench.js`, `assets/ui.js` | The pages' scripts |
 | `assets/wgsl-harness.js` | `src/theme_harness.zig`'s Metal harness, on WebGPU |
+| `assets/sources.js` | A theme from a share link (`#zig=`, `#wgsl=`), a dropped, picked or pasted file, to what `mount()` runs; Zig is compiled in the page. Used by both pages |
+| `assets/community.json` | Built: every merged community theme for the home page's picker (`tools/community.zig`) |
 | `tools/render.zig` | Fills the leaderboard table and the zero-shot prompt into the HTML from `BENCHMARK.md` |
+| `tools/community.zig` | Writes `assets/community.json`: tracked `themes/*.zig` and `bench/submissions/*.zig` that built to wasm, and `web/themes/*.wgsl`, each with its header's first sentence |
 | `tools/serve.zig` | A local server that mounts the site under `/argus/` with no COOP/COEP, as Pages does |
 | `tools/check.mjs` | Headless Chrome check: load size, time to first frame, every theme, the bench verdicts, phone width, no-WebGPU fallback |
 | `build.sh` | Assembles `_site/`: the pages, `web/`, the wasm builds, `coi-serviceworker.js` at the root |

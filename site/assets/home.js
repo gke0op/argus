@@ -2,10 +2,12 @@
 // leaderboard.
 import { THEMES, byId, mount, probeWebGPU } from './engines.js';
 import { sortable, copyButtons } from './ui.js';
+import { readShare, shareFragment, kindOf, themeName, unfence, zigToLive, wgslToLive } from './sources.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), picker = $('picker'), caption = $('caption'), teleBody = $('teleBody'), poster = $('poster');
 const hero = $('hero');
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const q = new URLSearchParams(location.search);
 
 copyButtons();
@@ -37,7 +39,90 @@ function chips() {
     b.addEventListener('click', () => select(t.id));
     picker.append(b);
   }
+  // Your own theme: a .zig (compiled here by Zig 0.17.0) or a .wgsl (WebGPU). So is a drop or a
+  // paste anywhere on the page, and a share link (#zig= or #wgsl=, make share).
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'chip yours';
+  b.innerHTML = 'Run yours <small>.zig · .wgsl</small>';
+  b.title = 'Run a .zig or .wgsl theme here (or drop or paste one anywhere on the page)';
+  b.addEventListener('click', () => filePick.click());
+  picker.append(b);
 }
+const filePick = Object.assign(document.createElement('input'), { type: 'file', accept: '.zig,.wgsl,.metal,text/plain', hidden: true });
+document.body.append(filePick);
+filePick.addEventListener('change', () => { const f = filePick.files[0]; filePick.value = ''; if (f) f.text().then((text) => runFile(f.name, text)); });
+
+// ---- your theme: a share link, a dropped, picked or pasted file -------------------------------
+let yoursGen = 0;   // bumped by every start (yours or a chip): a theme still compiling for an older one is dropped
+function runFile(fileName, text) {
+  const src = unfence(text);
+  const kind = kindOf(fileName, src);
+  hero.scrollIntoView({ block: 'start' });
+  runYours(kind, themeName(fileName || (kind === 'wgsl' ? 'Your_Theme.wgsl' : 'Your_Theme.zig')), Promise.resolve(src));
+}
+async function runYours(kind, name, sourceP) {
+  const gen = ++yoursGen;
+  loading = `yours:${name}`;
+  note = ''; err = ''; errShown = false;
+  current?.stop();
+  current = null;
+  for (const b of picker.querySelectorAll('.chip')) b.setAttribute('aria-pressed', String(b.classList.contains('yours')));
+  const say = (html) => { if (gen === yoursGen) caption.innerHTML = `<b>${esc(name)}</b> · ${html}`; };
+  let benchLink = 'bench/';
+  try {
+    const src = await sourceP;
+    if (kind === 'metal') throw new Error('Metal themes run in the Mac app. In a browser a theme needs its WGSL port (web/README.md has the contract), or write it in Zig');
+    if (kind !== 'zig' && kind !== 'wgsl') throw new Error('this is not a .zig or .wgsl theme');
+    const frag = await shareFragment(kind, name, src);
+    benchLink = `bench/#${frag}`;
+    // The address bar holds a link to this theme (reload or share it); a chip clears it.
+    history.replaceState(null, '', `${location.pathname}${location.search.replace(/([?&])theme=[^&]*&?/, '$1').replace(/[?&]$/, '')}#${frag}`);
+    let theme, opts = {};
+    if (kind === 'zig') {
+      say('compiling in this page with Zig 0.17.0…');
+      ({ theme, opts } = await zigToLive(name, src, { onPhase: (p) => say(`${esc(p)}…`) }));
+    } else {
+      if (!gpu.ok) throw new Error(`a WGSL theme needs WebGPU, and ${gpu.why}`);
+      theme = wgslToLive(name, src);
+    }
+    if (gen !== yoursGen) return;
+    say('starting…');
+    const h = await mount(stage, theme, {
+      ...opts,
+      scale: (globalThis.devicePixelRatio || 1) * (half ? 0.5 : 1),
+      onFirstFrame: () => { if (firstFrameMs === null) firstFrameMs = performance.now(); poster.style.opacity = '0'; },
+      onError: (e) => { err = String(e.message ?? e); },
+    });
+    if (gen !== yoursGen) { h.stop(); return; }
+    current = h;
+    h.setPaused(!visible);
+    say(`${esc(theme.line)} <a href="${benchLink}">Grade it on the bench</a> · the address bar links to it.`);
+  } catch (e) {
+    if (gen !== yoursGen) return;
+    err = `${name}: ${e.message ?? e}${e.log ? `\n\n${String(e.log).slice(0, 2000)}` : ''}`;
+    say(`didn’t run: ${esc(e.message ?? e)}. <a href="${benchLink}">Open it on the bench</a> for the full report.`);
+    console.error(e);
+  } finally {
+    if (loading === `yours:${name}`) loading = null;
+  }
+}
+// Drop a file, or paste source outside a field, anywhere on the page.
+addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); });
+addEventListener('drop', (e) => {
+  const f = e.dataTransfer?.files?.[0];
+  if (!f) return;
+  e.preventDefault();
+  f.text().then((text) => runFile(f.name, text));
+});
+addEventListener('paste', (e) => {
+  if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable]')) return;
+  const text = e.clipboardData?.getData('text/plain') || '';
+  const kind = kindOf('', unfence(text));
+  if (kind !== 'zig' && kind !== 'wgsl') return;
+  e.preventDefault();
+  runFile('', text);
+});
 
 function mark(id) {
   for (const b of picker.querySelectorAll('.chip')) b.setAttribute('aria-pressed', String(b.dataset.id === id));
@@ -50,9 +135,11 @@ async function select(id, { replace = false } = {}) {
   if (!t || loading === id) return;
   if (t.kind !== 'wasm' && !gpu.ok) return;
   loading = id;
+  yoursGen++;
   mark(id);
   note = ''; err = ''; errShown = false;
   const u = new URL(location.href);
+  u.hash = '';
   u.searchParams.set('theme', id);
   history[replace ? 'replaceState' : 'pushState'](null, '', u);
   current?.stop();
@@ -162,9 +249,18 @@ let visible = true;
 new IntersectionObserver(([e]) => { visible = e.isIntersecting; current?.setPaused(!visible); }).observe(hero);
 
 gpu = await probeWebGPU();
+// Every merged theme the build found (site/tools/community.zig) joins the picker after the
+// curated ones: a pull request that adds a theme puts it here once it is merged.
+try {
+  const community = await (await fetch(new URL('community.json', import.meta.url))).json();
+  for (const t of community) if (!byId(t.id)) THEMES.push({ ...t, tag: 'community', line: t.line || 'A community theme.' });
+} catch { /* no list: the curated themes only */ }
 chips();
+const shared = readShare(location.hash);
 const want = q.get('theme');
 const first = (want && byId(want) && (gpu.ok || byId(want).kind === 'wasm')) ? want : gpu.ok ? 'Cygnus_A' : 'Tutorial_Tides_wasm';
 tele();
-await select(first, { replace: true });
+if (shared) await runYours(shared.kind, shared.name, shared.source);
+else await select(first, { replace: true });
+addEventListener('hashchange', () => { const s = readShare(location.hash); if (s) runYours(s.kind, s.name, s.source); });
 window.__site = { current: () => current, firstFrameMs: () => firstFrameMs, gpu: () => gpu, visible: () => visible };

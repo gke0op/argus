@@ -150,6 +150,7 @@ button:disabled { opacity: 0.45; cursor: default; }
 .chip small { font: 500 10px/1 var(--mono); color: var(--mute); letter-spacing: 0.03em; margin-left: 0.2em; }
 .chip[aria-pressed="true"] { color: var(--link); background: rgba(var(--vi), 0.16); border-color: rgba(var(--vi), 0.9); }
 .chip[aria-pressed="true"] small { color: rgba(var(--vi), 0.7); }
+.chip.yours { border-style: dashed; }
 .chip:disabled { opacity: 0.38; }
 
 /* Telemetry: a quiet instrument readout, top right. No blur over the canvas. */

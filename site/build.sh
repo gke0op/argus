@@ -62,4 +62,12 @@ cp BENCHMARK.md "$OUT/BENCHMARK.md"
 cp docs/media/social-card.png "$OUT/assets/social-card.png"
 touch "$OUT/.nojekyll"   # serve files as they are (no Jekyll pass on Pages)
 
+# The home page's community themes: every merged Zig theme that built to wasm above (make
+# web-wasm-all), and every WGSL theme in web/themes/ (site/tools/community.zig; the page skips
+# the ones it already lists).
+community_zig=$(git ls-files ':(glob)themes/*.zig' ':(glob)bench/submissions/*.zig' | grep -v -e argus_theme_sdk.zig -e '^themes/Cygnus_A.zig$' || true)
+# shellcheck disable=SC2086,SC2046
+"$ZIG" run site/tools/community.zig -- "$OUT/assets/community.json" web/wasm/build/manifest.json \
+    $community_zig $(git ls-files ':(glob)web/themes/*.wgsl')
+
 echo "site: $OUT ($(du -sh "$OUT" | cut -f1), $(find "$OUT" -type f | wc -l | tr -d ' ') files)"

@@ -32,23 +32,27 @@ kronos:
 harness:
 	$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $(THEME) --frames $(FRAMES) --out $(OUT) $(if $(SEED),--seed $(SEED)) $(if $(FPS),--fps $(FPS)) $(if $(STATS),--stats $(STATS)) $(if $(DATE),--date $(DATE))
 
-# A link that opens THEME on the ARGUS-BENCH page, compiled, running and graded in the browser.
-# The source rides in the URL fragment: nothing is uploaded (tools/share.zig).
+# Two links for THEME (.zig, or a .wgsl port): the home page, where it fills the screen, and the
+# ARGUS-BENCH page, where it is compiled, run and graded. The source rides in the URL fragment:
+# nothing is uploaded (tools/share.zig).
 share:
 	@$(ZIG) run tools/share.zig -- $(THEME)
 
 # The finished render, in front of the user (BENCHMARK.md, "Show it"): the harness's verdict, its
-# last frame opened in the image viewer, and the theme live in the browser through a share link.
-# Opens with `open` (macOS) or `xdg-open` (Linux); NO_OPEN=1, or neither present, only prints.
-# The exit status is the harness's: a FAIL is still shown, and still fails.
+# last frame opened in the image viewer, and the theme live on the home page through a share link
+# (the bench link, printed too, grades it in the browser). Opens with `open` (macOS) or
+# `xdg-open` (Linux); NO_OPEN=1, or neither present, only prints. The exit status is the
+# harness's: a FAIL is still shown, and still fails.
 SHOW_OUT ?= /tmp/$(basename $(notdir $(THEME))).png
 show:
 	@$(MAKE) --no-print-directory harness THEME=$(THEME) OUT=$(SHOW_OUT); status=$$?; \
-	url=$$($(ZIG) run tools/share.zig -- $(THEME)); \
+	links=$$($(ZIG) run tools/share.zig -- $(THEME)); \
+	home=$$(echo "$$links" | sed -n 1p); bench=$$(echo "$$links" | sed -n 2p); \
 	opener=$$(command -v open || command -v xdg-open || true); \
 	echo "Last frame : $(SHOW_OUT)"; \
-	echo "Live       : $$url"; \
-	if [ -n "$$opener" ] && [ -z "$(NO_OPEN)" ]; then "$$opener" "$(SHOW_OUT)"; "$$opener" "$$url"; \
+	echo "Live       : $$home"; \
+	echo "Graded     : $$bench"; \
+	if [ -n "$$opener" ] && [ -z "$(NO_OPEN)" ]; then "$$opener" "$(SHOW_OUT)"; "$$opener" "$$home"; \
 	else echo "Nothing opened here: put the PNG and the live link in front of the user."; fi; \
 	exit $$status
 
@@ -77,11 +81,16 @@ web-wasm:
 # Every theme the dev page lists, the BENCHMARK.md skeleton and the gate fixtures. A theme that
 # fails to compile is recorded (Gate 1) in build/NAME.compile.txt, not fatal. Then the manifest.
 WEB_WASM_THEMES ?= themes/cpu/Tutorial_Tides.zig themes/Cygnus_A.zig tests/fixtures/Fixture_Stateful.zig tests/fixtures/Fixture_Stateless.zig tests/fixtures/Fixture_Hang.zig $(sort $(wildcard tests/fixtures/Gate*.zig))
+# Every merged community theme (tracked themes/*.zig and bench/submissions/*.zig), built from a copy
+# next to the SDK, as the harness builds a submission; the home page lists those that compile.
+COMMUNITY_ZIG ?= $(filter-out themes/argus_theme_sdk.zig themes/Cygnus_A.zig,$(shell git ls-files ':(glob)themes/*.zig' ':(glob)bench/submissions/*.zig' 2>/dev/null))
+COMMUNITY_WGSL ?= $(shell git ls-files ':(glob)web/themes/*.wgsl' 2>/dev/null)
 web-wasm-all:
 	@mkdir -p $(WEB_WASM_OUT)/stage
 	@awk '/^### Minimal Working Skeleton/{s=1} s&&/^```zig/{c=1;next} c&&/^```/{exit} c' BENCHMARK.md > $(WEB_WASM_OUT)/stage/Bench_Skeleton.zig
 	@cp themes/argus_theme_sdk.zig $(WEB_WASM_OUT)/stage/argus_theme_sdk.zig
-	@for t in $(WEB_WASM_THEMES) $(WEB_WASM_OUT)/stage/Bench_Skeleton.zig; do \
+	@for t in $(COMMUNITY_ZIG); do cp $$t $(WEB_WASM_OUT)/stage/$$(basename $$t); done
+	@for t in $(WEB_WASM_THEMES) $(WEB_WASM_OUT)/stage/Bench_Skeleton.zig $(addprefix $(WEB_WASM_OUT)/stage/,$(notdir $(COMMUNITY_ZIG))); do \
 		n=$$(basename $$t .zig); \
 		if $(MAKE) -s web-wasm THEME=$$t > $(WEB_WASM_OUT)/$$n.compile.txt 2>&1; then echo "  ok    $$n"; else echo "  FAIL  $$n (Gate 1: compile; see $(WEB_WASM_OUT)/$$n.compile.txt)"; fi; \
 	done

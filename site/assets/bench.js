@@ -6,6 +6,7 @@
 //   WGSL: compiled by WebGPU and run through the Metal harness's checks (wgsl-harness.js).
 import { mount, probeWebGPU } from './engines.js';
 import { copyText } from './ui.js';
+import { unfence, shareLink, readShare, speedProbe } from './sources.js';
 
 const $ = (id) => document.getElementById(id);
 const REPO = 'gke0op/argus';
@@ -299,29 +300,6 @@ $('zigDiag').addEventListener('click', (e) => {
   ta.scrollTop = Math.max(0, l * lh - ta.clientHeight / 2);
 });
 
-/// One 320x200 step + draw, timed (after a first one): how fast this build is, before the gates
-/// spend 120 frames at 1920x1200 on it. undefined if it did not answer within 10 s (starting
-/// the Worker included), null if it failed; its Workers are always terminated.
-async function speedProbe(m, signal) {
-  const { startEngine } = await import(new URL('wasm/engine.js', WEB));
-  let eng = null, stop = false;
-  const work = (async () => {
-    eng = await startEngine({ module: m.module, threaded: false, threads: 1 });
-    if (stop) return undefined;
-    const { ptr } = await eng.leader.call('liveInit', { w: 320, h: 200, scale: 2 });
-    if (!ptr) return null;
-    await eng.leader.call('frame', { dt: 0.008, w: 320, h: 200, ptr });
-    return (await eng.leader.call('frame', { dt: 0.008, w: 320, h: 200, ptr })).cpuMs;
-  })().catch(() => null);
-  let t;
-  const r = await Promise.race([work, new Promise((res) => { t = setTimeout(() => res(undefined), 10000); signal.addEventListener('abort', () => res(undefined), { once: true }); })]);
-  clearTimeout(t);
-  stop = true;
-  eng?.terminate();
-  work.then(() => eng?.terminate());
-  return r;
-}
-
 const GATE_BUDGET_S = 90; // run the gates without asking when 120 frames at 1920x1200 take less
 
 /// What the page says when zig.wasm itself did not finish: a time limit, a crash, a dead Worker,
@@ -604,51 +582,36 @@ $('runWgsl').addEventListener('click', async () => {
   } finally { wgslBusy = false; }
 });
 
-// ---- Zig: share links ------------------------------------------------------------------------
+// ---- Zig: share links (sources.js) ------------------------------------------------------------
 // #zig=<the source as raw deflate, base64url>&name=<theme name>: tools/share.zig (make share) makes
 // one, and so does "Copy share link". The fragment never reaches the server; the theme compiles,
 // runs and is graded here, as if it had been dropped on the page.
-function unfence(s) {
-  const blocks = [...s.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1]);
-  return blocks.length ? blocks.sort((a, b) => b.length - a.length)[0] : s;
-}
-const b64urlToBytes = (b) => {
-  const s = atob(b.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (b.length % 4)) % 4));
-  return Uint8Array.from(s, (c) => c.charCodeAt(0));
-};
-const bytesToB64url = (u8) => {
-  let s = '';
-  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000));
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-};
-const viaStream = (bytes, stream) => new Response(new Blob([bytes]).stream().pipeThrough(stream));
-async function shareLink(name, src) {
-  const packed = new Uint8Array(await viaStream(src, new CompressionStream('deflate-raw')).arrayBuffer());
-  return `${location.origin}${location.pathname}#zig=${bytesToB64url(packed)}&name=${encodeURIComponent(name)}`;
-}
 $('zigShare').addEventListener('click', async (e) => {
   const src = unfence($('zigSrc').value);
   if (!src.trim()) { $('zigHint').textContent = 'Paste the model’s answer first, or drop a .zig file.'; return; }
-  const url = await shareLink(zigName(), src);
+  const url = await shareLink('zig', zigName(), src, 'bench/');
   await copyText(url, e.currentTarget);
   $('zigHint').textContent = 'The link is on your clipboard: it opens this theme here, compiled, running and graded.';
 });
 {
-  const shared = new URLSearchParams(location.hash.slice(1));
-  if (shared.has('zig')) {
-    const name = (shared.get('name') || 'Model_Theme').replace(/\.zig$/, '').replace(/[^A-Za-z0-9_]/g, '_');
+  const shared = readShare(location.hash);
+  if (shared?.kind === 'zig') {
     showTab('tab-zig', false);   // no history entry: the link stays in the address bar
-    $('zigName').value = name;
+    $('zigName').value = shared.name;
     $('zigName').dispatchEvent(new Event('input'));
-    viaStream(b64urlToBytes(shared.get('zig')), new DecompressionStream('deflate-raw')).text().then((src) => {
+    shared.source.then((src) => {
       $('zigSrc').value = src;
       $('zigResult').scrollIntoView?.({ block: 'start' });
-      return compileAndGrade(name, src, `${name}.zig (from a share link)`);
+      return compileAndGrade(shared.name, src, `${shared.name}.zig (from a share link)`);
     }, (err) => {
-      const r = beginRun(`${name}.zig (from a share link)`);
+      const r = beginRun(`${shared.name}.zig (from a share link)`);
       showDiagnostics(`This share link's theme could not be read (${err.message ?? err}). The link may be cut short: copy it whole.`, '', 'warn');
       endRun(r, 'the link could not be read');
     });
+  } else if (shared?.kind === 'wgsl') {
+    showTab('tab-wgsl', false);
+    $('wgslName').value = shared.name;
+    shared.source.then((src) => { $('wgslSrc').value = src; $('runWgsl').click(); }, () => {});
   }
 }
 

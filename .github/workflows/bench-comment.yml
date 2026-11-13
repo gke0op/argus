@@ -45,18 +45,38 @@ jobs:
             echo "### ARGUS-BENCH: native harness"
             echo
             if [ -s reports/verdicts.txt ]; then
-              while read -r name verdict; do
+              while read -r name ext verdict; do
                 name=$(printf '%s' "$name" | tr -cd 'A-Za-z0-9_')
+                ext=$(printf '%s' "$ext" | tr -cd 'a-z')
                 verdict=$(printf '%s' "$verdict" | tr -cd 'A-Z')
-                echo "**\`$name.zig\`: $verdict**"
+                [ -n "$name" ] || continue
+                if [ "$verdict" = LINK ]; then echo "**\`$name.$ext\`**"; else echo "**\`$name.$ext\`: $verdict**"; fi
                 echo
+                # The links come from the pull request's run: only the site's own link shape is
+                # posted (https, this site, a base64url fragment, a plain name), and only if it
+                # fits a comment (65,536 characters); otherwise make share gives it locally.
+                if [ -f "reports/$name.links.txt" ]; then
+                  home=$(sed -n 1p "reports/$name.links.txt"); bench=$(sed -n 2p "reports/$name.links.txt")
+                  ok='^https://gke0op\.github\.io/argus/(bench/)?#(zig|wgsl)=[A-Za-z0-9_-]+&name=[A-Za-z0-9_]+$'
+                  if ! printf '%s' "$home" | grep -Eq "$ok" || ! printf '%s' "$bench" | grep -Eq "$ok"; then
+                    echo "No link: the run's links did not have the site's link shape."
+                  elif [ ${#home} -gt 20000 ]; then
+                    echo "Too large for a link in a comment: \`make share THEME=...\` prints it."
+                  else
+                    echo "[Run it on the home page]($home) · [Grade it on the bench]($bench) (the source rides in the link; nothing is uploaded)"
+                  fi
+                  echo
+                fi
+                [ -f "reports/$name.nolink.txt" ] && { tr -d '`[]()<>' < "reports/$name.nolink.txt" | head -c 400; echo; echo; }
                 echo '```text'
                 tr -d '`' < "reports/$name.txt" | head -c 6000
                 echo '```'
                 echo
               done < reports/verdicts.txt
+              echo "Once merged, these themes join the home page's picker: <https://gke0op.github.io/argus/>."
+              echo
             else
-              echo "No Zig theme under \`bench/submissions/\` was graded (run: $CONCLUSION)."
+              echo "No theme was graded (run: $CONCLUSION)."
             fi
             [ -s reports/skipped.txt ] && { tr -d '`' < reports/skipped.txt; echo; }
             echo "Run on a GitHub-hosted Apple silicon runner (\`macos-15\`), shared and virtualized: Gate 8's frame time there is not the M3 of the leaderboard. [The run]($RUN_URL)."

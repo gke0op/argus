@@ -1,26 +1,35 @@
-//! tools/share.zig: a link that opens a Zig theme on the ARGUS-BENCH page, compiled, run and
-//! graded in the browser, with nothing uploaded.
+//! tools/share.zig: links that open a theme in the browser, with nothing uploaded: on the home
+//! page, where it fills the screen, and on the ARGUS-BENCH page, where it is compiled, run and
+//! graded.
 //!
-//!   zig run tools/share.zig -- themes/My_Theme.zig [BASE_URL]      (or: make share THEME=...)
+//!   zig run tools/share.zig -- themes/My_Theme.zig [SITE_URL]      (or: make share THEME=...)
 //!
-//! Prints BASE_URL#zig=<source, raw deflate, base64url>&name=<file stem>. The source rides in the
-//! URL fragment, which the browser never sends to the server; the bench page inflates it with
-//! DecompressionStream('deflate-raw'). BASE_URL defaults to the public bench page.
+//! Prints two lines, SITE_URL#K=... (home) and SITE_URLbench/#K=... (bench), K being `zig` for a
+//! .zig theme and `wgsl` for a .wgsl one, the source as raw deflate in base64url, then
+//! &name=<file stem>. The source rides in the URL fragment, which the browser never sends to the
+//! server; the pages inflate it with DecompressionStream('deflate-raw'). SITE_URL defaults to
+//! the public site.
 
 const std = @import("std");
 const flate = std.compress.flate;
 
-pub const default_base = "https://gke0op.github.io/argus/bench/";
+pub const default_site = "https://gke0op.github.io/argus/";
+pub const default_base = default_site ++ "bench/";
 
-/// The share link for `source`, saved as `name`.zig, on the bench page at `base`.
-pub fn link(gpa: std.mem.Allocator, base: []const u8, name: []const u8, source: []const u8) ![]u8 {
+/// `zig` or `wgsl`, from the file name (anything else is taken as Zig).
+pub fn kindOf(path: []const u8) []const u8 {
+    return if (std.mem.endsWith(u8, path, ".wgsl")) "wgsl" else "zig";
+}
+
+/// The share link for `source` (a `kind` theme named `name`) on the page at `base`.
+pub fn link(gpa: std.mem.Allocator, base: []const u8, kind: []const u8, name: []const u8, source: []const u8) ![]u8 {
     const packed_bytes = try deflateRaw(gpa, source);
     defer gpa.free(packed_bytes);
     const enc = std.base64.url_safe_no_pad.Encoder;
     const b64 = try gpa.alloc(u8, enc.calcSize(packed_bytes.len));
     defer gpa.free(b64);
     _ = enc.encode(b64, packed_bytes);
-    return std.fmt.allocPrint(gpa, "{s}#zig={s}&name={s}", .{ base, b64, name });
+    return std.fmt.allocPrint(gpa, "{s}#{s}={s}&name={s}", .{ base, kind, b64, name });
 }
 
 /// `bytes` as a raw deflate stream (no zlib or gzip header), at the best compression.
@@ -51,16 +60,18 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const args = try init.minimal.args.toSlice(arena);
     if (args.len < 2) {
-        try std.Io.File.stderr().writeStreamingAll(io, "usage: share THEME.zig [BASE_URL]\n");
+        try std.Io.File.stderr().writeStreamingAll(io, "usage: share THEME.zig|THEME.wgsl [SITE_URL]\n");
         std.process.exit(2);
     }
     const path = args[1];
-    const base = if (args.len > 2) args[2] else default_base;
+    const site = if (args.len > 2) args[2] else default_site;
     const source = try std.Io.Dir.cwd().readFileAlloc(io, path, arena, .unlimited);
     const name = try themeName(arena, path);
-    const url = try link(arena, base, name, source);
-    try std.Io.File.stdout().writeStreamingAll(io, url);
-    try std.Io.File.stdout().writeStreamingAll(io, "\n");
+    const kind = kindOf(path);
+    const home = try link(arena, site, kind, name, source);
+    const bench = try link(arena, try std.fmt.allocPrint(arena, "{s}bench/", .{site}), kind, name, source);
+    const out = try std.fmt.allocPrint(arena, "{s}\n{s}\n", .{ home, bench });
+    try std.Io.File.stdout().writeStreamingAll(io, out);
 }
 
 fn inflateRaw(gpa: std.mem.Allocator, packed_bytes: []const u8) ![]u8 {
@@ -100,12 +111,21 @@ test "deflateRaw handles empty and tiny input" {
 
 test "link: base, base64url payload, name" {
     const gpa = std.testing.allocator;
-    const url = try link(gpa, default_base, "My_Theme", "pub fn main() void {}\n");
+    const url = try link(gpa, default_base, "zig", "My_Theme", "pub fn main() void {}\n");
     defer gpa.free(url);
     try std.testing.expect(std.mem.startsWith(u8, url, default_base ++ "#zig="));
     try std.testing.expect(std.mem.endsWith(u8, url, "&name=My_Theme"));
     const payload = url[(default_base ++ "#zig=").len..std.mem.find(u8, url, "&name=").?];
     for (payload) |ch| try std.testing.expect(std.ascii.isAlphanumeric(ch) or ch == '-' or ch == '_');
+}
+
+test "kindOf: .wgsl is WGSL, anything else Zig" {
+    try std.testing.expectEqualStrings("wgsl", kindOf("web/themes/Reef.wgsl"));
+    try std.testing.expectEqualStrings("zig", kindOf("themes/My.zig"));
+    const gpa = std.testing.allocator;
+    const url = try link(gpa, default_site, "wgsl", "Reef", "@compute @workgroup_size(8, 8) fn argus_draw() {}");
+    defer gpa.free(url);
+    try std.testing.expect(std.mem.startsWith(u8, url, default_site ++ "#wgsl="));
 }
 
 test "themeName keeps the stem and replaces other characters" {
