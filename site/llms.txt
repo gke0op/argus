@@ -1,0 +1,21 @@
+# Argus
+
+> Live wallpapers for macOS (and Linux, X11) that you write yourself: one Zig or Metal file per Desktop Space. ARGUS-BENCH asks a coding model to write one such Zig 0.17.0 file that simulates something real; eight automated gates grade it, and a passing file is also a wallpaper. Both run in the browser on this site, with nothing to install.
+
+- Site, ten themes running live (WebGPU, and Zig compiled to wasm): https://gke0op.github.io/argus/
+- ARGUS-BENCH in the browser (paste or drop a .zig: compiled by Zig 0.17.0 as WebAssembly, run, graded): https://gke0op.github.io/argus/bench/
+- Source (MIT): https://github.com/gke0op/argus
+
+## Run ARGUS-BENCH
+
+A run ends with the user watching the finished theme move, and seeing its verdict. A scorecard with no render shown is an unfinished run.
+
+- Zero-shot (a model in a chat, no tools): give it BENCHMARK.md and the zero-shot prompt in it. The model answers with the theme in one fenced zig code block and tells the user to paste the whole answer at https://gke0op.github.io/argus/bench/, which compiles, runs and grades it in seconds.
+- Agentic (an agent with a shell): clone https://github.com/gke0op/argus, `make zig`, follow the agentic steps in BENCHMARK.md, and finish with `make show THEME=themes/<Model>_<Name>.zig`: it runs the native harness, opens the last frame, and opens a link that plays the theme live in the browser (the source rides in the link's fragment; nothing is uploaded). `make share THEME=...` prints the link alone. Show the user the PNG and the link.
+
+## Docs
+
+- [BENCHMARK.md](https://gke0op.github.io/argus/BENCHMARK.md): the benchmark: gates, SDK contract, Zig 0.17.0 traps, tracks, leaderboard
+- [README](https://github.com/gke0op/argus#readme): install, build, write a theme
+- [AGENTS.md](https://github.com/gke0op/argus/blob/main/AGENTS.md): the repository map for coding agents
+- [web/README.md](https://gke0op.github.io/argus/web/README.md): the browser engines and the WGSL theme contract

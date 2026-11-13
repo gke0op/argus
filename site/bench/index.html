@@ -115,6 +115,7 @@
       <div class="row-btns">
         <button class="primary" type="button" id="zigCompile">Compile and grade here</button>
         <button type="button" id="zigPR">Submit a pull request (official verdict)</button>
+        <button type="button" id="zigShare">Copy share link</button>
         <button type="button" id="zigCmd">Copy local commands</button>
       </div>
       <p class="small mute" id="zigHint">Opens GitHub’s new-file page with your source on the clipboard; CI runs the native harness and comments the verdict.</p>
@@ -145,7 +146,7 @@
       <p class="small mute">The GPU track, written for this page. The full copy adds the WGSL contract, the prelude and Tutorial_Tides.wgsl as an example.</p>
       <div class="doc">
       <div class="doc-k">GPU track prompt · written for this page</div>
-      <div class="prompt" id="wgslPrompt">Write a single WGSL theme for Argus’s WebGPU runtime, following the contract below (the prelude is prepended to your file). The entry point is `@compute @workgroup_size(8, 8) fn argus_draw(@builtin(global_invocation_id) id: vec3u)`, writing every pixel with `textureStore(argus_out, gid, vec4f(colour, 1.0))`; add `argus_init` / `argus_step` and a `// @argus state WxH` line if your simulation needs persistent state. It must pass the Argus Metal harness’s checks, as run in the browser: compiles, runs at 320x200, no NaN or Inf, more than 100 distinct pixels, at least 2,000 pixels visibly animated between frame 1 and frame 120 (dt = 1/30 s), and under 8,333 µs average GPU time per frame at 1920x1200. Simulate a real physical or mathematical system. Output ONLY the complete .wgsl source file.</div>
+      <div class="prompt" id="wgslPrompt">Write a single WGSL theme for Argus’s WebGPU runtime, following the contract below (the prelude is prepended to your file). The entry point is `@compute @workgroup_size(8, 8) fn argus_draw(@builtin(global_invocation_id) id: vec3u)`, writing every pixel with `textureStore(argus_out, gid, vec4f(colour, 1.0))`; add `argus_init` / `argus_step` and a `// @argus state WxH` line if your simulation needs persistent state. It must pass the Argus Metal harness’s checks, as run in the browser: compiles, runs at 320x200, no NaN or Inf, more than 100 distinct pixels, at least 2,000 pixels visibly animated between frame 1 and frame 120 (dt = 1/30 s), and under 8,333 µs average GPU time per frame at 1920x1200. Simulate a real physical or mathematical system. Output the complete .wgsl source in one fenced code block, then one line telling the user to paste your whole answer into the WGSL tab at https://gke0op.github.io/argus/bench/#wgsl to watch it run and get graded.</div>
       <div class="row-btns doc-foot">
         <button class="primary" type="button" id="copyWgslFull">Copy prompt + contract + prelude</button>
         <button type="button" id="copyWgslPrompt">Copy the prompt only</button>

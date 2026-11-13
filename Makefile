@@ -6,7 +6,7 @@ THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: icon quasars all app desktop kronos harness linux web-wasm web-wasm-all web-wasm-refs web-wasm-serve web-zigc web-zigc-test check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
+.PHONY: icon quasars all app desktop kronos harness share show linux web-wasm web-wasm-all web-wasm-refs web-wasm-serve web-zigc web-zigc-test check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
 
 all: app kronos
 
@@ -31,6 +31,26 @@ kronos:
 
 harness:
 	$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $(THEME) --frames $(FRAMES) --out $(OUT) $(if $(SEED),--seed $(SEED)) $(if $(FPS),--fps $(FPS)) $(if $(STATS),--stats $(STATS)) $(if $(DATE),--date $(DATE))
+
+# A link that opens THEME on the ARGUS-BENCH page, compiled, running and graded in the browser.
+# The source rides in the URL fragment: nothing is uploaded (tools/share.zig).
+share:
+	@$(ZIG) run tools/share.zig -- $(THEME)
+
+# The finished render, in front of the user (BENCHMARK.md, "Show it"): the harness's verdict, its
+# last frame opened in the image viewer, and the theme live in the browser through a share link.
+# Opens with `open` (macOS) or `xdg-open` (Linux); NO_OPEN=1, or neither present, only prints.
+# The exit status is the harness's: a FAIL is still shown, and still fails.
+SHOW_OUT ?= /tmp/$(basename $(notdir $(THEME))).png
+show:
+	@$(MAKE) --no-print-directory harness THEME=$(THEME) OUT=$(SHOW_OUT); status=$$?; \
+	url=$$($(ZIG) run tools/share.zig -- $(THEME)); \
+	opener=$$(command -v open || command -v xdg-open || true); \
+	echo "Last frame : $(SHOW_OUT)"; \
+	echo "Live       : $$url"; \
+	if [ -n "$$opener" ] && [ -z "$(NO_OPEN)" ]; then "$$opener" "$(SHOW_OUT)"; "$$opener" "$$url"; \
+	else echo "Nothing opened here: put the PNG and the live link in front of the user."; fi; \
+	exit $$status
 
 # Linux X11 live wallpaper (pure Zig, no libc): THEME is compiled in. ./argus-linux to run.
 # -fstrip: debug info is most of the LLVM time (rebuild 20 s -> 6 s) and size (4.7 MB -> 324 KB).

@@ -7,7 +7,8 @@ Vanilla HTML, CSS and JavaScript (no framework, no npm), on top of the three eng
 | Path | What it is |
 |---|---|
 | `index.html` | Home: a live full-bleed theme (Cygnus A first) with a picker for the 10 shipped themes and Tides as wasm, telemetry, install, the leaderboard, how it works |
-| `bench/index.html` | Run ARGUS-BENCH: the prompts to copy, then grading in the page (Zig as wasm through the 8 gates; WGSL on WebGPU through the Metal harness's checks) |
+| `bench/index.html` | Run ARGUS-BENCH: the prompts to copy, then grading in the page (Zig as wasm through the 8 gates; WGSL on WebGPU through the Metal harness's checks). `#zig=<raw deflate, base64url>&name=` opens a theme from a link (`make share`, "Copy share link") |
+| `llms.txt` | The site, the bench and how to run both modes, for language models |
 | `bench/fixtures/*.wgsl` | WGSL themes that each fail one check (the Zig gate fixtures are `tests/fixtures/`) |
 | `assets/engines.js` | The theme list and `mount()`: any engine on a fresh canvas, sized to device pixels, on rAF |
 | `assets/home.js`, `assets/bench.js`, `assets/ui.js` | The pages' scripts |

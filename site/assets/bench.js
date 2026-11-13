@@ -352,6 +352,8 @@ function crashText(c, retried) {
 }
 
 async function compileAndGrade(name, source, title) {
+  // A chat answer pasted whole: the ```zig block is the theme.
+  if (typeof source === 'string' && source.includes('```')) { source = unfence(source); $('zigSrc').value = source; }
   const text = typeof source === 'string' ? source : null;
   if (text !== null && !text.trim()) { $('zigHint').textContent = 'Paste the model’s answer first, or drop a .zig file.'; $('zigSrc').focus(); return; }
   const r = beginRun(title ?? `${name}.zig`);
@@ -551,8 +553,8 @@ $('zigCmd').addEventListener('click', (e) => {
   copyText([
     'git clone https://github.com/gke0op/argus.git && cd argus && make zig',
     `# save the answer as themes/${n}.zig, then:`,
-    `make harness THEME=themes/${n}.zig OUT=/tmp/${n}.png   # the native harness: the verdict`,
-    `make web-wasm THEME=themes/${n}.zig                      # web/wasm/build/${n}.{st,mt}.wasm, to upload here`,
+    `make show THEME=themes/${n}.zig      # the native harness (the verdict), its last frame, and a live link`,
+    `make web-wasm THEME=themes/${n}.zig  # web/wasm/build/${n}.{st,mt}.wasm (LLVM, SIMD128), to upload here`,
   ].join('\n'), e.currentTarget);
 });
 
@@ -567,7 +569,7 @@ let harnessMod = null;
 let wgslBusy = false;
 $('runWgsl').addEventListener('click', async () => {
   if (wgslBusy) return;
-  const src = $('wgslSrc').value;
+  const src = unfence($('wgslSrc').value);   // a chat answer pasted whole: its fenced block
   if (!src.trim()) { $('wgslSrc').focus(); return; }
   if (!gpu.ok) { $('wgslResult').classList.add('on'); badge($('wgslBadge'), 'FAIL'); $('wgslReport').textContent = `No WebGPU in this browser: ${gpu.why}`; return; }
   wgslBusy = true;
@@ -601,6 +603,54 @@ $('runWgsl').addEventListener('click', async () => {
     window.__bench = { kind: 'wgsl', name, error: String(e.message ?? e) };
   } finally { wgslBusy = false; }
 });
+
+// ---- Zig: share links ------------------------------------------------------------------------
+// #zig=<the source as raw deflate, base64url>&name=<theme name>: tools/share.zig (make share) makes
+// one, and so does "Copy share link". The fragment never reaches the server; the theme compiles,
+// runs and is graded here, as if it had been dropped on the page.
+function unfence(s) {
+  const blocks = [...s.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].map((m) => m[1]);
+  return blocks.length ? blocks.sort((a, b) => b.length - a.length)[0] : s;
+}
+const b64urlToBytes = (b) => {
+  const s = atob(b.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (b.length % 4)) % 4));
+  return Uint8Array.from(s, (c) => c.charCodeAt(0));
+};
+const bytesToB64url = (u8) => {
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+const viaStream = (bytes, stream) => new Response(new Blob([bytes]).stream().pipeThrough(stream));
+async function shareLink(name, src) {
+  const packed = new Uint8Array(await viaStream(src, new CompressionStream('deflate-raw')).arrayBuffer());
+  return `${location.origin}${location.pathname}#zig=${bytesToB64url(packed)}&name=${encodeURIComponent(name)}`;
+}
+$('zigShare').addEventListener('click', async (e) => {
+  const src = unfence($('zigSrc').value);
+  if (!src.trim()) { $('zigHint').textContent = 'Paste the model’s answer first, or drop a .zig file.'; return; }
+  const url = await shareLink(zigName(), src);
+  await copyText(url, e.currentTarget);
+  $('zigHint').textContent = 'The link is on your clipboard: it opens this theme here, compiled, running and graded.';
+});
+{
+  const shared = new URLSearchParams(location.hash.slice(1));
+  if (shared.has('zig')) {
+    const name = (shared.get('name') || 'Model_Theme').replace(/\.zig$/, '').replace(/[^A-Za-z0-9_]/g, '_');
+    showTab('tab-zig', false);   // no history entry: the link stays in the address bar
+    $('zigName').value = name;
+    $('zigName').dispatchEvent(new Event('input'));
+    viaStream(b64urlToBytes(shared.get('zig')), new DecompressionStream('deflate-raw')).text().then((src) => {
+      $('zigSrc').value = src;
+      $('zigResult').scrollIntoView?.({ block: 'start' });
+      return compileAndGrade(name, src, `${name}.zig (from a share link)`);
+    }, (err) => {
+      const r = beginRun(`${name}.zig (from a share link)`);
+      showDiagnostics(`This share link's theme could not be read (${err.message ?? err}). The link may be cut short: copy it whole.`, '', 'warn');
+      endRun(r, 'the link could not be read');
+    });
+  }
+}
 
 // For web/zigc/verify.html, which drives this page in a frame.
 window.__benchReady = true;

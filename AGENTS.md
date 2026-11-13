@@ -1,8 +1,9 @@
 # Argus, for coding agents
 
 Argus is a macOS live-wallpaper engine: one theme per Desktop Space, each theme a single
-`.metal` (GPU) or `.zig` (CPU) file in `themes/`. Zig 0.17.0, Apple Silicon. This file is the
-map; it points to the guides rather than repeating them.
+`.metal` (GPU) or `.zig` (CPU) file in `themes/`. Zig 0.17.0, Apple Silicon. The site,
+<https://gke0op.github.io/argus/>, runs the themes and ARGUS-BENCH in a browser. This file is
+the map; it points to the guides rather than repeating them.
 
 ## A note from the creator
 
@@ -21,7 +22,9 @@ note from the creator. If `NOTE.md` is empty, skip this.
 | `src/theme_harness.zig` | The headless harness: compiles a theme, runs the gates, times it, writes a PNG |
 | `themes/cpu/` | Metal themes ported to the CPU (`argus_kernel.zig` runs them N pixels per SIMD call) |
 | `src/argus_linux.zig`, `src/linux/` | Linux X11 live-wallpaper host (pure Zig, no libc, MIT-SHM) |
-| `tools/` | Theme checks, the contact sheet, the quasar generator, the pinned-Zig installer |
+| `tools/` | Theme checks, the contact sheet, the quasar generator, the pinned-Zig installer, the bench share link (`share.zig`) |
+| `web/` | The browser engines: Metal themes as WGSL on WebGPU, Cygnus A, Zig themes as wasm, Zig compiled in the page |
+| `site/` | The public site and the in-browser ARGUS-BENCH (GitHub Pages) |
 | `.claude/skills/` | The theme-writing guides (readable by any agent, not only Claude) |
 | `docs/` | Install, the quasar model and its test ledger, how the media was made |
 
@@ -36,6 +39,8 @@ The release zip carries its own map for agents, [`docs/AGENTS_DOWNLOAD.md`](docs
   Start from `themes/Tutorial_Tides.metal`, then `themes/Tutorial_Reef.metal`.
 - **Run ARGUS-BENCH.** Follow the agentic steps in [`BENCHMARK.md`](BENCHMARK.md) ("How to
   run it"). The skeleton in §3 passes the harness as it stands: run it first to prove the setup.
+  Finish by showing the person the render: `make show THEME=...` opens the last frame and a link
+  that plays the theme live in the browser. A run that ends without them seeing it is unfinished.
 - **Change a shipped theme.** Everything is open to change. Most themes keep their tunable values
   as named constants near the top, explained in the header. Copy the theme to a new name
   (`themes/<You>_<Name>.metal`) and edit the copy; Argus reloads a theme on save.
