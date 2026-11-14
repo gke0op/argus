@@ -226,8 +226,8 @@ function enableThreads() {
 }
 
 $('bareBtn').addEventListener('click', () => hero.classList.toggle('bare'));
-// Narrow screens: the readout starts folded to one line, so it never covers the caption.
-if (matchMedia('(max-width: 640px)').matches) { $('tele').classList.add('min'); $('teleBtn').textContent = '+'; }
+// The readout starts folded to one line on every screen; + unfolds it.
+$('tele').classList.add('min'); $('teleBtn').textContent = '+';
 $('teleBtn').addEventListener('click', () => { $('tele').classList.toggle('min'); $('teleBtn').textContent = $('tele').classList.contains('min') ? '+' : '–'; });
 $('resBtn').textContent = half ? 'half res' : 'native res';
 $('resBtn').addEventListener('click', () => {
