@@ -81,10 +81,8 @@
 <header class="top">
   <a class="brand" href="./" aria-label="Argus, home">Argus</a>
   <nav aria-label="Site">
-    <a class="opt" href="#install">Install</a>
     <a class="opt" href="#bench">Leaderboard</a>
-    <a class="opt" href="#how">How it works</a>
-    <a href="bench/">Run the bench</a>
+    <a href="bench/">Bench</a>
     <a href="https://github.com/gke0op/argus">GitHub</a>
   </nav>
 </header>
@@ -97,11 +95,9 @@
 
   <div class="hero-copy">
     <h1 class="wordmark">Argus</h1>
-    <p class="lede">Live macOS wallpapers you write yourself: one Zig or Metal file per Desktop Space, on the bare metal.</p>
-    <p class="lede-2">This is the theme’s own code, running in your browser.</p>
+    <p class="lede">Live macOS wallpapers you write yourself: one Zig or Metal file per Desktop Space, on the bare metal. This one is running in your browser.</p>
     <div class="ctas">
       <a class="btn primary" href="#install">Install on macOS</a>
-      <a class="btn quiet" href="bench/">Run ARGUS-BENCH <span aria-hidden="true">→</span></a>
     </div>
   </div>
 
@@ -125,7 +121,6 @@
   <section class="band" id="what">
     <div class="wrap split">
       <div class="prose">
-        <div class="eyebrow">What it is</div>
         <h2>Every Desktop Space gets its own live theme</h2>
         <p>Swipe from one Space to the next and you swipe from a quasar to a night beach to a marbling bath. A theme is one file: a <b>Metal kernel</b> on the GPU or a <b>Zig file</b> on the CPU.</p>
         <p>Drop it on a Space from the menu bar and Argus compiles it on the spot; save an edit and it reloads in a second. No engine, no assets: a pixel grid, a clock and a frame budget. Argus draws only the Spaces you can see.</p>
@@ -140,7 +135,6 @@
 
   <section class="band" id="install">
     <div class="wrap">
-      <div class="eyebrow">Install</div>
       <h2>One line on macOS, from source on Linux</h2>
       <div class="installs">
         <div class="card install mac">
@@ -159,18 +153,18 @@ make linux THEME=themes/Cygnus_A.zig  <span class="c"># or THEME=themes/cpu/Tuto
           <p>One static Zig binary, no libc or X libraries, that draws one theme as your X11 desktop. Tested on Ubuntu 24.04, arm64 and x86_64. Metal themes need a CPU port first; Tutorial Tides has one.</p>
         </div>
       </div>
-      <p class="repo"><a class="btn" href="https://github.com/gke0op/argus"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg>github.com/gke0op/argus</a> <span>MIT licence. Build from source on a Mac: <code>make zig &amp;&amp; make run</code>.</span></p>
+      <p class="repo">MIT licence. Build from source on a Mac: <code>make zig &amp;&amp; make run</code>.</p>
     </div>
   </section>
 
   <section class="band" id="bench">
     <div class="wrap">
-      <div class="eyebrow">ARGUS-BENCH</div>
       <h2>A benchmark where the answer is a wallpaper</h2>
       <div class="bench-intro">
         <div class="prose">
           <p>Give a model <a href="https://github.com/gke0op/argus/blob/main/BENCHMARK.md">BENCHMARK.md</a> and one sentence. It writes one Zig 0.17.0 file that simulates something real, and eight gates grade it. A pass is also a wallpaper.</p>
         </div>
+        <details class="fold"><summary>The eight gates</summary>
         <ol class="gatelist" aria-label="The eight gates">
           <li><span class="n">1</span>it compiles</li>
           <li><span class="n">2</span>makes one allocation</li>
@@ -181,62 +175,59 @@ make linux THEME=themes/Cygnus_A.zig  <span class="c"># or THEME=themes/cpu/Tuto
           <li><span class="n">7</span>moves visibly</li>
           <li><span class="n">8</span>stays under 16.7 ms a frame on one CPU core</li>
         </ol>
+        </details>
       </div>
       <dl class="figures">
-        <div><dt>models</dt><dd>6</dd><dd class="sub">zero-shot and agentic</dd></div>
-        <div><dt>runs</dt><dd>34</dd><dd class="sub">all rescored on one machine</dd></div>
-        <div><dt>pass all eight gates</dt><dd>31</dd><dd class="sub">3 zero-shot compile errors</dd></div>
+        <div><dt>models</dt><dd>6</dd></div>
+        <div><dt>runs</dt><dd>34</dd></div>
+        <div><dt>pass all eight gates</dt><dd>31</dd></div>
       </dl>
-      <div class="lb-head"><h3>Cross-model leaderboard <span>2026-10-19</span></h3><span class="hint">Click a column to sort.</span></div>
-      <div class="tablewrap" tabindex="0" role="region" aria-label="Leaderboard, scrolls sideways"><!-- @LEADERBOARD --></div>
+      <div class="lb-head"><h3>Cross-model leaderboard <span>2026-10-19</span></h3><label class="lb-all"><input type="checkbox" id="lbAll"> all columns</label></div>
+      <div class="tablewrap" tabindex="0" role="region" aria-label="Leaderboard, sortable, scrolls sideways"><!-- @LEADERBOARD --></div>
+      <details class="fold"><summary>Notes: Argon grades itself; marks, quotas and frame times</summary>
       <ul class="footnotes">
         <li><b>Argon grades itself:</b> Argon (Gemini) wrote ARGUS-BENCH and the theme SDK.</li>
         <li>† One agentic Argon run, not three: the Gemini quota ran out (the cap was set before any results).</li>
         <li>* Haiku’s two zero-shot passes are mostly the skeleton. The gates check that a theme runs, not what it simulates.</li>
         <li>Frame times vary up to 9× within one model, so this table doesn’t rank speed; the machine was loaded (about 30% slow). <a href="https://github.com/gke0op/argus/blob/main/docs/notes/bench-leaderboard.md">Methods and every run</a>.</li>
+        <li>The figures: 6 models, zero-shot and agentic; 34 runs, all rescored on one machine; 31 pass all eight gates, and the 3 that fail are zero-shot compile errors.</li>
       </ul>
-      <div class="cta-band">
-        <div><h3>Run ARGUS-BENCH in your browser</h3><p>Copy the prompt, paste the answer, watch it run and get graded.</p></div>
-        <a class="btn primary" href="bench/">Open the bench <span aria-hidden="true">→</span></a>
-      </div>
+      </details>
+      <p class="cta-band"><a class="btn primary" href="bench/">Run ARGUS-BENCH in your browser <span aria-hidden="true">→</span></a></p>
     </div>
   </section>
 
   <section class="band" id="how">
     <div class="wrap">
-      <div class="eyebrow">How it works</div>
       <h2>One file per theme, three ways to run it here</h2>
       <div class="grid three">
         <div class="card">
-          <div class="card-k">.metal · .zig</div>
           <h3>Themes are single files</h3>
           <p>A <code>.metal</code> theme is a compute kernel over every pixel, with optional state kept between frames. A <code>.zig</code> theme is a <code>State</code> with <code>init</code>, <code>step</code> and <code>draw</code>: one allocation, then none.</p>
         </div>
         <div class="card">
-          <div class="card-k">GPU</div>
           <h3>Metal → WGSL on WebGPU</h3>
           <p>Each of the nine Metal themes has a one-to-one WGSL translation with the app’s frame semantics. At frame 120, every pixel is within 3/255 of Metal’s.</p>
         </div>
         <div class="card">
-          <div class="card-k">CPU</div>
           <h3>Zig → wasm on Workers</h3>
           <p>Zig themes compile unchanged to SIMD128 wasm and split rows across Worker threads. The 8 gates are the native harness’s own code, and Tides’ final frame is bit-identical to native.</p>
         </div>
       </div>
+      <details class="fold"><summary>Cygnus A’s physics, checked · what this page can’t match yet</summary>
       <div class="grid two">
         <div class="card feature">
-          <div class="card-k">Cygnus A</div>
           <h3>Kerr light paths, checked</h3>
           <p>The black hole’s Metal kernels are ported to WGSL one for one, and its Zig runs as a 79 KB wasm module. 99.996% of pixels match the app’s frame, none by more than 2 levels, and the shadow’s edge matches Bardeen’s analytic curve to 1.79e-5 M.</p>
           <p class="aside">In the app, 49 physics claims sit in a test ledger, all passing. <a href="https://github.com/gke0op/argus/blob/main/docs/QUASARS.md">What is computed and what is chosen</a>.</p>
         </div>
         <div class="card">
-          <div class="card-k">Limits</div>
           <h3>What this page can’t match yet</h3>
           <p>Full screen at 120 Hz, Roulette Chrome and Night Tide run at 105–120 fps and Lizard Island near 100, close to the 8.33 ms budget; their simulations keep the 30 Hz tick. Tides in wasm takes 17–18 ms a frame against 15.3 ms natively, so here it fails Gate 8. Measured in Chrome 157 on an Apple M3.</p>
           <p class="aside">The readout in the corner shows your machine’s numbers: frames drawn against the display’s refresh.</p>
         </div>
       </div>
+      </details>
     </div>
   </section>
 </main>
