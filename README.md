@@ -251,7 +251,7 @@ record, and [NOTICE.md](NOTICE.md) credits each piece.
 ## Contributing
 
 Coding agents: start at [AGENTS.md](AGENTS.md), the map of the repository. Themes are the best way in. Open a
-pull request with a `.zig` theme (or a `.metal` one with its WGSL port): CI runs the harness and
+pull request with a `.zig` or `.metal` theme (Metal is translated to WGSL for the browser): CI runs the harness and
 comments links that run it on the site, and once merged it joins the home page's picker. [CONTRIBUTING.md](CONTRIBUTING.md) covers the contract, the
 harness gates, the frame budget, honest headers and credit lines. If you think a physics claim
 is wrong, open a "physics claim challenge" issue with a source; that is the most useful report

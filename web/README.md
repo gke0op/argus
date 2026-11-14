@@ -1,8 +1,9 @@
 # Argus in the browser
 
 `web/` runs Argus themes live in a browser. This part is the **WebGPU runtime for Metal themes**:
-each `themes/<Name>.metal` has a one-to-one WGSL translation in `web/themes/<Name>.wgsl`, run by
-`web/host/argus_gpu.js` with the same frame semantics as the Mac app (`src/gpu/metal_theme.zig`).
+each `themes/<Name>.metal` has a one-to-one WGSL translation, hand-written in
+`web/themes/<Name>.wgsl` or, without one, made automatically by `tools/msl2wgsl.zig` (below), run
+by `web/host/argus_gpu.js` with the same frame semantics as the Mac app (`src/gpu/metal_theme.zig`).
 No video stand-ins and no reduced versions: the kernels run in full at the canvas's device-pixel
 size, on every display frame.
 
@@ -180,6 +181,106 @@ Language traps when translating from Metal:
   `module`, `static`, ...): rename them.
 - Keep the theme's header and its `// @argus` lines verbatim, so the directives and the honest
   account of what is measured and what is modelled carry over.
+
+## Automatic translation (`tools/msl2wgsl.zig`)
+
+A Metal theme needs no hand-written port: `tools/msl2wgsl.zig` translates it into the WGSL above.
+The site's build (`site/build.sh`) translates every tracked `themes/*.metal` without a
+`web/themes/<Name>.wgsl` into the published `web/themes/` (with its `@argus data` file) and lists
+it in the home page's picker; the Bench workflow does the same for a pull request's theme and
+links the translation; `make test` translates every tracked theme. A hand-written port, when there
+is one, wins (the nine shipped themes keep theirs).
+
+```sh
+make wgsl THEME=themes/Night_Tide.metal                     # -> web/.auto/Night_Tide.wgsl (gitignored)
+node web/host/tools/verify.mjs --theme ../.auto/Night_Tide.wgsl --ref /tmp/ref/Night_Tide.png --out /tmp/verify
+zig run tools/msl2wgsl.zig -- --check themes/*.metal          # translate, report, write nothing
+```
+
+(`.bin` data files go next to the translation: `cp themes/X.bin web/.auto/`.)
+
+It is a compiler, not a text rewrite: the theme is preprocessed (`#define`, also function-like),
+parsed into a syntax tree of the C++ subset themes use, and every expression is typed, so each
+rule in the table and the traps above is applied where it belongs:
+
+- Metal's implicit conversions become explicit (`f32(i)`, `vec3f(x)`, `u32(n)` for a shift
+  amount, `x != 0` for an int condition), with C++'s usual arithmetic conversions deciding the
+  type; literals take the type they are used as (`2.0f`, `2u`).
+- Overloads are resolved per call; templates and functions taking textures, samplers, lambdas
+  or pointers are instantiated per distinct argument (two textures: two WGSL functions).
+  Texture, sampler, `ArgusFrame` and `ArgusStats` parameters disappear: their uses name the
+  prelude's bindings.
+- `thread T&` is `ptr<function, T>` (a by-value parameter that is assigned gets a `var` copy;
+  an argument that is not a whole variable is copied in and back); `thread char*` into a local
+  array is the array's pointer plus an offset; `constant char` strings live in one constant pool
+  (`M2W_STR`); `s.procs[i].name` is `argus_proc_char`.
+- A lambda becomes a function; what it captures becomes parameters, pointers for what it
+  writes. Passed to a template, it is threaded through the instance.
+- `a ? b : c` is `select(c, b, a)` when both sides are cheap and free of side effects, else an
+  `if`; `x++`, assignments and impure ternaries inside expressions become statements before the
+  statement, in order (also inside `&&`, `||` and loop conditions); swizzle assignment is done
+  per component; `switch` fall-through is unrolled; two-dimensional `constant` arrays are
+  flattened (the Safari rule); `round`, `pow(x, 2)`, `fmod`, `isfinite`/`isnan`/`isinf`,
+  `sincos`, `log10` keep Metal's meaning; `[[threads_per_threadgroup]]` is the declared
+  `@workgroup_size` (16 x 16 for kernels with threadgroup memory, else 8 x 8).
+- `half` is f32, as in the hand ports; an explicit conversion to a half type (`half2(v)`) still
+  rounds to half precision (`quantizeToF16`), which Ebru_Studio relies on.
+
+The output keeps the theme's header and its `// @argus` lines, and names the Metal line of every
+function. A theme outside the subset is not translated: the tool exits 1 with
+`themes/X.metal:line:col: error: <the construct>` and writes nothing, so no page runs a guess.
+Not supported, each with its own message: SIMD-group functions and attributes (`simd_ballot`,
+`[[thread_index_in_simdgroup]]`: WGSL subgroups are an extension the host does not enable),
+textures other than `texture2d<float>`, mip levels, recursion, `#if` with an expression,
+pointers that are reassigned, structs with member functions, lambdas capturing by name, a lambda
+calling another lambda that captures.
+
+### Measured (2026-11-14, Chrome 157 headless, Apple M3)
+
+The harness's check (`verify.mjs`: frame 120 of 1920x1200, seed `0x5EED`, the pinned date)
+against the Metal harness PNG of the same frame, levels 0..255 per channel. Distinct and animated
+pixels are the harness gates; every row passes them (no NaN/Inf, opaque, animated).
+
+**The nine shipped themes**, translated from `themes/*.metal` (their hand ports' max diff, from
+the table below, in the last column):
+
+| Theme | Max diff | Pixels exact | Within 2 | Distinct | Animated | Hand port |
+|---|---|---|---|---|---|---|
+| Tutorial_Tides | 1 | 99.9997% | 100% | 2,297,890 | 1,545,270 | 1 |
+| Tutorial_Reef | 1 | 100% | 100% | 2,254,731 | 965,553 | 1 |
+| Night_Tide | 3 | 99.9854% | 100% | 2,291,509 | 268,083 | 3 |
+| Roulette_Chrome | 1 | 99.9988% | 100% | 2,277,228 | 262,092 | 1 |
+| Ebru_Studio | 1 | 99.9942% | 100% | 2,298,489 | 1,279,707 | 1 |
+| Orion_Nebula | 1 | 99.9938% | 100% | 2,303,800 | 1,017,014 | 1 |
+| Lizard_Island | 1 | 99.9983% | 100% | 2,303,895 | 1,822,561 | 3 |
+| Aventurine_Horoscope | 2 | 99.9993% | 100% | 2,282,194 | 94,860 | 2 |
+| Phosphor_Terminal | 1 | 99.9993% | 100% | 2,288,135 | 75,742 | 1 |
+
+**Held out:** nine Metal themes from the git history (earlier and retired themes) the translator
+was not developed on, translated by the version that passed the nine above before their sources
+were opened. Six translated and five of those match within 3 levels on the first try:
+
+| Theme | First try | Max diff | Pixels exact | Within 4 |
+|---|---|---|---|---|
+| Test_PR_Tides | translated | 1 | 99.9997% | 100% |
+| Opus_Ebru_Studio | translated | 1 | 99.9942% | 100% |
+| Opus_Night_Tide | translated | 3 | 99.9854% | 100% |
+| Opus_Orion_Nebula | translated | 1 | 99.9938% | 100% |
+| Opus_Orion_Flight | translated | 1 | 99.9941% | 100% |
+| Gemini_Wormhole | translated | 125 | 99.9694% | 99.9995% (all but 12 pixels) |
+| Gemini_Aquarium | stopped (parse error in its `simd_ballot` helper) | now: `sincos` added; stops at `[[thread_index_in_simdgroup]]` | | |
+| Coral_Reef, Opus_Coral_Reef | stopped (parse error in its `simd_ballot` helper) | now: stops at `[[thread_index_in_simdgroup]]` | | |
+
+Gemini_Wormhole's 12 pixels are isolated fireflies in its lensing ring (one is pure white in the
+Metal frame among neighbours both renders agree on): a geodesic integration and a hashed star
+field there turn a last-bit difference into a whole pixel, as Lizard_Island's spots do in Safari.
+Three of the held-out themes are earlier versions of shipped ones and Opus_Coral_Reef is
+Coral_Reef under its first name, so the independent part is five: Gemini_Wormhole,
+Gemini_Aquarium, Opus_Orion_Flight, Coral_Reef and Test_PR_Tides (a renamed tutorial).
+
+GPU time is not claimed: back-to-back pairs on a busy machine put the translations within the
+run-to-run noise of the hand ports (Tutorial_Reef 2.33 / 2.69 ms translated, 2.10 / 2.27 ms by
+hand). Not yet checked in Safari.
 
 ## Verify a theme like the harness
 
