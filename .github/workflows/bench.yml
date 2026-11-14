@@ -91,9 +91,10 @@ jobs:
             if [ "$ext" = zig ]; then links "$theme" "$n"
             elif [ -f "web/themes/$n.wgsl" ]; then links "web/themes/$n.wgsl" "$n"
             elif ./.toolchain/zig run tools/msl2wgsl.zig -- "$theme" -o "out/$n.wgsl" 2> "out/$n.translate.txt"; then
-              # The browser runs the automatic translation (the site's build makes the same one).
-              echo "Browser: translated automatically from Metal to WGSL (tools/msl2wgsl.zig); the links run the translation." >> "out/$n.txt"
-              links "out/$n.wgsl" "$n"
+              # It translates, so the pages can: the links carry the .metal itself, and the page
+              # translates it with the same translator built to wasm (web/msl2wgsl/).
+              echo "Browser: translated automatically from Metal to WGSL (tools/msl2wgsl.zig), in the page." >> "out/$n.txt"
+              links "$theme" "$n"
             else
               { echo "No browser link: the automatic Metal-to-WGSL translation stopped at"; sed 's|^[^:]*/||' "out/$n.translate.txt" | head -n 3
                 echo "The theme runs in the app; a hand-written web/themes/$n.wgsl takes it to the browser (web/README.md)."; } > "out/$n.nolink.txt"

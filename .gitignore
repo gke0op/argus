@@ -21,3 +21,4 @@ web/zigc/build/
 .zig-wasm/
 _site/
 web/.auto/
+web/msl2wgsl/*.wasm

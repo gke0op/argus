@@ -6,7 +6,7 @@
 //   WGSL: compiled by WebGPU and run through the Metal harness's checks (wgsl-harness.js).
 import { mount, probeWebGPU } from './engines.js';
 import { copyText } from './ui.js';
-import { unfence, shareLink, readShare } from './sources.js';
+import { unfence, shareLink, readShare, kindOf, metalToWgsl } from './sources.js';
 
 const $ = (id) => document.getElementById(id);
 const REPO = 'gke0op/argus';
@@ -461,6 +461,13 @@ $('zigSrc').addEventListener('input', () => {
 async function takeFile(file) {
   if (!file) return;
   if (/\.wasm$/i.test(file.name)) return gradeUpload(file);
+  if (/\.(metal|wgsl)$/i.test(file.name)) {   // the GPU tab: a .metal is translated there first
+    showTab('tab-wgsl');
+    $('wgslName').value = file.name.replace(/\.(metal|wgsl)$/i, '').replace(/[^A-Za-z0-9_]/g, '_');
+    $('wgslSrc').value = await file.text();
+    $('runWgsl').click();
+    return;
+  }
   const isZig = /\.zig$/i.test(file.name);
   const src = await file.text();
   if (!isZig && !looksLikeZig(src)) {
@@ -551,7 +558,8 @@ let harnessMod = null;
 let wgslBusy = false;
 $('runWgsl').addEventListener('click', async () => {
   if (wgslBusy) return;
-  const src = unfence($('wgslSrc').value);   // a chat answer pasted whole: its fenced block
+  let src = unfence($('wgslSrc').value);   // a chat answer pasted whole: its fenced block
+  const isMetal = kindOf('', src) === 'metal';   // a .metal: translated here first (tools/msl2wgsl.zig)
   if (!src.trim()) { $('wgslSrc').focus(); return; }
   if (!gpu.ok) { $('wgslResult').classList.add('on'); badge($('wgslBadge'), 'FAIL'); $('wgslReport').textContent = `No WebGPU in this browser: ${gpu.why}`; return; }
   wgslBusy = true;
@@ -559,13 +567,14 @@ $('runWgsl').addEventListener('click', async () => {
   const name = $('wgslName').value.trim().replace(/[^A-Za-z0-9_]/g, '_') || 'Model_Theme';
   $('wgslResult').classList.add('on');
   badge($('wgslBadge'), 'RUNNING');
-  $('wgslTitle').textContent = `${name}.wgsl`;
+  $('wgslTitle').textContent = isMetal ? `${name}.metal, translated to WGSL here` : `${name}.wgsl`;
   $('wgslReport').textContent = '';
   $('wgslLiveCap').textContent = 'Live, after the checks.';
   drawFinal($('wgslFinal'), null);
   $('wgslResult').scrollIntoView({ behavior: 'smooth', block: 'start' });
   const t0 = performance.now();
   try {
+    if (isMetal) { $('wgslPhase').textContent = 'translating Metal to WGSL'; src = await metalToWgsl(name, src); }
     harnessMod ??= await import('./wgsl-harness.js');
     renderGates($('wgslGates').tBodies[0], harnessMod.GATES.map((g) => ({ ...g, pass: null, detail: '…' })));
     const res = await harnessMod.runWgslHarness(src, { name, onPhase: (p) => { $('wgslPhase').textContent = p; } });
@@ -612,7 +621,7 @@ $('zigShare').addEventListener('click', async (e) => {
       showDiagnostics(`This share link's theme could not be read (${err.message ?? err}). The link may be cut short: copy it whole.`, '', 'warn');
       endRun(r, 'the link could not be read');
     });
-  } else if (shared?.kind === 'wgsl') {
+  } else if (shared?.kind === 'wgsl' || shared?.kind === 'metal') {
     showTab('tab-wgsl', false);
     $('wgslName').value = shared.name;
     shared.source.then((src) => { $('wgslSrc').value = src; $('runWgsl').click(); }, () => {});

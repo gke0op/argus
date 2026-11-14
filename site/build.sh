@@ -61,6 +61,11 @@ fi
 mkdir -p "$OUT/web/wasm/build"
 cp web/wasm/build/*.wasm web/wasm/build/*.compile.txt web/wasm/build/manifest.json "$OUT/web/wasm/build/"
 
+# The same translator as wasm, so the pages translate a dropped or linked .metal themselves.
+make -s web-msl2wgsl ZIG="$ZIG"
+mkdir -p "$OUT/web/msl2wgsl"
+cp web/msl2wgsl/msl2wgsl.wasm "$OUT/web/msl2wgsl/msl2wgsl.wasm"
+
 # The bench page's in-browser compiler (make web-zigc ZIG_WASM=...; CI builds zig.wasm). Without
 # it the page still grades prebuilt and uploaded builds; REQUIRE_ZIGC=1 (CI) makes it an error.
 if [ -f web/zigc/build/manifest.json ]; then

@@ -3,8 +3,8 @@
 **Live wallpapers for macOS that you write yourself: one Zig or Metal file per Desktop Space, running on the bare metal.**
 
 **In your browser:** [the themes, live](https://gke0op.github.io/argus/) ·
-[ARGUS-BENCH](https://gke0op.github.io/argus/bench/): paste or drop a `.zig` and watch it compile,
-run and get graded, with nothing to install.
+[ARGUS-BENCH](https://gke0op.github.io/argus/bench/): paste or drop a `.zig` or `.metal` file and watch
+it compile, run and get graded, with nothing to install.
 
 Our programs live in terminals and editors. We rarely get to see them run in their full glory,
 right there on the desktop. Argus fixes that: ignite a relativistic quasar behind your windows

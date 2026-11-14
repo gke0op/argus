@@ -4,11 +4,11 @@
 //!
 //!   zig run tools/share.zig -- themes/My_Theme.zig [SITE_URL]      (or: make share THEME=...)
 //!
-//! Prints two lines, SITE_URL#K=... (home) and SITE_URLbench/#K=... (bench), K being `zig` for a
-//! .zig theme and `wgsl` for a .wgsl one, the source as raw deflate in base64url, then
-//! &name=<file stem>. The source rides in the URL fragment, which the browser never sends to the
-//! server; the pages inflate it with DecompressionStream('deflate-raw'). SITE_URL defaults to
-//! the public site.
+//! Prints two lines, SITE_URL#K=... (home) and SITE_URLbench/#K=... (bench). K is `zig`,
+//! `metal` or `wgsl` by the file's extension (the pages translate a .metal themselves), then
+//! the source as raw deflate in base64url and &name=<file stem>. The source rides in the URL
+//! fragment, which the browser never sends to the server; the pages inflate it with
+//! DecompressionStream('deflate-raw'). SITE_URL defaults to the public site.
 
 const std = @import("std");
 const flate = std.compress.flate;
@@ -16,9 +16,12 @@ const flate = std.compress.flate;
 pub const default_site = "https://gke0op.github.io/argus/";
 pub const default_base = default_site ++ "bench/";
 
-/// `zig` or `wgsl`, from the file name (anything else is taken as Zig).
+/// `zig`, `metal` or `wgsl`, from the file name (anything else is taken as Zig). The pages
+/// translate a `metal` link to WGSL themselves (web/msl2wgsl/).
 pub fn kindOf(path: []const u8) []const u8 {
-    return if (std.mem.endsWith(u8, path, ".wgsl")) "wgsl" else "zig";
+    if (std.mem.endsWith(u8, path, ".wgsl")) return "wgsl";
+    if (std.mem.endsWith(u8, path, ".metal")) return "metal";
+    return "zig";
 }
 
 /// The share link for `source` (a `kind` theme named `name`) on the page at `base`.
@@ -119,8 +122,9 @@ test "link: base, base64url payload, name" {
     for (payload) |ch| try std.testing.expect(std.ascii.isAlphanumeric(ch) or ch == '-' or ch == '_');
 }
 
-test "kindOf: .wgsl is WGSL, anything else Zig" {
+test "kindOf: .wgsl is WGSL, .metal Metal, anything else Zig" {
     try std.testing.expectEqualStrings("wgsl", kindOf("web/themes/Reef.wgsl"));
+    try std.testing.expectEqualStrings("metal", kindOf("themes/Reef.metal"));
     try std.testing.expectEqualStrings("zig", kindOf("themes/My.zig"));
     const gpa = std.testing.allocator;
     const url = try link(gpa, default_site, "wgsl", "Reef", "@compute @workgroup_size(8, 8) fn argus_draw() {}");

@@ -127,6 +127,8 @@ A theme in a pull request runs in the browser before anyone merges it, and on th
   the translator can't handle (it names the construct: SIMD-group functions, for one) still
   ships in the app, and reaches the browser with a hand-written port, `web/themes/<Name>.wgsl`,
   which then replaces the translation (the nine shipped ports are worked examples).
+  The home page and the bench run the same translator in the page (built to wasm), so a
+  dropped or linked `.metal` runs there before any pull request.
 - **WGSL** alone (`web/themes/*.wgsl`) runs on the website only.
 
 The picker's caption is the first sentence of the file's header comment, so make it say what

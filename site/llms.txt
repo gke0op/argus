@@ -2,7 +2,7 @@
 
 > Live wallpapers for macOS (and Linux, X11) that you write yourself: one Zig or Metal file per Desktop Space. ARGUS-BENCH asks a coding model to write one such Zig 0.17.0 file that simulates something real; eight automated gates grade it, and a passing file is also a wallpaper. Both run in the browser on this site, with nothing to install.
 
-- Site, ten themes running live (WebGPU, and Zig compiled to wasm), plus every merged community theme; drop or paste your own .zig or .wgsl to run it there: https://gke0op.github.io/argus/
+- Site, ten themes running live (WebGPU, and Zig compiled to wasm), plus every merged community theme; drop or paste your own .zig, .metal or .wgsl to run it there (Metal is translated to WGSL in the page): https://gke0op.github.io/argus/
 - ARGUS-BENCH in the browser (paste or drop a .zig: compiled by Zig 0.17.0 as WebAssembly, run, graded): https://gke0op.github.io/argus/bench/
 - Source (MIT): https://github.com/gke0op/argus
 

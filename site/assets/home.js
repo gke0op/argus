@@ -2,7 +2,7 @@
 // leaderboard.
 import { THEMES, byId, mount, probeWebGPU } from './engines.js';
 import { sortable, copyButtons } from './ui.js';
-import { readShare, shareFragment, kindOf, themeName, unfence, zigToLive, wgslToLive } from './sources.js';
+import { readShare, shareFragment, kindOf, themeName, unfence, zigToLive, wgslToLive, metalToLive } from './sources.js';
 
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), picker = $('picker'), caption = $('caption'), teleBody = $('teleBody'), poster = $('poster');
@@ -39,13 +39,13 @@ function chips() {
     b.addEventListener('click', () => select(t.id));
     picker.append(b);
   }
-  // Your own theme: a .zig (compiled here by Zig 0.17.0) or a .wgsl (WebGPU). So is a drop or a
-  // paste anywhere on the page, and a share link (#zig= or #wgsl=, make share).
+  // Your own theme: a .zig (compiled here by Zig 0.17.0), a .metal (translated here) or a .wgsl. So is a drop or a
+  // paste anywhere on the page, and a share link (#zig=, #metal= or #wgsl=; make share).
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'chip yours';
-  b.innerHTML = 'Run yours <small>.zig · .wgsl</small>';
-  b.title = 'Run a .zig or .wgsl theme here (or drop or paste one anywhere on the page)';
+  b.innerHTML = 'Run yours <small>.zig · .metal · .wgsl</small>';
+  b.title = 'Run a .zig, .metal or .wgsl theme here (or drop or paste one anywhere on the page)';
   b.addEventListener('click', () => filePick.click());
   picker.append(b);
 }
@@ -72,8 +72,7 @@ async function runYours(kind, name, sourceP) {
   let benchLink = 'bench/';
   try {
     const src = await sourceP;
-    if (kind === 'metal') throw new Error('Metal themes run in the Mac app. In a browser a theme needs its WGSL port (web/README.md has the contract), or write it in Zig');
-    if (kind !== 'zig' && kind !== 'wgsl') throw new Error('this is not a .zig or .wgsl theme');
+    if (kind !== 'zig' && kind !== 'wgsl' && kind !== 'metal') throw new Error('this is not a .zig, .metal or .wgsl theme');
     const frag = await shareFragment(kind, name, src);
     benchLink = `bench/#${frag}`;
     // The address bar holds a link to this theme (reload or share it); a chip clears it.
@@ -83,8 +82,9 @@ async function runYours(kind, name, sourceP) {
       say('compiling in this page with Zig 0.17.0…');
       ({ theme, opts } = await zigToLive(name, src, { onPhase: (p) => say(`${esc(p)}…`) }));
     } else {
-      if (!gpu.ok) throw new Error(`a WGSL theme needs WebGPU, and ${gpu.why}`);
-      theme = wgslToLive(name, src);
+      if (!gpu.ok) throw new Error(`a ${kind === 'metal' ? 'Metal' : 'WGSL'} theme needs WebGPU here, and ${gpu.why}`);
+      if (kind === 'metal') say('translating Metal to WGSL in this page…');
+      theme = kind === 'metal' ? await metalToLive(name, src) : wgslToLive(name, src);
     }
     if (gen !== yoursGen) return;
     say('starting…');
@@ -119,7 +119,7 @@ addEventListener('paste', (e) => {
   if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable]')) return;
   const text = e.clipboardData?.getData('text/plain') || '';
   const kind = kindOf('', unfence(text));
-  if (kind !== 'zig' && kind !== 'wgsl') return;
+  if (kind !== 'zig' && kind !== 'wgsl' && kind !== 'metal') return;
   e.preventDefault();
   runFile('', text);
 });

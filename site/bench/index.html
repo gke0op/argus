@@ -56,7 +56,7 @@
     <p class="page-lede">A model writes one theme file. This page compiles it, runs it and grades it in seconds.</p>
     <ol class="steps">
       <li>Copy the prompt into any model.</li>
-      <li>It answers with one file: a Zig theme or a WGSL kernel.</li>
+      <li>It answers with one file: a Zig theme, or a Metal or WGSL kernel.</li>
       <li>Drop or paste it anywhere on this page.</li>
       <li>Watch it run and read the gates.</li>
     </ol>
@@ -64,7 +64,7 @@
 
     <div class="tabs" role="tablist" aria-label="Submission kind">
       <button role="tab" id="tab-zig" aria-controls="pane-zig" aria-selected="true">Zig theme · the benchmark</button>
-      <button role="tab" id="tab-wgsl" aria-controls="pane-wgsl" aria-selected="false" tabindex="-1">WGSL kernel · on the GPU</button>
+      <button role="tab" id="tab-wgsl" aria-controls="pane-wgsl" aria-selected="false" tabindex="-1">Metal or WGSL · on the GPU</button>
     </div>
 
     <!-- ================================================================ Zig ============== -->
@@ -207,7 +207,7 @@
     </nav>
   </div>
 </footer>
-<div class="dropall" id="dropAll" aria-hidden="true">Drop a .zig theme to compile and grade it here<br><span class="small mute">or the .wasm you built from one</span></div>
+<div class="dropall" id="dropAll" aria-hidden="true">Drop a .zig, .metal or .wgsl theme to grade it here<br><span class="small mute">or the .wasm you built from a .zig</span></div>
 <script type="module" src="../assets/bench.js"></script>
 </body>
 </html>

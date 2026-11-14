@@ -24,8 +24,9 @@ export function themeName(fileName) {
 export function kindOf(fileName, text = '') {
   const m = /\.(zig|wgsl|metal)$/i.exec(fileName || '');
   if (m) return m[1].toLowerCase();
-  if (/@compute\b|textureStore\s*\(|\bvec[234]f\b/.test(text)) return 'wgsl';
+  // Metal first: WGSL never has `kernel void`, while a Metal comment may mention textureStore().
   if (/\bkernel\s+void\b|\[\[\s*thread_position_in_grid\s*\]\]/.test(text)) return 'metal';
+  if (/@compute\b|textureStore\s*\(|\bvec[234]f\b/.test(text)) return 'wgsl';
   if (/@import\s*\(|\bpub\s+fn\b|\bconst\s+std\b/.test(text)) return 'zig';
   return null;
 }
@@ -55,7 +56,7 @@ export async function shareLink(kind, name, src, page = '') {
 /// The theme in a location.hash, or null: { kind, name, source: Promise<string> }.
 export function readShare(hash) {
   const p = new URLSearchParams(String(hash || '').replace(/^#/, ''));
-  const kind = p.has('zig') ? 'zig' : p.has('wgsl') ? 'wgsl' : null;
+  const kind = ['zig', 'wgsl', 'metal'].find((k) => p.has(k)) ?? null;
   if (!kind) return null;
   const name = themeName(p.get('name') || 'Model_Theme');
   const source = viaStream(b64urlToBytes(p.get(kind)), new DecompressionStream('deflate-raw')).text();
@@ -97,3 +98,17 @@ export async function zigToLive(name, src, { onPhase, onProgress, signal } = {})
 
 /// WGSL source -> a theme for mount() (WebGPU compiles it).
 export const wgslToLive = (name, src) => ({ id: `yours:${name}`, label: name, kind: 'wgsl-source', source: src, line: 'WGSL compiled by this browser’s WebGPU.', yours: true });
+
+/// Metal source -> WGSL, translated in this page by tools/msl2wgsl.zig as wasm (the translator
+/// the site's build and the Bench workflow run). Throws SourceError naming the construct.
+export async function metalToWgsl(name, src) {
+  const { translate } = await import(new URL('msl2wgsl/msl2wgsl.js', WEB));
+  const r = await translate(src, `themes/${name}.metal`);
+  if (!r.ok) throw new SourceError(`the Metal-to-WGSL translator stopped at line ${r.line}:${r.col}: ${r.message}`);
+  return r.wgsl;
+}
+
+/// Metal source -> a theme for mount(): translated here, then compiled by WebGPU.
+export async function metalToLive(name, src) {
+  return { ...wgslToLive(name, await metalToWgsl(name, src)), line: 'Metal, translated to WGSL in this page (tools/msl2wgsl.zig), run by WebGPU.' };
+}

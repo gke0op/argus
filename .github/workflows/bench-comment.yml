@@ -77,7 +77,7 @@ jobs:
                 # fits a comment (65,536 characters); otherwise make share gives it locally.
                 if [ -f "reports/$name.links.txt" ]; then
                   home=$(sed -n 1p "reports/$name.links.txt"); bench=$(sed -n 2p "reports/$name.links.txt")
-                  ok='^https://gke0op\.github\.io/argus/(bench/)?#(zig|wgsl)=[A-Za-z0-9_-]+&name=[A-Za-z0-9_]+$'
+                  ok='^https://gke0op\.github\.io/argus/(bench/)?#(zig|wgsl|metal)=[A-Za-z0-9_-]+&name=[A-Za-z0-9_]+$'
                   if ! printf '%s' "$home" | grep -Eq "$ok" || ! printf '%s' "$bench" | grep -Eq "$ok"; then
                     echo "No link: the run's links did not have the site's link shape."
                   elif [ ${#home} -gt 20000 ]; then
