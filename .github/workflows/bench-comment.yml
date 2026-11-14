@@ -40,9 +40,9 @@ jobs:
           [ -n "$pr" ] || { echo "no PR number"; exit 0; }
           head=$(gh api "repos/$REPO/pulls/$pr" --jq .head.sha)
           [ "$head" = "$RUN_HEAD" ] || { echo "PR $pr head $head is not this run's $RUN_HEAD: not commenting"; exit 0; }
-          # The live board's data (bench/feed.zig reads it): per theme the native verdict and the
-          # browser build's reference grade (web/zigc/grade.mjs), every field checked against its
-          # shape (the reports come from the pull request's run and are untrusted).
+          # The live board's data (site/assets/live.js reads it): per theme its path, the native
+          # verdict and the browser build's reference grade (web/zigc/grade.mjs), every field
+          # checked against its shape (the reports come from the pull request's run and are untrusted).
           shape='def sha: if type == "string" and test("^[0-9a-f]{64}$") then . else null end;
             {ruler: (.ruler | sha), moduleSha256: (.moduleSha256 | sha),
              outcome: (.outcome | if type == "string" and test("^[a-z-]{1,32}$") then . else "" end),
@@ -54,7 +54,8 @@ jobs:
               [ -n "$name" ] || continue
               b=null
               [ -f "reports/$name.browser.json" ] && b=$(jq -c "$shape" "reports/$name.browser.json" 2>/dev/null || echo null)
-              themes=$(jq -c --arg n "$name" --arg e "$ext" --arg v "$verdict" --argjson b "$b" '. + [{name: $n, ext: $e, native: $v, browser: $b}]' <<< "$themes")
+              path=$(grep -xE "(bench/submissions|themes|web/themes)/$name\.$ext" reports/files.txt 2>/dev/null | head -1 || true)
+              themes=$(jq -c --arg n "$name" --arg e "$ext" --arg p "$path" --arg v "$verdict" --argjson b "$b" '. + [{name: $n, ext: $e, path: $p, native: $v, browser: $b}]' <<< "$themes")
             done < reports/verdicts.txt
           fi
           data=$(jq -c --arg h "$(printf '%s' "$RUN_HEAD" | tr -cd '0-9a-f')" '{head: $h, themes: .}' <<< "$themes")

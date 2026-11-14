@@ -6,7 +6,7 @@
 //   WGSL: compiled by WebGPU and run through the Metal harness's checks (wgsl-harness.js).
 import { mount, probeWebGPU } from './engines.js';
 import { copyText } from './ui.js';
-import { unfence, shareLink, readShare, speedProbe } from './sources.js';
+import { unfence, shareLink, readShare } from './sources.js';
 
 const $ = (id) => document.getElementById(id);
 const REPO = 'gke0op/argus';
@@ -301,8 +301,6 @@ $('zigDiag').addEventListener('click', (e) => {
   ta.scrollTop = Math.max(0, l * lh - ta.clientHeight / 2);
 });
 
-const GATE_BUDGET_S = 90; // run the gates without asking when 120 frames at 1920x1200 take less
-
 /// What the page says when zig.wasm itself did not finish: a time limit, a crash, a dead Worker,
 /// a failed load. Gate 1 is then not decided here (the native compiler has no such limits).
 function compilerTrouble(r, name, kind, why, log, extra) {
@@ -342,12 +340,23 @@ async function compileAndGrade(name, source, title) {
     renderGates($('zigGates').tBodies[0], GATES.map((g) => ({ ...g, pass: null, detail: '…' })));
     phase('loading the compiler');
     const zc = await zigc();
-    let c;
+    // The pipeline the home page and CI run too (web/zigc/grade.js): compile, module, probe.
+    const { prepare } = await import(new URL('zigc/grade.js', WEB));
+    const gate1Line = (c) => `type-checks with Zig 0.17.0 in this page for wasm64 (64-bit usize, as aarch64-macos), ${secs(c.gate1.ms)}; built wasm32-freestanding, ${(c.wasm.length / 1024).toFixed(0)} KB, in ${secs(c.build.ms)} (Zig’s wasm backend, no SIMD, 1 thread)`;
+    let p;
     try {
-      c = await zc.compile(name, source, {
+      p = await prepare(zc, name, source, {
         signal: r.ac.signal,
         timeoutMs: COMPILE_LIMIT_MS,
-        onPhase: (p) => phase(p === 'sema' ? 'compiling: Gate 1, type-checking for a 64-bit target (wasm64)' : 'compiling: building the module (wasm32, Zig’s wasm backend)'),
+        onPhase: (k, so) => {
+          if (k === 'sema') phase('compiling: Gate 1, type-checking for a 64-bit target (wasm64)');
+          else if (k === 'build') phase('compiling: building the module (wasm32, Zig’s wasm backend)');
+          else if (k === 'module') phase('compiling the module in this browser');
+          else if (k === 'probe' && !cancelled(r)) {
+            renderGates($('zigGates').tBodies[0], GATES.map((g) => ({ ...g, pass: g.id === 1 ? true : null, detail: g.id === 1 ? gate1Line(so.c) : '…' })));
+            phase('timing one frame at 320×200');
+          }
+        },
       });
     } catch (e) {
       if (cancelled(r)) return;
@@ -361,20 +370,20 @@ async function compileAndGrade(name, source, title) {
       return;
     }
     if (cancelled(r)) return;
-    const info = c.info || {};
+    const c = p.c, info = p.info;
     const extra = { compile: { semaMs: Math.round(c.gate1.ms || 0), buildMs: c.build ? Math.round(c.build.ms) : null, wallMs: Math.round(c.wallMs || 0), wasmKB: c.wasm ? Math.round(c.wasm.length / 1024) : null, cachedDownloads: info.cachedDownloads, downloadBytes: info.downloadBytes, restoredCacheFiles: info.restoredCacheFiles, cacheDropped: info.cacheDropped || null, retriedWithoutCache: !!c.retriedWithoutCache, memMB: Math.round((c.memBytes || 0) / 1048576), ok: c.ok, gate1: c.gate1.ok } };
     // The module's SHA-256 and the ruler it was built under: two grades under the same ruler
     // must give the same module (the live board compares them, live.js).
     extra.compile.ruler = info.ruler || null;
-    extra.compile.moduleSha256 = c.wasm ? [...new Uint8Array(await crypto.subtle.digest('SHA-256', c.wasm))].map((b) => b.toString(16).padStart(2, '0')).join('') : null;
+    extra.compile.moduleSha256 = p.moduleSha256;
     window.__zigc = extra.compile;
     const cacheNote = info.cacheDropped ? ` · the saved compiler cache was dropped (${info.cacheDropped})` : c.retriedWithoutCache ? ' · retried without the saved compiler cache' : '';
-    if (c.crash) {
+    if (p.stop === 'crash') {
       compilerTrouble(r, name, 'compiler-crash', crashText(c.crash, !!c.retriedWithoutCache), c.crash.stderr, extra);
       endRun(r, `the compiler ${c.crash.kind === 'stack-overflow' ? 'ran out of stack' : c.crash.kind === 'out-of-memory' ? 'ran out of memory' : 'crashed'} · ${secs(performance.now() - t0)}${cacheNote}`);
       return;
     }
-    if (!c.gate1.ok) {
+    if (p.stop === 'gate1') {
       const gates = GATES.map((g) => ({ ...g, pass: g.id === 1 ? false : null, detail: g.id === 1 ? `zig build-obj -fno-emit-bin -target wasm64-freestanding failed (${secs(c.gate1.ms)}):\n${c.gate1.log}` : 'not run' }));
       renderGates($('zigGates').tBodies[0], gates);
       showDiagnostics(c.gate1.log, name);
@@ -386,7 +395,7 @@ async function compileAndGrade(name, source, title) {
       return;
     }
     const sema = `type-checks with Zig 0.17.0 in this page for wasm64 (64-bit usize, as aarch64-macos), ${secs(c.gate1.ms)}`;
-    if (!c.ok) {
+    if (p.stop === 'build') {
       const gates = GATES.map((g) => ({ ...g, pass: g.id === 1 ? true : null, detail: g.id === 1 ? sema : 'not run: this page’s compiler could not build it (see above)' }));
       renderGates($('zigGates').tBodies[0], gates);
       showDiagnostics(`This theme passes Gate 1, but this page’s compiler (Zig’s wasm backend, no LLVM) could not build it. That is a limit of the browser build, not a verdict: a pull request builds it with LLVM.\n\n${c.build.log}`, name, 'warn');
@@ -396,27 +405,17 @@ async function compileAndGrade(name, source, title) {
       window.__bench = { kind: 'zig', name, outcome: 'not-graded', pass: null, gates: gates.map((g) => g.pass), text: c.build.log, ...extra };
       return;
     }
-    const { moduleFromBytes } = await import(new URL('wasm/engine.js', WEB));
-    phase('compiling the module in this browser');
-    let module;
-    try { module = await bounded(moduleFromBytes(c.wasm), 30000, 'compiling the module in this browser'); } catch (e) {
-      if (cancelled(r)) return;
-      compilerTrouble(r, name, 'module-error', `Zig built a module that this browser could not load: ${e.message ?? e}. This is a fault of the browser build, not a verdict on the theme.`, '', extra);
+    if (p.stop === 'module') {
+      compilerTrouble(r, name, 'module-error', `Zig built a module that this browser could not load: ${p.error?.message ?? p.error}. This is a fault of the browser build, not a verdict on the theme.`, '', extra);
       endRun(r, 'the module did not load in this browser');
       return;
     }
     if (cancelled(r)) return;
-    const gate1 = `${sema}; built wasm32-freestanding, ${(c.wasm.length / 1024).toFixed(0)} KB, in ${secs(c.build.ms)} (Zig’s wasm backend, no SIMD, 1 thread)`;
-    renderGates($('zigGates').tBodies[0], GATES.map((g) => ({ ...g, pass: g.id === 1 ? true : null, detail: g.id === 1 ? gate1 : '…' })));
-    phase('timing one frame at 320×200');
-    const ms320 = await speedProbe(module, r.ac.signal);
-    if (cancelled(r)) return;
-    // The live view renders as many pixels as this build draws in ~25 ms (at most 1920x1200).
-    const maxPixels = ms320 > 0 ? Math.max(320 * 200, Math.min(1920 * 1200, Math.round(320 * 200 * 25 / ms320))) : undefined;
-    const projected = ms320 > 0 ? ms320 * ((1920 * 1200) / (320 * 200)) * 121 / 1000 : 0;
+    const gate1 = gate1Line(c);
+    const { module, ms320, maxPixels, projectedS: projected } = p;
     extra.compile.ms320 = ms320 ?? null;
     extra.compile.projectedGatesS = Math.round(projected);
-    if (projected > GATE_BUDGET_S) {
+    if (p.deferred) {
       const mins = Math.ceil(projected / 60);
       const gates = GATES.map((g) => ({ ...g, pass: g.id === 1 ? true : null, detail: g.id === 1 ? gate1 : `not run yet: about ${mins} min in this build` }));
       renderGates($('zigGates').tBodies[0], gates);

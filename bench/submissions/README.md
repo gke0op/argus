@@ -13,10 +13,9 @@ M3 figure the leaderboard uses.
 ## The live board
 
 The bench page's "Submissions, live" (`/bench/#live`) lists every theme a pull request adds here,
-by model, within minutes: waiting for the native grade, graded, or stale (a grade for an older
-commit). `.github/workflows/bench-feed.yml` builds the list (`bench/feed.sh`, `bench/feed.zig`)
-from the pull requests and their bench comments and publishes `feed.json` on the `bench-feed`
-branch. It only reads metadata and never runs a pull request's code.
+by model, once its bench run has commented: graded, or stale (a newer commit is waiting for its
+grade). The page reads GitHub's public API directly (the pull requests and the bot's comments,
+whose `argus-bench-data` line carries each theme's path and grades); there is no feed to build.
 
 Besides the native verdict, the Bench workflow grades each Zig theme as the page does
 (`web/zigc/grade.mjs`, with the live site's compiler): the module's SHA-256 and gates 1-7 under a
