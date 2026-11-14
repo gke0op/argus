@@ -298,7 +298,8 @@ pub const Parser = struct {
                 const t = self.peek();
                 if (t.tag == .int_lit) {
                     _ = self.advance();
-                    try targs.append(self.a, .{ .int = std.fmt.parseInt(i64, std.mem.trimEnd(u8, t.text, "uUlL"), 0) catch 0 });
+                    const v = std.fmt.parseInt(i64, std.mem.trimEnd(u8, t.text, "uUlL"), 0) catch return lex.fail(self.a, self.diag, t.line, t.col, "bad template argument '{s}'", .{t.text});
+                    try targs.append(self.a, .{ .int = v });
                 } else if (t.tag == .ident and (self.isPAt(1, "::"))) {
                     var full: std.ArrayList(u8) = .empty;
                     try full.appendSlice(self.a, self.advance().text);
@@ -344,7 +345,16 @@ pub const Parser = struct {
         var arg: ?i64 = null;
         if (self.eatP("(")) {
             const t = self.advance();
-            if (t.tag == .int_lit) arg = std.fmt.parseInt(i64, std.mem.trimEnd(u8, t.text, "uUlL"), 0) catch null;
+            if (t.tag == .int_lit) {
+                arg = std.fmt.parseInt(i64, std.mem.trimEnd(u8, t.text, "uUlL"), 0) catch return lex.fail(self.a, self.diag, t.line, t.col, "bad attribute argument '{s}'", .{t.text});
+            } else if (!std.mem.eql(u8, t.text, ")")) {
+                return lex.fail(self.a, self.diag, t.line, t.col, "attribute [[{s}(...)]]: only an integer argument is supported", .{name});
+            }
+            if (std.mem.eql(u8, t.text, ")")) {
+                try self.expectP("]");
+                try self.expectP("]");
+                return .{ .name = name, .arg = null };
+            }
             while (!self.isP(")")) {
                 if (self.peek().tag == .eof) return self.failHere("unterminated attribute", .{});
                 _ = self.advance();

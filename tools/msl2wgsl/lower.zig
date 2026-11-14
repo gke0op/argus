@@ -1039,7 +1039,7 @@ pub const Lowerer = struct {
                 try self.push(try self.newSym(.{ .name = nm, .wname = if (special == .frame) "f" else "s", .kind = .static_, .ty = t, .special = special }));
             } else if (std.mem.eql(u8, at.name, "texture")) {
                 if (t != .texture) return self.err(prm.line, prm.col, "[[texture]] parameter {s} is not a texture2d", .{nm});
-                const idx = at.arg orelse 0;
+                const idx = at.arg orelse return self.err(prm.line, prm.col, "[[texture]] parameter {s} needs an index, [[texture(n)]]", .{nm});
                 const g: []const u8 = switch (kind) {
                     .draw => if (idx == 0) "argus_out" else if (idx == 1) "argus_state" else "",
                     .init => if (idx == 0) "argus_state_out" else if (idx == 1) "argus_data" else "",
