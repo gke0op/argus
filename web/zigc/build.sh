@@ -9,7 +9,9 @@
 #   zig-lib.bin.gz   the std/compiler_rt import closure of the release's lib/ (web/zigc/bundle.zig)
 #   support/...      runtime.zig, harness_gates.zig, the SDK and the kernel, at the paths the
 #                    compile sees (web/zigc/zigc.js SUPPORT)
-#   manifest.json    sizes and SHA-256 of the two .gz, which the Worker checks and caches by
+#   manifest.json    sizes and SHA-256 of the two .gz, which the Worker checks and caches by;
+#                    and `ruler`, the SHA-256 of ruler.txt (the content hashes of zig.wasm, the
+#                    uncompressed std bundle and every support file)
 set -eu
 cd "$(dirname "$0")/../.."
 ZIG=${ZIG:-.toolchain/zig}
@@ -29,6 +31,7 @@ mkdir -p "$OUT"
 rm -rf "$OUT/support"
 "$ZIG" run -OReleaseSafe web/zigc/bundle.zig -- "$LIB_DIR" "$OUT/zig-lib.bin"
 gzip -9n -c "$OUT/zig-lib.bin" > "$OUT/zig-lib.bin.gz"
+lib_sha=$(sha256 "$OUT/zig-lib.bin")
 rm -f "$OUT/zig-lib.bin"
 gzip -9n -c "$ZIG_WASM" > "$OUT/zig.wasm.gz"
 
@@ -39,20 +42,29 @@ web/wasm/runtime.zig:web/wasm/runtime.zig
 web/wasm/wasm_heap.zig:web/wasm/wasm_heap.zig
 web/zigc/root.zig:web/zigc/root.zig
 src/harness_gates.zig:src/harness_gates.zig'
+# The ruler: everything a grade depends on besides the theme, by content. Two grades under the
+# same ruler must give the same module (by SHA-256) and the same gates 1-7 (web/zigc/README.md).
 list=''
+ruler_parts="zig.wasm $(sha256 "$ZIG_WASM")
+zig-lib.bin $lib_sha"
 for pair in $support; do
     virt=${pair%%:*}; repo=${pair#*:}
     mkdir -p "$OUT/support/$(dirname "$virt")"
     cp "$repo" "$OUT/support/$virt"
     list="$list${list:+,}[\"$virt\",\"support/$virt\"]"
+    ruler_parts="$ruler_parts
+$virt $(sha256 "$repo")"
 done
+printf '%s\n' "$ruler_parts" > "$OUT/ruler.txt"
+ruler=$(sha256 "$OUT/ruler.txt")
 
 cat > "$OUT/manifest.json" <<EOF
 {
   "zigVersion": "$VERSION",
   "zig": { "file": "zig.wasm.gz", "bytes": $(size "$ZIG_WASM"), "gzBytes": $(size "$OUT/zig.wasm.gz"), "sha256": "$(sha256 "$OUT/zig.wasm.gz")" },
   "lib": { "file": "zig-lib.bin.gz", "gzBytes": $(size "$OUT/zig-lib.bin.gz"), "sha256": "$(sha256 "$OUT/zig-lib.bin.gz")" },
-  "support": [$list]
+  "support": [$list],
+  "ruler": "$ruler"
 }
 EOF
 echo "web-zigc: $OUT: zig.wasm.gz $(size "$OUT/zig.wasm.gz") B, zig-lib.bin.gz $(size "$OUT/zig-lib.bin.gz") B"

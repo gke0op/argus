@@ -96,6 +96,23 @@ jobs:
           for t in out/*.txt; do echo "::group::$t"; cat "$t"; echo "::endgroup::"; done
           exit $status
 
+      # The live board's reference grade (web/zigc/grade.mjs): each Zig theme compiled and graded
+      # as the bench page does, with the live site's compiler and gates (the ruler), giving the
+      # module's SHA-256 and gates 1-7 that a visitor's "Re-grade in my browser" must reproduce.
+      # It never decides the pull request: the native harness above does.
+      - uses: actions/setup-node@v4
+        if: always()
+        with:
+          node-version: 22
+
+      - name: Grade each Zig theme in the browser build (the live board's reference)
+        if: always()
+        continue-on-error: true
+        run: |
+          zig_files=$(grep -E '(^|/)[A-Za-z0-9_]+\.zig$' out/files.txt 2>/dev/null | grep -v '^themes/argus_theme_sdk\.zig$' || true)
+          [ -n "$zig_files" ] || { echo "no Zig themes"; exit 0; }
+          node web/zigc/grade.mjs --site https://gke0op.github.io/argus/ --out out $zig_files
+
       - name: Upload the reports
         if: always()
         uses: actions/upload-artifact@v4

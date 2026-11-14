@@ -165,7 +165,7 @@ async function init(msg) {
   for (const [virt, bytes] of support) fs.writeFile(fs.cwd, virt, bytes, 1n);
   const cache = await restoreCache(!!msg.dropCache);
   return {
-    zigVersion: manifest.zigVersion, libFiles, restoredCacheFiles: cache.files, cacheDropped: cache.dropped, cacheUnavailable: cache.unavailable || null,
+    zigVersion: manifest.zigVersion, ruler: manifest.ruler || null, libFiles, restoredCacheFiles: cache.files, cacheDropped: cache.dropped, cacheUnavailable: cache.unavailable || null,
     cachedDownloads: z.cached && l.cached, downloadBytes: (z.cached ? 0 : manifest.zig.gzBytes) + (l.cached ? 0 : manifest.lib.gzBytes),
     gzBytes: manifest.zig.gzBytes + manifest.lib.gzBytes, loadMs: performance.now() - t0, downloadMs: tDownload, wasmCompileMs: tCompile,
   };

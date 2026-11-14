@@ -413,6 +413,21 @@ table.gates tbody tr:hover td { background: rgba(255, 255, 255, 0.02); }
 .stage:fullscreen canvas { width: 100%; height: 100%; }
 .result > p.small { margin: 1rem 0 0; color: var(--mute); max-width: 52rem; }
 .progress { font: 12px/1.5 var(--mono); color: var(--mute); }
+/* The live board (live.js). */
+.live-t td { font-size: 0.82rem; }
+.live-t td code { font-size: 0.78rem; white-space: nowrap; }
+.live-t td:nth-child(3) { min-width: 14rem; }
+.live-t td:last-child { min-width: 12rem; }
+#live .toolbar select { flex: 0 1 14rem; }
+.pill { display: inline-block; padding: 0.15em 0.55em; border: 1px solid var(--line-2); border-radius: 4px; font: 600 0.7rem/1.4 var(--mono); color: var(--fg-2); white-space: nowrap; }
+.pill.graded, .pill.merged { border-color: rgba(94, 214, 139, 0.45); color: var(--pass); }
+.pill.waiting, .pill.stale { border-color: rgba(240, 197, 98, 0.45); color: var(--warn); }
+.v { font: 700 0.8rem/1 var(--mono); }
+.v.pass { color: var(--pass); } .v.fail { color: var(--fail); }
+.cmp { margin-top: 0.45rem; font: 12px/1.45 var(--mono); padding-left: 0.6rem; border-left: 2px solid var(--line-3); color: var(--fg-2); max-width: 30rem; }
+.cmp.ok { border-left-color: var(--pass); color: var(--pass); }
+.cmp.bad { border-left-color: var(--fail); color: var(--fail); background: var(--fail-bg); }
+.cmp[hidden] { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

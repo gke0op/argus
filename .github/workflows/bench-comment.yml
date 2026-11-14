@@ -40,8 +40,28 @@ jobs:
           [ -n "$pr" ] || { echo "no PR number"; exit 0; }
           head=$(gh api "repos/$REPO/pulls/$pr" --jq .head.sha)
           [ "$head" = "$RUN_HEAD" ] || { echo "PR $pr head $head is not this run's $RUN_HEAD: not commenting"; exit 0; }
+          # The live board's data (site/assets/live.js reads it): per theme its path, the native
+          # verdict and the browser build's reference grade (web/zigc/grade.mjs), every field
+          # checked against its shape (the reports come from the pull request's run and are untrusted).
+          shape='def sha: if type == "string" and test("^[0-9a-f]{64}$") then . else null end;
+            {ruler: (.ruler | sha), moduleSha256: (.moduleSha256 | sha),
+             outcome: (.outcome | if type == "string" and test("^[a-z-]{1,32}$") then . else "" end),
+             gates: (.gates | if type == "array" and length == 8 and all(.[]; . == true or . == false or . == null) then . else [] end)}'
+          themes='[]'
+          if [ -s reports/verdicts.txt ]; then
+            while read -r name ext verdict; do
+              name=$(printf '%s' "$name" | tr -cd 'A-Za-z0-9_'); ext=$(printf '%s' "$ext" | tr -cd 'a-z'); verdict=$(printf '%s' "$verdict" | tr -cd 'A-Z')
+              [ -n "$name" ] || continue
+              b=null
+              [ -f "reports/$name.browser.json" ] && b=$(jq -c "$shape" "reports/$name.browser.json" 2>/dev/null || echo null)
+              path=$(grep -xE "(bench/submissions|themes|web/themes)/$name\.$ext" reports/files.txt 2>/dev/null | head -1 || true)
+              themes=$(jq -c --arg n "$name" --arg e "$ext" --arg p "$path" --arg v "$verdict" --argjson b "$b" '. + [{name: $n, ext: $e, path: $p, native: $v, browser: $b}]' <<< "$themes")
+            done < reports/verdicts.txt
+          fi
+          data=$(jq -c --arg h "$(printf '%s' "$RUN_HEAD" | tr -cd '0-9a-f')" '{head: $h, themes: .}' <<< "$themes")
           {
             echo "<!-- argus-bench -->"
+            echo "<!-- argus-bench-data: $data -->"
             echo "### ARGUS-BENCH: native harness"
             echo
             if [ -s reports/verdicts.txt ]; then
@@ -68,6 +88,10 @@ jobs:
                   echo
                 fi
                 [ -f "reports/$name.nolink.txt" ] && { tr -d '`[]()<>' < "reports/$name.nolink.txt" | head -c 400; echo; echo; }
+                # The browser build's reference grade, from the checked data above.
+                bl=$(jq -r --arg n "$name" '.[] | select(.name == $n) | .browser | select(. != null and .outcome != "") |
+                  "Browser build: \(.outcome)\(if (.gates | length) == 8 then (if any(.gates[0:7][]; . == false) then ", gates 1-7 FAIL" elif all(.gates[0:7][]; . == true) then ", gates 1-7 PASS" else ", gate 1 PASS, gates 2-7 not run" end) else "" end)\(if .moduleSha256 then ", module `" + .moduleSha256[0:16] + "`" else "" end)\(if .ruler then " (ruler `" + .ruler[0:12] + "`)" else "" end). Anyone can re-grade it in a browser on the [live board](https://gke0op.github.io/argus/bench/#live) and must get the same module and gates."' <<< "$themes")
+                [ -n "$bl" ] && { echo "$bl"; echo; }
                 echo '```text'
                 tr -d '`' < "reports/$name.txt" | head -c 6000
                 echo '```'

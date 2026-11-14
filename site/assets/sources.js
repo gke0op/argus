@@ -69,30 +69,6 @@ export function zigCompiler(onProgress) {
   return compilerPromise;
 }
 
-/// One frame of `m` (engine.js moduleFromBytes) at 320x200 on one thread: CPU ms, or undefined after 10 s.
-export async function speedProbe(m, signal) {
-  const { startEngine } = await import(new URL('wasm/engine.js', WEB));
-  let eng = null, stop = false;
-  const work = (async () => {
-    eng = await startEngine({ module: m.module, threaded: false, threads: 1 });
-    if (stop) return undefined;
-    const { ptr } = await eng.leader.call('liveInit', { w: 320, h: 200, scale: 2 });
-    if (!ptr) return null;
-    await eng.leader.call('frame', { dt: 0.008, w: 320, h: 200, ptr });
-    return (await eng.leader.call('frame', { dt: 0.008, w: 320, h: 200, ptr })).cpuMs;
-  })().catch(() => null);
-  let t;
-  const r = await Promise.race([work, new Promise((res) => { t = setTimeout(() => res(undefined), 10000); signal?.addEventListener('abort', () => res(undefined), { once: true }); })]);
-  clearTimeout(t);
-  stop = true;
-  eng?.terminate();
-  work.then(() => eng?.terminate());
-  return r;
-}
-
-/// The pixels this build can draw in about `ms` per frame, from its 320x200 time (at most 1920x1200).
-export const pixelsFor = (ms320, ms = 25) => (ms320 > 0 ? Math.max(320 * 200, Math.min(1920 * 1200, Math.round((320 * 200 * ms) / ms320))) : undefined);
-
 export class SourceError extends Error {
   constructor(message, log = '') { super(message); this.log = log; }
 }
@@ -102,21 +78,20 @@ export class SourceError extends Error {
 export async function zigToLive(name, src, { onPhase, onProgress, signal } = {}) {
   onPhase?.('loading the compiler');
   const zc = await zigCompiler(onProgress);
-  const c = await zc.compile(name, src, {
+  const { prepare } = await import(new URL('zigc/grade.js', WEB));
+  const p = await prepare(zc, name, src, {
     signal,
     timeoutMs: 120000,
-    onPhase: (p) => onPhase?.(p === 'sema' ? 'compiling: type-checking' : 'compiling: building the module'),
+    onPhase: (k) => { const t = { sema: 'compiling: type-checking', build: 'compiling: building the module', module: 'starting it' }[k]; if (t) onPhase?.(t); },
   });
-  if (c.crash) throw new SourceError(`the compiler stopped (${c.crash.kind})`, c.crash.stderr || '');
-  if (!c.gate1.ok) throw new SourceError('it does not compile (Zig 0.17.0’s errors below)', c.gate1.log);
-  if (!c.ok) throw new SourceError('this page’s compiler (Zig’s wasm backend, no LLVM) could not build it; the native harness can', c.build.log);
-  onPhase?.('starting it');
-  const { moduleFromBytes } = await import(new URL('wasm/engine.js', WEB));
-  const module = await moduleFromBytes(c.wasm);
-  const maxPixels = pixelsFor(await speedProbe(module, signal));
+  const c = p.c;
+  if (p.stop === 'crash') throw new SourceError(`the compiler stopped (${c.crash.kind})`, c.crash.stderr || '');
+  if (p.stop === 'gate1') throw new SourceError('it does not compile (Zig 0.17.0’s errors below)', c.gate1.log);
+  if (p.stop === 'build') throw new SourceError('this page’s compiler (Zig’s wasm backend, no LLVM) could not build it; the native harness can', c.build.log);
+  if (p.stop === 'module') throw p.error;
   return {
     theme: { id: `yours:${name}`, label: name, kind: 'wasm', build: name, line: 'compiled in this page by Zig 0.17.0 as WebAssembly (one thread, no SIMD).', yours: true },
-    opts: { module, maxPixels, label: 'wasm (Zig compiled in this page)' },
+    opts: { module: p.module, maxPixels: p.maxPixels, label: 'wasm (Zig compiled in this page)' },
   };
 }
 
