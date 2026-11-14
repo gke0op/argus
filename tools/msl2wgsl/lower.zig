@@ -313,6 +313,9 @@ pub const Lowerer = struct {
     tmp: u32 = 0,
     lambda_count: u32 = 0,
     pending_copyback: std.ArrayList([]const u8) = .empty,
+    /// Instances created, in order (keys and names), so a discarded lowering pass can drop
+    /// the ones it made.
+    inst_log: std.ArrayList(*Instance) = .empty,
     ctx: *Ctx = undefined,
 
     // ----------------------------------------------------------------- utilities
@@ -2095,9 +2098,9 @@ pub const Lowerer = struct {
         if (c.callee.kind != .ident) return self.errE(e, "calling an expression is not supported", .{});
         const name = stripNs(c.callee.kind.ident);
         if (c.targs.len > 0) {
-            const t = try self.resolveType(c.targs[0]);
             if (c.args.len != 1) return self.errE(e, "{s} takes one argument", .{name});
             const v = try self.lowerExpr(c.args[0]);
+            const t = try self.resolveType(c.targs[0]);
             if (std.mem.eql(u8, name, "as_type")) {
                 if (scalarOf(v.ty) == null or scalarOf(t) == null or widthOf(t) != widthOf(v.ty)) return self.errE(e, "as_type between {s} and {s}", .{ try self.mslName(v.ty), try self.mslName(t) });
                 if (scalarOf(t).? == .bool or scalarOf(v.ty).? == .bool) return self.errE(e, "as_type with bool", .{});
@@ -2201,10 +2204,27 @@ pub const Lowerer = struct {
             return .{ .ty = .void, .text = "workgroupBarrier()", .pure = false };
         }
         if (std.mem.startsWith(u8, name, "atomic_")) return self.callAtomic(name, arg_exprs, e);
+        if (std.mem.startsWith(u8, name, "simd_") or std.mem.startsWith(u8, name, "quad_") or std.mem.startsWith(u8, name, "simdgroup_"))
+            return self.errE(e, "{s}(): SIMD-group functions have no WGSL equivalent the Argus web host can use (WGSL subgroups are an optional extension it does not enable)", .{name});
         if (std.mem.eql(u8, name, "level")) {
             if (arg_exprs.len != 1) return self.errE(e, "level(x)", .{});
             const v = try self.lowerExpr(arg_exprs[0]);
             return .{ .ty = .void, .text = "", .special = .{ .level = try self.coerce(v, t_f32, arg_exprs[0]) } };
+        }
+        if (std.mem.eql(u8, name, "sincos")) {
+            // sincos(x, cosval): returns sin(x), writes cos(x) through the reference
+            if (arg_exprs.len != 2) return self.errE(e, "sincos(x, cosval) takes 2 arguments", .{});
+            const x = try self.lowerExpr(arg_exprs[0]);
+            const cv = try self.lowerExpr(arg_exprs[1]);
+            try self.requireWritable(cv, arg_exprs[1]);
+            const t = shape(.f32, widthOf(x.ty));
+            if (!eql(cv.ty, t)) return self.errE(arg_exprs[1], "sincos(): the cosine goes to a {s}", .{try self.mslName(t)});
+            const tmp = try self.newTmp();
+            try self.line("let {s}: {s} = {s};", .{ tmp, try self.tyText(t), try self.coerce(x, t, arg_exprs[0]) });
+            if (cv.swz) |sw| {
+                for (sw.comps, 0..) |c, i| try self.line("{s}.{c} = cos({s}).{c};", .{ sw.base, c, tmp, "xyzw"[i] });
+            } else try self.line("{s} = cos({s});", .{ cv.text, tmp });
+            return .{ .ty = t, .text = try self.p("sin({s})", .{tmp}), .pure = false };
         }
         const args = try self.lowerArgs(arg_exprs);
         var pure = true;
@@ -2611,6 +2631,7 @@ pub const Lowerer = struct {
             const i = try self.a.create(Instance);
             i.* = .{ .key = key.items, .name = try self.uniqueName(f.name), .func = f, .binds = m.binds, .tbinds = m.tbinds, .ret = ret };
             try self.inst_idx.put(self.a, key.items, i);
+            try self.inst_log.append(self.a, i);
             try self.lowerInstance(i);
             break :blk i;
         };
@@ -2720,6 +2741,8 @@ pub const Lowerer = struct {
         for (f.params) |_| try marks.append(self.a, false);
         var attempt: u32 = 0;
         while (true) : (attempt += 1) {
+            const mark_insts = self.insts.items.len;
+            const mark_log = self.inst_log.items.len;
             var body: std.ArrayList(u8) = .empty;
             var ctx: Ctx = .{ .out = &body, .ret = inst.ret, .inst = inst, .tbinds = inst.tbinds, .owner = inst.name };
             const saved = self.ctx;
@@ -2807,7 +2830,16 @@ pub const Lowerer = struct {
                     marks.items[i] = true;
                     changed = true;
                 };
-                if (changed) continue;
+                if (changed) {
+                    // drop what this pass instantiated: the next pass makes what it needs
+                    for (self.inst_log.items[mark_log..]) |d| {
+                        _ = self.inst_idx.remove(d.key);
+                        _ = self.used.remove(d.name);
+                    }
+                    self.inst_log.items.len = mark_log;
+                    self.insts.items.len = mark_insts;
+                    continue;
+                }
             }
             const ret_txt = if (inst.ret == .void) "" else if (inst.ret == .ptr) " -> i32" else try self.p(" -> {s}", .{try self.tyText(inst.ret)});
             inst.text = try self.p("// {s} (Metal line {d})\nfn {s}({s}){s} {{\n{s}{s}}}\n\n", .{ f.name, f.line, inst.name, try std.mem.join(self.a, ", ", sig.items), ret_txt, prologue.items, body.items });
@@ -2842,8 +2874,8 @@ pub const Lowerer = struct {
             },
             .call => |c| {
                 try self.collectIdents(c.callee, out, false);
-                // an argument may bind to a reference parameter: count it as written
-                for (c.args) |x| try self.collectIdents(x, out, true);
+                // an argument is written when it may bind to a reference (or pointer) parameter
+                for (c.args, 0..) |x, i| try self.collectIdents(x, out, self.argMayBeWritten(c.callee, i, c.args.len));
             },
             .member => |m| try self.collectIdents(m.e, out, lvalue),
             .index => |x| {
@@ -2860,6 +2892,38 @@ pub const Lowerer = struct {
             },
             else => {},
         }
+    }
+
+    fn paramWrites(prm: P.Param) bool {
+        const t = prm.ty;
+        if (t.ptr > 0 and !t.is_const and t.space != .constant) return true;
+        if (prm.dims.len > 0 and !t.is_const) return true;
+        return t.ref and !t.is_const and t.space != .constant;
+    }
+
+    /// Whether argument i of a call may be written by the callee (a reference or pointer
+    /// parameter, sincos's cosine, an atomic): what a lambda must capture by pointer.
+    fn argMayBeWritten(self: *Lowerer, callee: *const P.Expr, i: usize, nargs: usize) bool {
+        const n = switch (callee.kind) {
+            .ident => |x| stripNs(x),
+            else => return false, // texture methods write nothing they are given
+        };
+        if (self.lookup(n)) |s| {
+            if (s.special == .lambda) {
+                const ps = s.special.lambda.def.ast.params;
+                return i < ps.len and paramWrites(ps[i]);
+            }
+        }
+        if (self.funcs.get(n)) |list| {
+            for (list.items) |f| {
+                if (f.params.len < nargs or i >= f.params.len) continue;
+                if (paramWrites(f.params[i])) return true;
+            }
+            return false;
+        }
+        if (std.mem.eql(u8, n, "sincos")) return i == 1;
+        if (std.mem.startsWith(u8, n, "atomic_")) return i == 0;
+        return false;
     }
 
     fn collectStmtIdents(self: *Lowerer, s: *const P.Stmt, out: *std.StringHashMapUnmanaged(bool)) Error!void {
@@ -3007,6 +3071,7 @@ pub const Lowerer = struct {
             const i = try self.a.create(Instance);
             i.* = .{ .key = key.items, .name = try self.uniqueName(def.name), .func = null, .ldef = def, .binds = binds.items, .tbinds = &.{}, .ret = .void };
             try self.inst_idx.put(self.a, key.items, i);
+            try self.inst_log.append(self.a, i);
             try self.lowerLambdaInstance(i);
             break :blk i;
         };

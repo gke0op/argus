@@ -120,10 +120,13 @@ A theme in a pull request runs in the browser before anyone merges it, and on th
   theme on the home page and one that grades it on the bench. Once merged, the site builds it to
   wasm and the home page's picker lists it. `make share THEME=...` prints the same links locally.
 - **Metal** (`themes/*.metal`): the workflow runs the harness on the runner's GPU. A browser
-  can't run Metal, so a Metal theme reaches the web through its WGSL port,
-  `web/themes/<Name>.wgsl` ([web/README.md](web/README.md) has the contract, and the nine shipped
-  ports are worked examples). Add the port to the same pull request and it gets the links and,
-  once merged, a place in the picker. Without one, the theme still ships in the app.
+  can't run Metal, so a Metal theme reaches the web as WGSL: `tools/msl2wgsl.zig` translates it
+  automatically, so a `.metal` file alone gets the links and, once merged, a place in the picker.
+  `make wgsl THEME=themes/<Name>.metal` shows the translation; check it against the harness with
+  `web/host/tools/verify.mjs` ([web/README.md](web/README.md), "Automatic translation"). A theme
+  the translator can't handle (it names the construct: SIMD-group functions, for one) still
+  ships in the app, and reaches the browser with a hand-written port, `web/themes/<Name>.wgsl`,
+  which then replaces the translation (the nine shipped ports are worked examples).
 - **WGSL** alone (`web/themes/*.wgsl`) runs on the website only.
 
 The picker's caption is the first sentence of the file's header comment, so make it say what

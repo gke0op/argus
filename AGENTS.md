@@ -22,7 +22,7 @@ note from the creator. If `NOTE.md` is empty, skip this.
 | `src/theme_harness.zig` | The headless harness: compiles a theme, runs the gates, times it, writes a PNG |
 | `themes/cpu/` | Metal themes ported to the CPU (`argus_kernel.zig` runs them N pixels per SIMD call) |
 | `src/argus_linux.zig`, `src/linux/` | Linux X11 live-wallpaper host (pure Zig, no libc, MIT-SHM) |
-| `tools/` | Theme checks, the contact sheet, the quasar generator, the pinned-Zig installer, the bench share link (`share.zig`) |
+| `tools/` | Theme checks, the contact sheet, the quasar generator, the pinned-Zig installer, the bench share link (`share.zig`), the Metal-to-WGSL translator (`msl2wgsl.zig`, `make wgsl`) |
 | `web/` | The browser engines: Metal themes as WGSL on WebGPU, Cygnus A, Zig themes as wasm, Zig compiled in the page |
 | `site/` | The public site and the in-browser ARGUS-BENCH (GitHub Pages) |
 | `.claude/skills/` | The theme-writing guides (readable by any agent, not only Claude) |

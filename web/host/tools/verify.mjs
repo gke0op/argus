@@ -34,6 +34,9 @@ for (let i = 2; i < process.argv.length; i++) {
   args[k] = process.argv[++i];
 }
 fs.mkdirSync(args.out, { recursive: true });
+// Output files are named by the theme's file name, so a path (`--theme ../.auto/X.wgsl`, a
+// translation from tools/msl2wgsl.zig) writes <out>/X_web.png too.
+const tag = path.basename(String(args.theme)).replace(/\.wgsl$/, '');
 
 // ---- PNG -----------------------------------------------------------------------------------
 function decodePNG(buf) {
@@ -130,17 +133,17 @@ function compare(web, ref, w, h) {
 function finish(result, b64, ok) {
   const web = Buffer.from(b64, 'base64');
   const w = +args.width, h = +args.height;
-  fs.writeFileSync(path.join(args.out, `${args.theme}_web.png`), encodePNG(w, h, web));
+  fs.writeFileSync(path.join(args.out, `${tag}_web.png`), encodePNG(w, h, web));
   if (args.ref) {
     const ref = decodePNG(fs.readFileSync(args.ref));
     if (ref.w !== w || ref.h !== h) throw new Error(`reference is ${ref.w}x${ref.h}, render is ${w}x${h}`);
     const c = compare(web, ref.rgba, w, h);
-    fs.writeFileSync(path.join(args.out, `${args.theme}_diff.png`), encodePNG(w, h, c.diff));
+    fs.writeFileSync(path.join(args.out, `${tag}_diff.png`), encodePNG(w, h, c.diff));
     delete c.diff;
     result.compare = { ref: args.ref, ...c };
     if (args['max-mean'] !== undefined && c.meanAbs > +args['max-mean']) ok = false;
   }
-  fs.writeFileSync(path.join(args.out, `${args.theme}.json`), JSON.stringify(result, null, 2));
+  fs.writeFileSync(path.join(args.out, `${tag}.json`), JSON.stringify(result, null, 2));
   return ok;
 }
 
@@ -192,7 +195,7 @@ if (args.browser) {
     result.browser = args.browser;
     ok = result.status === 'done' && result.gates.pass;
     if (result.status === 'done') ok = finish(result, body.pixels, ok);
-    else fs.writeFileSync(path.join(args.out, `${args.theme}.json`), JSON.stringify(result, null, 2));
+    else fs.writeFileSync(path.join(args.out, `${tag}.json`), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result, null, 2));
   }
   server.close();
@@ -263,7 +266,7 @@ if (args.live) {
   const v = await evaluate(`JSON.stringify((() => { const e = window.__engine && window.__engine(); if (!e) return { error: document.getElementById('err').textContent || 'no engine' };
     const cv = document.getElementById('c'); return { theme: e.name, dpr: devicePixelRatio, css: [cv.clientWidth, cv.clientHeight], canvasPx: [cv.width, cv.height], frames: (() => { const ft = window.__frameTimes ? window.__frameTimes() : []; const so = [...ft].sort((a, b) => a - b); const med = so[so.length >> 1] || 0; return { n: ft.length, medianMs: med, p95Ms: so[Math.floor(so.length * 0.95)] || 0, late: ft.filter((x) => x > med * 1.5).length }; })(), stats: e.stats(), info: e.info, hud: document.getElementById('read').innerText, err: document.getElementById('err').textContent, sources: e.statsSources() }; })())`, 10000);
   const shot = await send('Page.captureScreenshot', { format: 'png' }, 30000);
-  if (shot.result?.data) fs.writeFileSync(path.join(args.out, `${args.theme}_live.png`), Buffer.from(shot.result.data, 'base64'));
+  if (shot.result?.data) fs.writeFileSync(path.join(args.out, `${tag}_live.png`), Buffer.from(shot.result.data, 'base64'));
   const r = v ? JSON.parse(v) : { error: 'evaluate failed' };
   if (consoleLines.length) r.console = consoleLines.slice(0, 40);
   console.log(JSON.stringify(r, null, 2));
@@ -296,7 +299,7 @@ if (result.status === 'done') {
     b64 += part;
   }
   ok = finish(result, b64, ok);
-} else fs.writeFileSync(path.join(args.out, `${args.theme}.json`), JSON.stringify(result, null, 2));
+} else fs.writeFileSync(path.join(args.out, `${tag}.json`), JSON.stringify(result, null, 2));
 console.log(JSON.stringify(result, null, 2));
 cleanup();
 process.exit(ok ? 0 : 1);

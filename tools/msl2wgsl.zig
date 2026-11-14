@@ -3,6 +3,7 @@
 //! host prepends web/prelude.wgsl).
 //!
 //!   zig run tools/msl2wgsl.zig -- themes/Night_Tide.metal -o web/themes/Night_Tide.wgsl
+//!   zig run tools/msl2wgsl.zig -- --out-dir DIR themes/A.metal themes/B.metal   # DIR/A.wgsl ...
 //!   zig run tools/msl2wgsl.zig -- --check themes/*.metal     # translate, report, write nothing
 //!
 //! A theme the translator cannot handle fails with `file:line:col: error: <the construct>` and
@@ -88,6 +89,7 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(arena);
     var inputs: std.ArrayList([]const u8) = .empty;
     var out_path: ?[]const u8 = null;
+    var out_dir: ?[]const u8 = null;
     var check = false;
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -96,13 +98,17 @@ pub fn main(init: std.process.Init) !void {
             i += 1;
             if (i >= args.len) break;
             out_path = args[i];
+        } else if (std.mem.eql(u8, x, "--out-dir")) {
+            i += 1;
+            if (i >= args.len) break;
+            out_dir = args[i];
         } else if (std.mem.eql(u8, x, "--check")) {
             check = true;
         } else try inputs.append(arena, x);
     }
     const stderr = std.Io.File.stderr();
-    if (inputs.items.len == 0 or (!check and inputs.items.len != 1)) {
-        try stderr.writeStreamingAll(io, "usage: msl2wgsl THEME.metal [-o OUT.wgsl]\n       msl2wgsl --check THEME.metal...\n");
+    if (inputs.items.len == 0 or (!check and out_dir == null and inputs.items.len != 1)) {
+        try stderr.writeStreamingAll(io, "usage: msl2wgsl THEME.metal [-o OUT.wgsl]\n       msl2wgsl --out-dir DIR THEME.metal...\n       msl2wgsl --check THEME.metal...\n");
         std.process.exit(2);
     }
     var failed: usize = 0;
@@ -117,6 +123,10 @@ pub fn main(init: std.process.Init) !void {
             .ok => |wgsl| {
                 if (check) {
                     try stderr.writeStreamingAll(io, try std.fmt.allocPrint(arena, "{s}: ok ({d} lines of WGSL)\n", .{ path, std.mem.countScalar(u8, wgsl, '\n') }));
+                } else if (out_dir) |dir| {
+                    const op = try std.fmt.allocPrint(arena, "{s}/{s}.wgsl", .{ dir, std.fs.path.stem(path) });
+                    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = op, .data = wgsl });
+                    try stderr.writeStreamingAll(io, try std.fmt.allocPrint(arena, "{s} -> {s}\n", .{ path, op }));
                 } else if (out_path) |op| {
                     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = op, .data = wgsl });
                 } else {

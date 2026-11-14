@@ -285,6 +285,11 @@ pub const Parser = struct {
             name = "int";
             if (self.isKw("int") or self.isKw("char") or self.isKw("short")) name = self.advance().text;
         }
+        // a qualified name (simd_vote::vote_t): kept whole, resolved (or rejected) later
+        while (self.isP("::") and self.peekAt(1).tag == .ident) {
+            _ = self.advance();
+            name = try std.fmt.allocPrint(self.a, "{s}::{s}", .{ name, self.advance().text });
+        }
         ty.name = name;
         if (self.isP("<") and (std.mem.eql(u8, name, "texture2d") or std.mem.eql(u8, name, "vec") or std.mem.eql(u8, name, "array"))) {
             _ = self.advance();

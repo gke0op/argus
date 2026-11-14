@@ -6,7 +6,7 @@ THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: icon quasars all app desktop kronos harness share show linux web-wasm web-wasm-all web-wasm-refs web-wasm-serve web-zigc web-zigc-test check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
+.PHONY: icon quasars all app desktop kronos harness wgsl share show linux web-wasm web-wasm-all web-wasm-refs web-wasm-serve web-zigc web-zigc-test check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
 
 all: app kronos
 
@@ -31,6 +31,12 @@ kronos:
 
 harness:
 	$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $(THEME) --frames $(FRAMES) --out $(OUT) $(if $(SEED),--seed $(SEED)) $(if $(FPS),--fps $(FPS)) $(if $(STATS),--stats $(STATS)) $(if $(DATE),--date $(DATE))
+
+# The browser's WGSL for a Metal THEME, translated automatically (tools/msl2wgsl.zig). The site
+# and the bench do this for every .metal theme without a hand-written web/themes/NAME.wgsl.
+wgsl:
+	@mkdir -p web/.auto
+	$(ZIG) run tools/msl2wgsl.zig -- $(THEME) -o $(if $(filter command line,$(origin OUT)),$(OUT),web/.auto/$(basename $(notdir $(THEME))).wgsl)
 
 # Two links for THEME (.zig, or a .wgsl port): the home page, where it fills the screen, and the
 # ARGUS-BENCH page, where it is compiled, run and graded. The source rides in the URL fragment:
@@ -173,6 +179,9 @@ else
 	$(ZIG) test $(ZFLAGS) themes/cpu/argus_kernel.zig
 	if command -v qemu-aarch64-static >/dev/null; then $(ZIG) test -target aarch64-linux themes/cpu/argus_kernel.zig --test-cmd qemu-aarch64-static --test-cmd-bin; fi
 endif
+	# The Metal -> WGSL translator: its tests, and every tracked .metal theme translates.
+	$(ZIG) test tools/msl2wgsl.zig
+	$(ZIG) run tools/msl2wgsl.zig -- --check $(shell git ls-files 'themes/*.metal')
 
 run: app
 	./Launch_Argus_Wallpaper.command

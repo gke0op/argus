@@ -9,7 +9,9 @@ name: Bench
 # - a WGSL theme (web/themes/*.wgsl, a Metal theme's browser port or a theme of its own): the link.
 # The links (tools/share.zig) open the theme on the home page, filling the screen, and on the
 # bench page, graded; the source rides in the link, nothing is uploaded. A Metal theme runs in a
-# browser through its WGSL port: without web/themes/NAME.wgsl it gets the verdict and no link.
+# browser through its WGSL port, web/themes/NAME.wgsl when the pull request has one, else the
+# automatic translation (tools/msl2wgsl.zig); a theme the translator cannot handle gets the
+# verdict, the translator's message, and no link.
 # Once merged, the site's build lists every theme here in the home page's picker.
 #
 # This job runs the submission's code, so it has no write access and no secrets. It uploads the
@@ -88,7 +90,13 @@ jobs:
             fi
             if [ "$ext" = zig ]; then links "$theme" "$n"
             elif [ -f "web/themes/$n.wgsl" ]; then links "web/themes/$n.wgsl" "$n"
-            else echo "No web/themes/$n.wgsl: this Metal theme runs in the app; it reaches the browser (and the home page) with its WGSL port (web/README.md)." > "out/$n.nolink.txt"
+            elif ./.toolchain/zig run tools/msl2wgsl.zig -- "$theme" -o "out/$n.wgsl" 2> "out/$n.translate.txt"; then
+              # The browser runs the automatic translation (the site's build makes the same one).
+              echo "Browser: translated automatically from Metal to WGSL (tools/msl2wgsl.zig); the links run the translation." >> "out/$n.txt"
+              links "out/$n.wgsl" "$n"
+            else
+              { echo "No browser link: the automatic Metal-to-WGSL translation stopped at"; sed 's|^[^:]*/||' "out/$n.translate.txt" | head -n 3
+                echo "The theme runs in the app; a hand-written web/themes/$n.wgsl takes it to the browser (web/README.md)."; } > "out/$n.nolink.txt"
             fi
             [ "$theme" != "$f" ] && rm -f "$theme"
           done < out/files.txt
