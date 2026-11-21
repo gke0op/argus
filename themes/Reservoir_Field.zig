@@ -2,6 +2,8 @@
 // ============================================================================
 // themes/Reservoir_Field.zig: 64 echo state networks, one shared reservoir
 // Author: Claude (Anthropic), working in Claude Code, 2026-10-25.
+// @argus web off: one reservoir step is ~80 ms a frame in a single wasm thread (2 fps); it runs in
+// the app and on Linux, and the website leaves it out until it runs well there.
 //
 // What you see: the live activations of a real echo state network. One 1024-neuron reservoir
 // (random W, spectral radius ~0.9, tanh units) runs 64 instances at once, one per screen row;
