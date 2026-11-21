@@ -22,7 +22,8 @@ pub const Entry = struct {
 const max_line = 160;
 
 /// The first sentence of the header comment (`//!`, else leading `//` lines), at most 160
-/// characters; "" if there is none. Rules (lines of only -, =, * or /) are skipped.
+/// characters; "" if there is none. Skipped: rules (lines of only -, =, * or /), directives
+/// (`@argus...`) and `Author:` lines; a leading file path (`themes/X.zig: `) is dropped.
 pub fn caption(gpa: std.mem.Allocator, text: []const u8) ![]u8 {
     var words: std.ArrayList(u8) = .empty;
     defer words.deinit(gpa);
@@ -43,11 +44,38 @@ pub fn caption(gpa: std.mem.Allocator, text: []const u8) ![]u8 {
             continue;
         }
         if (std.mem.trim(u8, body, "-=*/ ").len == 0) continue;
+        if (body[0] == '@' or std.mem.startsWith(u8, body, "Author:")) continue;
+        body = dropPath(body);
+        if (body.len == 0) continue;
         if (words.items.len > 0) try words.append(gpa, ' ');
         try words.appendSlice(gpa, body);
         if (std.mem.findScalar(u8, words.items, '.') != null or words.items.len >= max_line) break;
     }
     return firstSentence(gpa, words.items);
+}
+
+/// A `// @argus web off: <why>` line in the header: a theme that ships in the app but does not
+/// run well in a browser yet (too heavy for one wasm thread, say) stays out of the site's picker.
+pub fn webOff(text: []const u8) bool {
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len == 0) continue;
+        if (!std.mem.startsWith(u8, line, "//")) return false; // the header is over
+        const body = std.mem.trim(u8, std.mem.trimStart(u8, line, "/!"), " \t");
+        if (std.mem.startsWith(u8, body, "@argus web off")) return true;
+    }
+    return false;
+}
+
+/// "themes/X.zig: text" -> "text": a header that opens with its own path (no spaces before the
+/// colon, a slash and a dot in it). Anything else is returned as it is.
+fn dropPath(s: []const u8) []const u8 {
+    const colon = std.mem.find(u8, s, ": ") orelse return s;
+    const head = s[0..colon];
+    if (std.mem.findScalar(u8, head, ' ') != null) return s;
+    if (std.mem.findScalar(u8, head, '/') == null or std.mem.findScalar(u8, head, '.') == null) return s;
+    return std.mem.trim(u8, s[colon + 2 ..], " \t");
 }
 
 fn firstSentence(gpa: std.mem.Allocator, s: []const u8) ![]u8 {
@@ -94,6 +122,7 @@ pub fn main(init: std.process.Init) !void {
         const ext = std.fs.path.extension(path);
         const id = std.fs.path.stem(path);
         const text = cwd.readFileAlloc(io, path, arena, .unlimited) catch continue;
+        if (webOff(text)) continue; // the theme says it does not run well in a browser (yet)
         const line = try caption(arena, text);
         if (std.mem.eql(u8, ext, ".zig")) {
             const ok = for (built) |b| {
@@ -155,4 +184,29 @@ test "labelOf" {
     const l = try labelOf(gpa, "Carbon_Erta_Ale");
     defer gpa.free(l);
     try std.testing.expectEqualStrings("Carbon Erta Ale", l);
+}
+
+test "caption: directives, Author: lines and a leading path are skipped" {
+    const gpa = std.testing.allocator;
+    const c = try caption(gpa,
+        \\// @argus-theme: custom_shader
+        \\// ============================================================================
+        \\// themes/Reservoir_Field.zig: 64 echo state networks, one shared reservoir
+        \\// Author: Claude (Anthropic), working in Claude Code, 2026-10-25.
+        \\//
+        \\// What you see: the live activations of a real echo state network.
+        \\const std = @import("std");
+    );
+    defer gpa.free(c);
+    try std.testing.expectEqualStrings("64 echo state networks, one shared reservoir", c);
+    // A colon in prose is not a path.
+    const p = try caption(gpa, "//! Night Tide: a coast at night. More.\n");
+    defer gpa.free(p);
+    try std.testing.expectEqualStrings("Night Tide: a coast at night.", p);
+}
+
+test "webOff: the header directive, and only in the header" {
+    try std.testing.expect(webOff("// Reservoir\n// @argus web off: too heavy for one wasm thread\nconst x = 1;\n"));
+    try std.testing.expect(!webOff("// Reservoir\nconst x = 1;\n// @argus web off: after the header\n"));
+    try std.testing.expect(!webOff("//! A theme. @argus web off is mentioned, not declared.\n"));
 }
