@@ -93,6 +93,11 @@ is pure Zig, with no libc and no X libraries. Tested on Ubuntu 24.04: on arm64, 
 and stock GNOME on Wayland through Xwayland; on x86_64 (emulated), Xorg with Xfce. There's no
 menu-bar app or per-Space themes on Linux: you pick one theme when you build. Zig themes run as they are; Metal themes need a CPU port
 first, and so far one exists, `themes/cpu/Tutorial_Tides.zig`.
+A theme runs caged, in its own process with no X connection, under seccomp and Landlock.
+
+The quickest way: download `argus-linux-Cygnus_A-x86_64` (needs AVX2) or
+`argus-linux-Cygnus_A-aarch64` from the [latest release](https://github.com/gke0op/argus/releases/latest),
+then `chmod +x` it and run it in your X session. To build any theme yourself:
 
 ```sh
 sudo apt install git make curl

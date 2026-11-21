@@ -18,7 +18,7 @@ DEST=${ARGUS_DIR:-$HOME/Applications/Argus}
 
 die() { printf 'argus install: %s\n' "$*" >&2; exit 1; }
 
-[ "$(uname -s)" = Darwin ] || die "this installer is for macOS. On Linux, build it from source: https://github.com/gke0op/argus#linux-experimental"
+[ "$(uname -s)" = Darwin ] || die "this installer is for macOS. On Linux, download argus-linux from https://github.com/gke0op/argus/releases/latest (Cygnus A, x86_64 or aarch64), or build any theme from source: https://github.com/gke0op/argus#linux-experimental"
 [ "$(uname -m)" = arm64 ] || die "Argus needs a Mac with Apple silicon (arm64)."
 
 if [ -n "${ARGUS_VERSION:-}" ]; then
