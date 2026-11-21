@@ -6,8 +6,32 @@ All notable changes to Argus are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-11-22
+
+### Added
+
+- Linux (experimental): `argus-linux`, one static binary in pure Zig (no libc, no X libraries)
+  that draws a theme as the X11 desktop background and follows screen resizes. Zig themes run as
+  they are; Metal themes run once ported to the CPU (`themes/cpu/`, so far Tutorial Tides).
+  Tested on Ubuntu (arm64 natively, x86_64 emulated). The release has prebuilt binaries of
+  Cygnus A for x86_64 (needs AVX2) and arm64; `make linux THEME=...` builds any other theme.
+- On Linux, a theme runs caged: in its own process with no X connection, under a seccomp-bpf
+  allowlist and Landlock (no files, no network). A theme that hangs is given up on after 5 s,
+  and a crash is reported with its signal.
+- Reservoir Field: a real echo state network as a wallpaper. One 1024-neuron reservoir runs 64
+  instances at once, each driven by a Mackey-Glass series at a different delay; you see the
+  neurons' activity. On x86 CPUs with AMX it steps on the tile unit, elsewhere on SIMD.
+- The website, <https://gke0op.github.io/argus/>: the shipped themes live in the browser
+  (Metal themes on WebGPU, Zig themes as WebAssembly), and ARGUS-BENCH in the page, with Zig
+  0.17.0 compiling a theme in the browser. A `.metal` theme is translated to WGSL automatically
+  (`tools/msl2wgsl.zig`), so a dropped or linked `.metal` runs there too. `make show` runs the
+  harness and opens the theme live in the browser; `make share` prints the link.
+
 ### Fixed
 
+- A theme that fails to load says why. Every early exit on the load path (a read error, no theme
+  marker, a failed compile or `dlopen`, missing exports) now prints one line with the path and
+  the reason, where it used to skip the theme silently.
 - No more frosted band across the top of a theme. On macOS 26 the menu bar is clear, and when
   the system desktop picture is bright behind it, macOS lays a frosted legibility band over the
   top of the screen, above Argus, blurring the live theme. macOS decides this from the desktop
@@ -274,7 +298,8 @@ First public release, as source and as a download (ad-hoc signed, not notarized)
   Zig and Metal themes, an Apple GPU architecture guide, GPU probe kernels (`make gpu-probes`,
   `make gpu-arch`) and a MetalFX upscaling demo (`make metalfx-demo`).
 
-[Unreleased]: https://github.com/gke0op/argus/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/gke0op/argus/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/gke0op/argus/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/gke0op/argus/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/gke0op/argus/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/gke0op/argus/compare/v0.1.5...v0.1.6

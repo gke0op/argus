@@ -6,7 +6,7 @@ THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: icon quasars all app desktop kronos harness wgsl web-msl2wgsl share show linux web-wasm web-wasm-all web-wasm-refs web-wasm-serve web-zigc web-zigc-test check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
+.PHONY: icon quasars all app desktop kronos harness wgsl web-msl2wgsl share show linux linux-dist web-wasm web-wasm-all web-wasm-refs web-wasm-serve web-zigc web-zigc-test check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
 
 all: app kronos
 
@@ -73,6 +73,15 @@ show:
 CPU ?= native
 linux:
 	$(ZIG) build-exe -O ReleaseFast -fstrip -mcpu=$(CPU) --dep theme -Mroot=src/argus_linux.zig -Mtheme=$(THEME) -femit-bin=argus-linux
+
+# The release's Linux binaries, cross-compiled from any host into dist/ with their SHA-256 files:
+# THEME for x86_64 (x86_64_v3: AVX2, Intel since 2013 and AMD since 2015) and for aarch64.
+LINUX_NAME ?= $(basename $(notdir $(THEME)))
+linux-dist:
+	@mkdir -p dist
+	$(ZIG) build-exe -O ReleaseFast -fstrip -target x86_64-linux -mcpu=x86_64_v3 --dep theme -Mroot=src/argus_linux.zig -Mtheme=$(THEME) -femit-bin=dist/argus-linux-$(LINUX_NAME)-x86_64
+	$(ZIG) build-exe -O ReleaseFast -fstrip -target aarch64-linux -mcpu=baseline --dep theme -Mroot=src/argus_linux.zig -Mtheme=$(THEME) -femit-bin=dist/argus-linux-$(LINUX_NAME)-aarch64
+	@cd dist && for a in x86_64 aarch64; do shasum -a 256 argus-linux-$(LINUX_NAME)-$$a | tee argus-linux-$(LINUX_NAME)-$$a.sha256; done
 
 # Browser (web/wasm/README.md): THEME compiled to WebAssembly with SIMD128, the same source the
 # harness builds, twice: NAME.mt.wasm (+atomics, shared memory: a page's Worker pool runs it on
@@ -207,7 +216,7 @@ zig:
 # Argus.app (ad-hoc signed) and the git-tracked files of themes/ (never a glob of the folder). Every .zig theme ships precompiled and verified in
 # Argus.app/Contents/Resources/prebuilt, so the app runs them with no Zig installed; a theme
 # that is edited or added later is compiled at runtime and needs Zig 0.17.0.
-VERSION ?= 0.1.8
+VERSION ?= 0.1.9
 RELEASE = Argus-v$(VERSION)-macos-arm64
 STAGE = dist/$(RELEASE)
 release: app

@@ -12,7 +12,7 @@ for a few milliseconds of GPU a frame, or really anything you can write a pixel 
 
 https://github.com/user-attachments/assets/214949f1-89ae-4a92-bc46-31b52c7ffadf
 
-<p align="center"><sub>Cygnus A as the camera tilts to nearly edge-on. 120 FPS, rendered by the theme's own code. <a href="https://youtu.be/ib9DmonvtZE">In 4K at 60 FPS on YouTube</a>; the other nine are <a href="#the-themes">at the bottom</a>.</sub></p>
+<p align="center"><sub>Cygnus A as the camera tilts to nearly edge-on. 120 FPS, rendered by the theme's own code. <a href="https://youtu.be/ib9DmonvtZE">In 4K at 60 FPS on YouTube</a>; the other ten are <a href="#the-themes">at the bottom</a>.</sub></p>
 
 ## What it is
 
@@ -264,7 +264,7 @@ CC0 and CC BY 4.0); see [NOTICE.md](NOTICE.md).
 
 ## The themes
 
-Ten themes ship with the app. Each clip is drawn offline by the theme's own code on the app's
+Eleven themes ship with the app. Each clip is drawn offline by the theme's own code on the app's
 GPU path, paced the way the app paces it, at 120 FPS (the roulette at 60). None of it is a
 screen recording.
 
@@ -302,6 +302,12 @@ https://github.com/user-attachments/assets/c4bd3439-f595-4f0c-b977-59328536bc30
 busiest processes, battery) on a green-phosphor terminal, in the DEC VT320's dot font.
 
 https://github.com/user-attachments/assets/23430e01-d9c9-4b60-889a-1f55d2884d6f
+
+**Reservoir Field**: a real echo state network: one 1024-neuron reservoir runs 64 instances at
+once, each driven by a chaotic Mackey-Glass series at a different delay, and you watch the
+neurons fire. A CPU theme in Zig; on x86 CPUs with AMX it steps on the tile unit. No clip yet,
+and not on the website: its step is too heavy for one WebAssembly thread, so it runs in the app
+and on Linux.
 
 **Tutorial Reef**: the second tutorial, a reaction-diffusion reef that remembers between frames.
 
