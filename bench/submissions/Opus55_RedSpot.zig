@@ -55,17 +55,18 @@
 //   anticyclone); vertical structure beyond one deformation radius; the planet's curvature, limb
 //   and lighting (the view is a flat true-colour map, no relief); Oval BA and the white ovals
 //   further south; the spot's 90-day oscillation and its shrinking.
-// CHECKED (`zig test -O ReleaseSafe -lc` on this file; LEDGER lines): collar wind 127 m/s after
+// CHECKED (`zig test -O ReleaseSafe -lc` on this file; LEDGER lines): collar wind 125 m/s after
 //   two minutes (cited 120); latitude 22.2 S; after an hour of wall time (216 Jovian days) still
-//   123 m/s at 22.3 S. The collar's circulation takes 7.3 days here, slower than the 4.5 days
+//   123 m/s at 22.5 S. The collar's circulation takes 7.1 days here, slower than the 4.5 days
 //   measured in 2008: the modelled collar is broader, and the spot turns once in about two minutes
 //   on screen. A size sweep (1x1 to 3024x1964, padded stride) draws every pixel opaque. Flicker:
-//   the stored tracers are renewed once a second; the mean frame change at that boundary is 0.18
-//   levels (0.05 mid-interval), at most a 7-level step (300 frames measured). The browser build
-//   (wasm, one thread) passes gates 1-7 on the bench page in Chrome. Not checked: the colours
-//   against calibrated spectra, the wind profile away from the two sourced jets.
-// How it works: every 30 ticks an interval starts: one PV step and inversion (~1.5 ms). The
-//   tracer advection and the next interval's departure field are spread over the 30 ticks. In
+//   the stored tracers are renewed every two seconds; the mean frame change at that boundary is
+//   0.32 levels (0.05 mid-interval), at most an 8-level step (600 frames measured). The browser
+//   build (wasm, one thread) passes gates 1-7 on the bench page in Chrome. Not checked: the
+//   colours against calibrated spectra, the wind profile away from the two sourced jets.
+// How it works: every 60 ticks (two wall seconds) an interval starts: one PV step and inversion
+//   (~1.5 ms). The tracer advection and the next interval's departure field are spread over the
+//   60 ticks. In
 //   between, each tick shows the tracers sampled at x - phase*displacement (plume injection
 //   shown in proportion), so motion is continuous while the stored tracers are resampled only
 //   once per interval: little numerical diffusion. step() colours the 960x600 grid through a
@@ -76,7 +77,7 @@
 //   runs 3.8 days in 16 long steps; the clouds start from the bands displaced by each parcel's
 //   PV anomaly (eta = q'/beta: PV is conserved, so it labels where a parcel came from), then
 //   run 2.9 days in 6 long steps (semi-Lagrangian advection is stable at any step).
-// Cost: 5.4-6.1 ms per frame in the harness on an M3 under load 3-6 from other work (the
+// Cost: 5.4-6.2 ms per frame in the harness on an M3 under load 3-6 from other work (the
 //   section 3 skeleton read 1.58 ms alongside it), Bronze tier.
 
 const std = @import("std");
@@ -99,8 +100,8 @@ const KM_PER_DEG: f32 = 1221.7; // R = 70,000 km
 const LAT_TOP: f32 = -22.0 + (@as(f32, @floatFromInt(NY)) * DXK * 0.5) / KM_PER_DEG; // -6.65
 
 // ---- time ----
-const TICKS: usize = 30; // ticks per interval = one wall second in Argus (30 Hz)
-const T_DAY: f32 = 0.06; // Jovian days per interval
+const TICKS: usize = 60; // ticks per interval = two wall seconds in Argus (30 Hz)
+const T_DAY: f32 = 0.12; // Jovian days per interval (0.06 per wall second)
 const TWO_OMEGA: f32 = 2.0 * (2.0 * math.pi / 35729.7) * 86400.0; // 1/day
 const LD_KM: f32 = 2000.0;
 
@@ -120,8 +121,8 @@ const CL_A: usize = 256; // colour table: brightness levels over [0, A_MAX]
 const CL_C: usize = 128; // chromophore levels over [0, C_MAX]
 const A_MAX: f32 = 1.1;
 const C_MAX: f32 = 1.2;
-const D_MAX: f32 = 15.0; // displacement clamp, tracer cells (the fastest wind moves ~12)
-const PAD: usize = 16; // interior cells (>= PAD from an edge) need no wrap or clamp
+const D_MAX: f32 = 30.0; // displacement clamp, tracer cells (the fastest wind moves ~25)
+const PAD: usize = 34; // interior cells (>= PAD from an edge) need no wrap or clamp, even for Catmull-Rom
 
 const Storm = struct {
     x: f32 = 0, // tracer cells
@@ -138,7 +139,7 @@ const Storm = struct {
 /// Plume strength this interval: switches on over a sixth of its life, fades over the last 40%.
 fn plumeStrength(st: *const Storm) f32 {
     const life_t = st.age / st.life;
-    return st.power * 0.6 * math.clamp(life_t * 6.0, 0.0, 1.0) * math.clamp((1.0 - life_t) * 2.5, 0.0, 1.0);
+    return st.power * 0.84 * math.clamp(life_t * 6.0, 0.0, 1.0) * math.clamp((1.0 - life_t) * 2.5, 0.0, 1.0);
 }
 
 /// Convective plume: fresh white ammonia cloud with no chromophore at the head (flat-topped,
@@ -251,8 +252,8 @@ pub const State = struct {
         // Spin-up, kept cheap because the 10 s watchdog probe repeats init (and wasm in a browser
         // is over 10x slower than native): long steps are fine for semi-Lagrangian advection, and
         // in the zonal jets a straight-line departure is nearly exact. The wind first: 16 steps of
-        // four intervals (3.8 Jovian days).
-        for (0..16) |_| self.coarseStep(false, 4.0);
+        // two intervals (3.8 Jovian days).
+        for (0..16) |_| self.coarseStep(false, 2.0);
         // tracers start on the band climatology, the spot pre-reddened
         const back = 1 - self.front;
         // PV is materially conserved, so a parcel's PV anomaly says where it came from: linear
@@ -271,16 +272,16 @@ pub const State = struct {
             self.ta[self.front][c] = self.ta[back][c];
             self.tc[self.front][c] = self.tc[back][c];
         };
-        // Then the clouds: 6 steps of eight intervals (2.9 days), each after two wind steps.
-        const spin: f32 = 8.0;
+        // Then the clouds: 6 steps of four intervals (2.9 days), each after two wind steps.
+        const spin: f32 = 4.0;
         self.departRows(0, DH, spin, false);
         for (0..6) |_| {
             self.front = 1 - self.front;
             self.dcur = 1 - self.dcur;
             self.advanceStorms();
             for (&self.storms) |*st| st.age += (spin - 1.0) * T_DAY; // plumes age at the real rate
-            for (0..2) |_| self.coarseStep(true, 4.0);
-            self.intervals += 8;
+            for (0..2) |_| self.coarseStep(true, 2.0);
+            self.intervals += 4;
             self.dyeRows(0, DH, spin, false);
             self.departRows(0, DH, spin, false);
         }
@@ -548,6 +549,24 @@ pub const State = struct {
         return a + (b - a) * ty;
     }
 
+    /// Total wind (PV cells per interval) at a PV-grid point, both components from one set of
+    /// weights; away from the edges without wrap or clamp.
+    fn windAt(self: *const State, x: f32, y: f32) [2]f32 {
+        if (x >= 1.0 and x < @as(f32, @floatFromInt(NX - 2)) and y >= 0.0 and y < @as(f32, @floatFromInt(NY - 2))) {
+            const xf = @floor(x);
+            const yf = @floor(y);
+            const tx = x - xf;
+            const ty = y - yf;
+            const p = @as(usize, @intFromFloat(yf)) * NX + @as(usize, @intFromFloat(xf));
+            const ua = self.cu[p] + (self.cu[p + 1] - self.cu[p]) * tx;
+            const ub = self.cu[p + NX] + (self.cu[p + NX + 1] - self.cu[p + NX]) * tx;
+            const va = self.cv[p] + (self.cv[p + 1] - self.cv[p]) * tx;
+            const vb = self.cv[p + NX] + (self.cv[p + NX + 1] - self.cv[p + NX]) * tx;
+            return .{ ua + (ub - ua) * ty, va + (vb - va) * ty };
+        }
+        return .{ bilinC(&self.cu, x, y), bilinC(&self.cv, x, y) };
+    }
+
     fn qbgAt(self: *const State, y: f32) f32 {
         const yc = math.clamp(y, 0.0, @as(f32, @floatFromInt(NY - 1)));
         const yf = @floor(yc);
@@ -594,7 +613,7 @@ pub const State = struct {
                 self.q[c] = v;
             }
         }
-        const reps: usize = @intFromFloat(@max(1.0, @round(k)));
+        const reps: usize = @intFromFloat(@max(1.0, @round(k * T_DAY / 0.06))); // rates are per 0.06 day
         for (0..reps) |_| {
             self.stir();
             if (storms) self.stormVortices();
@@ -741,12 +760,11 @@ pub const State = struct {
             const y = (@as(f32, @floatFromInt(j)) + 0.5) * C_PER_D - 0.5;
             for (0..DW) |i| {
                 const x = (@as(f32, @floatFromInt(i)) + 0.5) * C_PER_D - 0.5;
-                const ua = bilinC(&self.cu, x, y);
-                const va = bilinC(&self.cv, x, y);
-                const ub = if (fast) ua else bilinC(&self.cu, x - 0.5 * ua, y - 0.5 * va);
-                const vb = if (fast) va else bilinC(&self.cv, x - 0.5 * ua, y - 0.5 * va);
+                const va = self.windAt(x, y);
+                const vb = if (fast) va else self.windAt(x - 0.5 * va[0], y - 0.5 * va[1]);
+                const ub = vb[0];
                 self.dx[nxt][j * DW + i] = @floatCast(math.clamp(ub * k, -D_MAX * mult, D_MAX * mult));
-                self.dy[nxt][j * DW + i] = @floatCast(math.clamp(vb * k, -D_MAX * mult, D_MAX * mult));
+                self.dy[nxt][j * DW + i] = @floatCast(math.clamp(vb[1] * k, -D_MAX * mult, D_MAX * mult));
             }
         }
     }
@@ -767,7 +785,13 @@ pub const State = struct {
                 const fx: f32 = @floatFromInt(i);
                 const sx = fx - @as(f32, self.dx[dc][c]);
                 const sy = fy - @as(f32, self.dy[dc][c]);
-                var s = if (fast) sampleBL2(DW, DH, &self.ta[f], &self.tc[f], sx, sy) else sampleCR2(DW, DH, &self.ta[f], &self.tc[f], sx, sy);
+                const interior = mult <= 1.0 and j >= PAD and j + PAD < DH and i >= PAD and i + PAD < DW;
+                var s = if (fast)
+                    sampleBL2(DW, DH, &self.ta[f], &self.tc[f], sx, sy)
+                else if (interior)
+                    sampleCR2Interior(&self.ta[f], &self.tc[f], sx, sy)
+                else
+                    sampleCR2(DW, DH, &self.ta[f], &self.tc[f], sx, sy);
                 // air trapped in an anticyclone keeps its own history (no band relaxation) and
                 // reddens with time: colour tracks residence time, deepest in the core
                 const g = self.redAt(fx, fy);
@@ -818,12 +842,13 @@ pub const State = struct {
         const xb: isize = @intFromFloat(@ceil(cx + reach));
         const ka: f32 = @as(f32, @floatFromInt(CL_A - 1)) / A_MAX;
         const kc: f32 = @as(f32, @floatFromInt(CL_C - 1)) / C_MAX;
-        var yy = ya;
-        while (yy <= yb) : (yy += 1) {
+        const lod: isize = @intCast(self.lod);
+        var yy = @divFloor(ya + lod - 1, lod) * lod; // only the shaded cells: the lod lattice
+        while (yy <= yb) : (yy += lod) {
             const j: usize = @intCast(yy);
             const fy: f32 = @floatFromInt(yy);
-            var xx = xa;
-            while (xx <= xb) : (xx += 1) {
+            var xx = @divFloor(xa, lod) * lod;
+            while (xx <= xb) : (xx += lod) {
                 const ddx = @as(f32, @floatFromInt(xx)) - cx;
                 const ddy = fy - cy;
                 const r2 = (ddx * ddx + ddy * ddy) / (st.rad * st.rad);
@@ -1173,6 +1198,32 @@ fn sampleCR2(comptime W: usize, comptime H: usize, fa: *const [W * H]f32, fb: *c
     return out;
 }
 
+/// sampleCR2 on the tracer grid for a point whose 4x4 footprint is inside it (the caller checks:
+/// |displacement| <= D_MAX and the cell is >= PAD from every edge): no wrap, no clamp.
+fn sampleCR2Interior(fa: *const [ND]f32, fb: *const [ND]f32, x: f32, y: f32) [2]f32 {
+    const xf = @floor(x);
+    const yf = @floor(y);
+    const tx = x - xf;
+    const ty = y - yf;
+    const ix: usize = @intFromFloat(xf);
+    const iy: usize = @intFromFloat(yf);
+    const p = (iy - 1) * DW + ix - 1;
+    var out: [2]f32 = undefined;
+    inline for (0..2) |q| {
+        const f = if (q == 0) fa else fb;
+        var rows: [4]f32 = undefined;
+        inline for (0..4) |r| {
+            const o = p + r * DW;
+            rows[r] = crw(f[o], f[o + 1], f[o + 2], f[o + 3], tx);
+        }
+        const c0 = p + DW + 1;
+        const lo = @min(@min(f[c0], f[c0 + 1]), @min(f[c0 + DW], f[c0 + DW + 1]));
+        const hi = @max(@max(f[c0], f[c0 + 1]), @max(f[c0 + DW], f[c0 + DW + 1]));
+        out[q] = math.clamp(crw(rows[0], rows[1], rows[2], rows[3], ty), lo, hi);
+    }
+    return out;
+}
+
 /// Bilinear, two fields, periodic in x, clamped in y.
 inline fn sampleBL2(comptime W: usize, comptime H: usize, fa: *const [W * H]f32, fb: *const [W * H]f32, x: f32, y: f32) [2]f32 {
     const wf: f32 = @floatFromInt(W);
@@ -1204,7 +1255,7 @@ fn grsLatS(st: *const State) f32 {
 test "the spot's collar speed and circulation period after two minutes" {
     const st = try State.init(std.testing.allocator, 320, 200, 1.0);
     defer st.deinit(std.testing.allocator);
-    for (0..TICKS * 120) |_| st.step(0.008);
+    for (0..30 * 120) |_| st.step(0.008);
     const s = st.grsStats();
     try std.testing.expect(!st.hasNaN());
     try std.testing.expect(sdk.ledger(.{
@@ -1246,7 +1297,7 @@ test "the wind stays alive and bounded for an hour of wall time" {
     const st = try State.init(std.testing.allocator, 320, 200, 1.0);
     defer st.deinit(std.testing.allocator);
     // the PV model alone, one step per wall second (the tracers are bounded by relaxation)
-    for (0..3600) |_| {
+    for (0..1800) |_| {
         st.advanceStorms();
         st.coarseStep(true, 1.0);
     }
@@ -1256,7 +1307,7 @@ test "the wind stays alive and bounded for an hour of wall time" {
         .id = "redspot.one_hour",
         .claim = "after an hour on screen (216 Jovian days) the spot still spins at observed speeds",
         .reference = "edge winds ~120 m/s (en.wikipedia.org/wiki/Great_Red_Spot)",
-        .conditions = "3600 PV steps of 0.06 day with storms",
+        .conditions = "1800 PV steps of 0.12 day with storms",
         .quantity = "max collar wind speed, m/s",
         .measured = s[0],
         .lo = 90.0,
@@ -1267,7 +1318,7 @@ test "the wind stays alive and bounded for an hour of wall time" {
         .id = "redspot.one_hour_latitude",
         .claim = "after an hour the spot is still at ~22 S",
         .reference = "about 22 S (en.wikipedia.org/wiki/Great_Red_Spot)",
-        .conditions = "3600 PV steps of 0.06 day with storms",
+        .conditions = "1800 PV steps of 0.12 day with storms",
         .quantity = "latitude of the streamfunction minimum, degrees south",
         .measured = grsLatS(st),
         .lo = 20.0,
