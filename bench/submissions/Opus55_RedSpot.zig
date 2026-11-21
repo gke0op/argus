@@ -55,22 +55,27 @@
 //   anticyclone); vertical structure beyond one deformation radius; the planet's curvature, limb
 //   and lighting (the view is a flat true-colour map, no relief); Oval BA and the white ovals
 //   further south; the spot's 90-day oscillation and its shrinking.
-// CHECKED (`zig test -O ReleaseSafe -lc` on this file; LEDGER lines): collar wind 131 m/s after
-//   two minutes (cited 120); latitude 22.1 S; after an hour of wall time (216 Jovian days) still
-//   125 m/s at 22.3 S. The collar's circulation takes 7.3 days here, slower than the 4.5 days
+// CHECKED (`zig test -O ReleaseSafe -lc` on this file; LEDGER lines): collar wind 127 m/s after
+//   two minutes (cited 120); latitude 22.2 S; after an hour of wall time (216 Jovian days) still
+//   123 m/s at 22.3 S. The collar's circulation takes 7.3 days here, slower than the 4.5 days
 //   measured in 2008: the modelled collar is broader, and the spot turns once in about two minutes
 //   on screen. A size sweep (1x1 to 3024x1964, padded stride) draws every pixel opaque. Flicker:
-//   the stored tracers are renewed once a second; the mean frame change at that boundary is 0.22
-//   levels (0.06 mid-interval), at most an 11-level step at a plume head. Not checked: the colours
+//   the stored tracers are renewed once a second; the mean frame change at that boundary is 0.18
+//   levels (0.05 mid-interval), at most a 7-level step (300 frames measured). The browser build
+//   (wasm, one thread) passes gates 1-7 on the bench page in Chrome. Not checked: the colours
 //   against calibrated spectra, the wind profile away from the two sourced jets.
 // How it works: every 30 ticks an interval starts: one PV step and inversion (~1.5 ms). The
 //   tracer advection and the next interval's departure field are spread over the 30 ticks. In
 //   between, each tick shows the tracers sampled at x - phase*displacement (plume injection
 //   shown in proportion), so motion is continuous while the stored tracers are resampled only
 //   once per interval: little numerical diffusion. step() colours the 960x600 grid through a
-//   256x128 table; draw() upscales it bilinearly, 64-bit lane-packed (a gather-free path at
-//   exactly 2x). One allocation: the State, 24.7 MB. init() spins up the wind (160 steps) and
-//   the clouds (16 steps of five intervals; advection is stable at any step), ~0.9 s on an M3.
+//   256x128 table, only as finely as the screen shows it (every cell at 1920x1200, every third
+//   at 320x200); draw() upscales it bilinearly, 64-bit lane-packed (a gather-free path at
+//   exactly 2x). One allocation: the State, 24.7 MB. init() is kept to ~0.2 s on an M3,
+//   because the 10 s watchdog probe repeats it and wasm in a browser is >10x slower: the wind
+//   runs 3.8 days in 16 long steps; the clouds start from the bands displaced by each parcel's
+//   PV anomaly (eta = q'/beta: PV is conserved, so it labels where a parcel came from), then
+//   run 2.9 days in 6 long steps (semi-Lagrangian advection is stable at any step).
 // Cost: 5.4-6.1 ms per frame in the harness on an M3 under load 3-6 from other work (the
 //   section 3 skeleton read 1.58 ms alongside it), Bronze tier.
 
@@ -206,6 +211,8 @@ pub const State = struct {
     colx1: [MAX_W]u16,
     colw: [MAX_W]u16,
     rowy0: [MAX_H]u16,
+    rowy1: [MAX_H]u16,
+    lod: usize, // shade every lod-th tracer cell: no finer than the screen shows
     roww: [MAX_H]u16,
 
     pub fn init(alloc: std.mem.Allocator, w: usize, h: usize, scale: f64) !*State {
@@ -226,6 +233,11 @@ pub const State = struct {
         self.psi = @splat(0);
 
         self.setupTables();
+        // level of detail: the largest divisor of gcd(DW, DH) = 120 not above the tracer cells
+        // per screen pixel (1 at 1920x1200 and above, 3 for the 320x200 watchdog)
+        self.lod = @max(@as(usize, 1), @as(usize, @intFromFloat(@floor(@min(self.viewScale(), 120.0)))));
+        while (120 % self.lod != 0) self.lod -= 1;
+        @memset(&self.col, 0);
         self.setupBackground();
         self.gx = 0.62 * @as(f32, @floatFromInt(NX));
         self.gy = 0.5 * @as(f32, @floatFromInt(NY)) - 0.5;
@@ -236,37 +248,44 @@ pub const State = struct {
         };
         self.invert();
 
-        // spin up the wind first (cheap), then the clouds
-        for (0..160) |_| {
-            self.coarseStep(false);
-        }
+        // Spin-up, kept cheap because the 10 s watchdog probe repeats init (and wasm in a browser
+        // is over 10x slower than native): long steps are fine for semi-Lagrangian advection, and
+        // in the zonal jets a straight-line departure is nearly exact. The wind first: 16 steps of
+        // four intervals (3.8 Jovian days).
+        for (0..16) |_| self.coarseStep(false, 4.0);
         // tracers start on the band climatology, the spot pre-reddened
         const back = 1 - self.front;
+        // PV is materially conserved, so a parcel's PV anomaly says where it came from: linear
+        // theory displaces it by eta = q'/beta (PV is higher to the north), clamped to 1,500 km
+        const beta_km = TWO_OMEGA * @cos(22.0 * math.pi / 180.0) / (KM_PER_DEG * 180.0 / math.pi);
         for (0..DH) |j| for (0..DW) |i| {
             const c = j * DW + i;
-            const g = self.redAt(@floatFromInt(i), @floatFromInt(j));
-            self.ta[back][c] = self.a_clim[j] + (0.55 - self.a_clim[j]) * g;
-            self.tc[back][c] = self.c_clim[j] + (1.0 - self.c_clim[j]) * g;
+            const fi: f32 = @floatFromInt(i);
+            const fj: f32 = @floatFromInt(j);
+            const qp = bilinC(&self.q, (fi + 0.5) * C_PER_D - 0.5, (fj + 0.5) * C_PER_D - 0.5);
+            const eta_cells = math.clamp(qp / beta_km, -1500.0, 1500.0) / (DXK * C_PER_D);
+            const j0: usize = @intFromFloat(math.clamp(@round(fj - eta_cells), 0.0, @as(f32, @floatFromInt(DH - 1))));
+            const g = self.redAt(fi, fj);
+            self.ta[back][c] = self.a_clim[j0] + (0.55 - self.a_clim[j0]) * g;
+            self.tc[back][c] = self.c_clim[j0] + (1.0 - self.c_clim[j0]) * g;
             self.ta[self.front][c] = self.ta[back][c];
             self.tc[self.front][c] = self.tc[back][c];
         };
-        // 16 tracer steps of five intervals each (4.8 Jovian days): semi-Lagrangian advection is
-        // stable at any step, and this only makes the starting picture; init stays well under a
-        // second, so the 10 s watchdog probe (which repeats it) has room even in a browser
-        const spin: f32 = 5.0;
-        self.departRows(0, DH, spin);
-        for (0..16) |_| {
+        // Then the clouds: 6 steps of eight intervals (2.9 days), each after two wind steps.
+        const spin: f32 = 8.0;
+        self.departRows(0, DH, spin, false);
+        for (0..6) |_| {
             self.front = 1 - self.front;
             self.dcur = 1 - self.dcur;
             self.advanceStorms();
             for (&self.storms) |*st| st.age += (spin - 1.0) * T_DAY; // plumes age at the real rate
-            for (0..5) |_| self.coarseStep(true);
-            self.intervals += 5;
-            self.dyeRows(0, DH, spin);
-            self.departRows(0, DH, spin);
+            for (0..2) |_| self.coarseStep(true, 4.0);
+            self.intervals += 8;
+            self.dyeRows(0, DH, spin, false);
+            self.departRows(0, DH, spin, false);
         }
         // the first live interval moves at the real rate
-        self.departRows(0, DH, 1.0);
+        self.departRows(0, DH, 1.0, false);
         self.cam = self.camTarget();
         self.tick();
         return self;
@@ -538,21 +557,21 @@ pub const State = struct {
     }
 
     /// One PV step over an interval: advect, force, invert, track the spot.
-    fn coarseStep(self: *State, storms: bool) void {
-        const rate_e = T_DAY / TAU_E;
-        const rate_z = T_DAY / TAU_Z;
-        const rate_g = T_DAY / TAU_G;
+    fn coarseStep(self: *State, storms: bool, k: f32) void {
+        const rate_e = k * T_DAY / TAU_E;
+        const rate_z = k * T_DAY / TAU_Z;
+        const rate_g = k * T_DAY / TAU_G;
         for (0..NY) |j| {
             const fy: f32 = @floatFromInt(j);
             for (0..NX) |i| {
                 const fx: f32 = @floatFromInt(i);
                 const c = j * NX + i;
-                const mx = fx - 0.5 * self.cu[c];
-                const my = fy - 0.5 * self.cv[c];
+                const mx = fx - 0.5 * k * self.cu[c];
+                const my = fy - 0.5 * k * self.cv[c];
                 const ux = bilinC(&self.cu, mx, my);
                 const vy = bilinC(&self.cv, mx, my);
-                const sx = fx - ux;
-                const sy = fy - vy;
+                const sx = fx - k * ux;
+                const sy = fy - k * vy;
                 var v = sampleCR(NX, NY, &self.q, sx, sy) + self.qbgAt(sy) - self.qbg[j];
                 v -= v * rate_e;
                 self.q2[c] = v;
@@ -575,8 +594,11 @@ pub const State = struct {
                 self.q[c] = v;
             }
         }
-        self.stir();
-        if (storms) self.stormVortices();
+        const reps: usize = @intFromFloat(@max(1.0, @round(k)));
+        for (0..reps) |_| {
+            self.stir();
+            if (storms) self.stormVortices();
+        }
         self.invert();
         self.track();
         var sum: f32 = 0;
@@ -712,7 +734,7 @@ pub const State = struct {
     }
 
     /// Departure displacement for the next interval from the current wind (RK2), tracer rows [j0, j1).
-    fn departRows(self: *State, j0: usize, j1: usize, mult: f32) void {
+    fn departRows(self: *State, j0: usize, j1: usize, mult: f32, fast: bool) void {
         const nxt = 1 - self.dcur;
         const k = mult / C_PER_D;
         for (j0..j1) |j| {
@@ -721,8 +743,8 @@ pub const State = struct {
                 const x = (@as(f32, @floatFromInt(i)) + 0.5) * C_PER_D - 0.5;
                 const ua = bilinC(&self.cu, x, y);
                 const va = bilinC(&self.cv, x, y);
-                const ub = bilinC(&self.cu, x - 0.5 * ua, y - 0.5 * va);
-                const vb = bilinC(&self.cv, x - 0.5 * ua, y - 0.5 * va);
+                const ub = if (fast) ua else bilinC(&self.cu, x - 0.5 * ua, y - 0.5 * va);
+                const vb = if (fast) va else bilinC(&self.cv, x - 0.5 * ua, y - 0.5 * va);
                 self.dx[nxt][j * DW + i] = @floatCast(math.clamp(ub * k, -D_MAX * mult, D_MAX * mult));
                 self.dy[nxt][j * DW + i] = @floatCast(math.clamp(vb * k, -D_MAX * mult, D_MAX * mult));
             }
@@ -730,7 +752,7 @@ pub const State = struct {
     }
 
     /// The next interval's tracers from the current ones, tracer rows [j0, j1).
-    fn dyeRows(self: *State, j0: usize, j1: usize, mult: f32) void {
+    fn dyeRows(self: *State, j0: usize, j1: usize, mult: f32, fast: bool) void {
         const f = self.front;
         const b = 1 - f;
         const dc = self.dcur;
@@ -743,7 +765,9 @@ pub const State = struct {
             for (0..DW) |i| {
                 const c = j * DW + i;
                 const fx: f32 = @floatFromInt(i);
-                var s = sampleCR2(DW, DH, &self.ta[f], &self.tc[f], fx - self.dx[dc][c], fy - self.dy[dc][c]);
+                const sx = fx - @as(f32, self.dx[dc][c]);
+                const sy = fy - @as(f32, self.dy[dc][c]);
+                var s = if (fast) sampleBL2(DW, DH, &self.ta[f], &self.tc[f], sx, sy) else sampleCR2(DW, DH, &self.ta[f], &self.tc[f], sx, sy);
                 // air trapped in an anticyclone keeps its own history (no band relaxation) and
                 // reddens with time: colour tracks residence time, deepest in the core
                 const g = self.redAt(fx, fy);
@@ -849,7 +873,7 @@ pub const State = struct {
         self.front = 1 - self.front;
         self.dcur = 1 - self.dcur;
         self.advanceStorms();
-        self.coarseStep(true);
+        self.coarseStep(true, 1.0);
         self.intervals += 1;
     }
 
@@ -857,8 +881,8 @@ pub const State = struct {
         if (self.tk == 0) self.boundary();
         const r0 = self.tk * DH / TICKS;
         const r1 = (self.tk + 1) * DH / TICKS;
-        self.dyeRows(r0, r1, 1.0);
-        self.departRows(r0, r1, 1.0);
+        self.dyeRows(r0, r1, 1.0, false);
+        self.departRows(r0, r1, 1.0, false);
         const phase = @as(f32, @floatFromInt(self.tk)) / @as(f32, @floatFromInt(TICKS));
         self.shade(phase);
         self.updateCamera();
@@ -877,10 +901,13 @@ pub const State = struct {
         const kc: f32 = @as(f32, @floatFromInt(CL_C - 1)) / C_MAX;
         const top_a: f32 = @floatFromInt(CL_A - 1);
         const top_c: f32 = @floatFromInt(CL_C - 1);
-        for (0..DH) |j| {
+        const lod = self.lod;
+        var j: usize = 0;
+        while (j < DH) : (j += lod) {
             const fy: f32 = @floatFromInt(j);
             const inner_row = j >= PAD and j + PAD < DH;
-            for (0..DW) |i| {
+            var i: usize = 0;
+            while (i < DW) : (i += lod) {
                 const c = j * DW + i;
                 const fx: f32 = @floatFromInt(i);
                 const x = fx - phase * @as(f32, ddx[c]);
@@ -943,21 +970,28 @@ pub const State = struct {
         const sc = self.viewScale();
         self.view_sc = sc;
         self.view_oy = (@as(f32, @floatFromInt(DH)) - @as(f32, @floatFromInt(self.h)) * sc) * 0.5;
+        // sample the shaded cells: every lod-th column and row
+        const lod = self.lod;
+        const lf: f32 = @floatFromInt(lod);
         for (0..self.w) |x| {
             var sx = self.cam + (@as(f32, @floatFromInt(x)) + 0.5) * sc - 0.5;
             while (sx < 0) sx += span;
             while (sx >= span) sx -= span;
-            const fl = @floor(sx);
-            const ix: usize = @min(@as(usize, @intFromFloat(fl)), DW - 1);
+            const u = sx / lf;
+            const fl = @floor(u);
+            const ix: usize = @min(@as(usize, @intFromFloat(fl)) * lod, DW - lod);
             self.colx0[x] = @intCast(ix);
-            self.colx1[x] = @intCast(if (ix + 1 == DW) 0 else ix + 1);
-            self.colw[x] = @intFromFloat(math.clamp((sx - fl) * 256.0, 0.0, 256.0));
+            self.colx1[x] = @intCast(if (ix + lod >= DW) 0 else ix + lod);
+            self.colw[x] = @intFromFloat(math.clamp((u - fl) * 256.0, 0.0, 256.0));
         }
         for (0..self.h) |y| {
-            const sy = math.clamp(self.view_oy + (@as(f32, @floatFromInt(y)) + 0.5) * sc - 0.5, 0.0, @as(f32, @floatFromInt(DH - 1)));
-            const fl = @floor(sy);
-            self.rowy0[y] = @intFromFloat(fl);
-            self.roww[y] = @intFromFloat(math.clamp((sy - fl) * 256.0, 0.0, 256.0));
+            const sy = math.clamp(self.view_oy + (@as(f32, @floatFromInt(y)) + 0.5) * sc - 0.5, 0.0, @as(f32, @floatFromInt(DH - lod)));
+            const v = sy / lf;
+            const fl = @floor(v);
+            const j0: usize = @min(@as(usize, @intFromFloat(fl)) * lod, DH - lod);
+            self.rowy0[y] = @intCast(j0);
+            self.rowy1[y] = @intCast(@min(j0 + lod, DH - lod));
+            self.roww[y] = @intFromFloat(math.clamp((v - fl) * 256.0, 0.0, 256.0));
         }
     }
 
@@ -967,7 +1001,7 @@ pub const State = struct {
         const mask: u64 = 0x00FF_00FF_00FF;
         var tmp: [DW]u64 = undefined;
         // exactly 2x (1920x1200 from 960x600): stream a row rotated to the camera, no gathers
-        const two_x = self.view_sc == 0.5 and w % 2 == 0 and w / 2 + 2 <= DW;
+        const two_x = self.lod == 1 and self.view_sc == 0.5 and w % 2 == 0 and w / 2 + 2 <= DW;
         var rot: [DW + 2]u64 = undefined;
         const base: usize = self.colx0[0];
         const w_even: u64 = self.colw[0];
@@ -976,7 +1010,7 @@ pub const State = struct {
         for (0..h) |y| {
             if (y * stride + w > buf.len) return;
             const j0: usize = self.rowy0[y];
-            const j1 = @min(j0 + 1, DH - 1);
+            const j1: usize = self.rowy1[y];
             const wy: u64 = self.roww[y];
             const r0 = self.col[j0 * DW ..][0..DW];
             const r1 = self.col[j1 * DW ..][0..DW];
@@ -1214,7 +1248,7 @@ test "the wind stays alive and bounded for an hour of wall time" {
     // the PV model alone, one step per wall second (the tracers are bounded by relaxation)
     for (0..3600) |_| {
         st.advanceStorms();
-        st.coarseStep(true);
+        st.coarseStep(true, 1.0);
     }
     const s = st.grsStats();
     try std.testing.expect(!st.hasNaN());
