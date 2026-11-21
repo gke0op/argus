@@ -39,6 +39,8 @@ const builtin = @import("builtin");
 const sdk = @import("argus_theme_sdk.zig");
 
 const N = 1024; // neurons
+/// Threads exist natively; a wasm build (the website) draws every row on one thread.
+const can_thread = !builtin.cpu.arch.isWasm();
 const B = 64; // parallel instances (screen rows)
 const ROW_DELAY = 4; // input samples between neighbouring rows
 const V16 = @Vector(16, f32);
@@ -120,7 +122,7 @@ pub const State = struct {
         self.w = @min(w, self.xtap.len);
         self.h = h;
         self.frame = 0;
-        self.threads = std.math.clamp(std.Thread.getCpuCount() catch 1, 1, 8);
+        self.threads = if (comptime can_thread) std.math.clamp(std.Thread.getCpuCount() catch 1, 1, 8) else 1;
         self.fine_head = 0;
         self.coarse_head = 0;
 
@@ -536,6 +538,7 @@ pub const State = struct {
     fn drawLut(self: *const State, buf: []u32, stride: usize, lut: *const [256]u32) void {
         if (self.w == 0 or self.h == 0 or stride < self.w) return;
         const h: usize = @min(self.h, buf.len / stride);
+        if (comptime !can_thread) return drawRows(self, buf, stride, lut, h, 0, h);
         var pool: [8]?std.Thread = @splat(null);
         for (1..self.threads) |t| pool[t] = std.Thread.spawn(.{}, drawRows, .{ self, buf, stride, lut, h, h * t / self.threads, h * (t + 1) / self.threads }) catch null;
         drawRows(self, buf, stride, lut, h, 0, h / self.threads);
