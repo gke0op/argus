@@ -30,6 +30,21 @@ Drop a file on a Space in the menu bar and Argus compiles it on the spot. Save a
 reloads within a second. There is no engine to learn, no asset pipeline, no framework: you get
 a pixel grid, a clock and a frame budget.
 
+Click the eye in the menu bar. The Spaces strip shows one thumbnail per Desktop Space: drop a
+theme (or a picture) on any of them, and double-click one (or tap it with two fingers) to eject
+its theme and give that Space back to macOS. Pause with ⏸ (the eye closes while paused). The
+gear opens Settings: step a Space's theme (or go back to the macOS default), speed, frame rate
+(30 by default; 60, or 120 on ProMotion displays: smoother, but the cost grows with the rate),
+live reload and open at login. Settings live in `.argus_settings.conf` next to Argus.app, one
+`key=value` per line.
+
+<p align="center">
+  <img src="docs/media/popover.png" alt="The Argus menu-bar popover: a strip of seven Space thumbnails with Space V (Cygnus A) selected, plus pause and settings buttons" width="680">
+</p>
+<p align="center">
+  <img src="docs/media/settings.png" alt="The Argus Settings view: Space IV's preview and theme stepper set to Cygnus A, a speed slider at 1x, switches for live reload and open at login, and a 30 / 60 / 120 FPS selector" width="680">
+</p>
+
 The engine itself is Zig 0.17.0 talking straight to the macOS frameworks, with no AppKit wrapper.
 It runs at 30 FPS, draws only the Spaces you can see, and does nothing at all while a
 full-screen app, the lock screen or a sleeping display covers them.
@@ -133,20 +148,7 @@ make check-themes                         # the harness on every theme
 make release                              # dist/Argus-v<version>-macos-arm64.zip for a GitHub Release
 ```
 
-Then click the eye in the menu bar. The Spaces strip shows one thumbnail per Desktop Space:
-drop a theme (or a picture) on any of them, and double-click one (or tap it with two fingers)
-to eject its theme and give that Space back to macOS. Pause with ⏸ (the eye closes while paused). The
-gear opens Settings: step a Space's theme (or go back to the macOS default), speed, frame rate
-(30 by default; 60, or 120 on ProMotion displays: smoother, but the cost grows with the rate),
-live reload and open at login. Settings live in `.argus_settings.conf` next to
-Argus.app, one `key=value` per line.
-
-<p align="center">
-  <img src="docs/media/popover.png" alt="The Argus menu-bar popover: a strip of seven Space thumbnails with Space V (Cygnus A) selected, plus pause and settings buttons" width="680">
-</p>
-<p align="center">
-  <img src="docs/media/settings.png" alt="The Argus Settings view: Space IV's preview and theme stepper set to Cygnus A, a speed slider at 1x, switches for live reload and open at login, and a 30 / 60 / 120 FPS selector" width="680">
-</p>
+Then click the eye in the menu bar ([what you'll see](#what-it-is)).
 
 ## Write your own theme
 
