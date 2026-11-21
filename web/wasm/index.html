@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="coi-serviceworker.js"></script>
+<title>Argus wasm engine</title>
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #12151d; --line: #232838; --text: #d7dbe6; --dim: #8a91a6;
+    --pass: #4ec98a; --fail: #f06d6d; --skip: #8a91a6; --accent: #7aa7ff;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  main { max-width: 1280px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 18px; font-weight: 600; margin: 4px 0 2px; }
+  h2 { font-size: 15px; font-weight: 600; margin: 22px 0 8px; }
+  .sub { color: var(--dim); margin: 0 0 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin: 10px 0; }
+  label { color: var(--dim); font-size: 13px; }
+  select, button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font: inherit; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .stage { position: relative; width: 100%; aspect-ratio: 16 / 10; background: #000; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  canvas { width: 100%; height: 100%; display: block; }
+  .hud { position: absolute; left: 10px; top: 10px; background: rgba(8, 10, 14, .78); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; pointer-events: none; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); font-size: 12px; }
+  .ok { color: var(--pass); } .bad { color: var(--fail); } .na { color: var(--skip); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .wrap { overflow-x: auto; }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: auto; margin: 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+  .cap { color: var(--dim); font-size: 12px; margin: 4px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Argus wasm engine <span class="pill" id="iso">…</span></h1>
+  <p class="sub">Argus Zig themes and CPU kernels compiled to WebAssembly (SIMD128), the same source the native harness builds, running on a Worker pool. Dev page for <code>web/wasm</code>.</p>
+
+  <div class="bar">
+    <label>Theme <select id="theme"></select></label>
+    <label>Workers <select id="threads"><option>auto</option><option>1</option><option>2</option><option>4</option><option>8</option></select></label>
+    <label>Render scale <select id="rscale"><option value="1">1 (full)</option><option value="0.5">1/2</option><option value="0.25">1/4</option></select></label>
+    <label>Blit <select id="blit"><option>auto</option><option>webgl2</option><option>2d</option></select></label>
+    <button id="pause">Pause</button>
+  </div>
+  <div class="stage"><canvas id="c"></canvas><div class="hud" id="hud">loading…</div></div>
+
+  <h2>Harness gates in this page</h2>
+  <div class="bar">
+    <button id="run1">Run the 8 gates on this theme</button>
+    <button id="runall">Run every build</button>
+    <span class="cap" id="gstatus"></span>
+  </div>
+  <div id="one"></div>
+  <div class="wrap"><table id="all" hidden>
+    <thead><tr><th>Build</th><th>Browser verdict</th><th>Failed gates</th><th>Native verdict</th><th>Browser ms/frame</th><th>Native ms/frame</th><th>Workers</th><th>Final frame vs native PNG</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+</main>
+
+<script type="module">
+import { create } from './host.js';
+import { runGates } from './gates.js';
+import { decodePNG, comparePixels } from './png.js';
+import { canThread } from './engine.js';
+
+const $ = (id) => document.getElementById(id);
+const base = new URL('./build/', import.meta.url);
+const state = { live: null, paused: false, last: 0, gates: {}, all: [] };
+window.__argus = state;
+
+$('iso').textContent = canThread() ? `cross-origin isolated · ${navigator.hardwareConcurrency} threads` : 'not isolated · 1 thread';
+$('iso').className = 'pill ' + (canThread() ? 'ok' : 'bad');
+
+const manifest = await (await fetch(new URL('manifest.json', base))).json();
+for (const m of manifest) {
+  const o = document.createElement('option');
+  o.value = m.name;
+  o.textContent = m.name + (m.compiled ? '' : ' (does not compile)');
+  $('theme').append(o);
+}
+const params = new URLSearchParams(location.search);
+$('theme').value = params.get('theme') || 'Tutorial_Tides';
+if (params.get('threads')) $('threads').value = params.get('threads');
+if (params.get('scale')) $('rscale').value = params.get('scale');
+if (params.get('blit')) $('blit').value = params.get('blit');
+
+async function startLive() {
+  if (state.live) { state.live.destroy(); state.live = null; }
+  const name = $('theme').value;
+  const entry = manifest.find((m) => m.name === name);
+  if (!entry || !entry.compiled) { $('hud').textContent = `${name}: did not compile (see Gate 1 below)`; return; }
+  $('hud').textContent = `loading ${name}…`;
+  // A canvas keeps its first context (WebGL2 or 2D): each engine gets a fresh one.
+  const canvas = document.createElement('canvas');
+  canvas.id = 'c';
+  $('c').replaceWith(canvas);
+  ro.observe(canvas);
+  const t = $('threads').value;
+  try {
+    state.live = await create(canvas, { theme: name, base, threads: t === 'auto' ? 'auto' : +t, renderScale: +$('rscale').value, blit: $('blit').value });
+  } catch (e) {
+    $('hud').textContent = `${name}: ${e.message}`;
+    return;
+  }
+  sizeCanvas();
+}
+
+function sizeCanvas() {
+  if (!state.live) return;
+  const c = $('c');
+  const dpr = devicePixelRatio || 1;
+  state.live.resize(Math.round(c.clientWidth * dpr), Math.round(c.clientHeight * dpr));
+}
+const ro = new ResizeObserver(sizeCanvas);
+
+let hudAt = 0;
+function loop(t) {
+  const dt = state.last ? (t - state.last) / 1000 : 0;
+  state.last = t;
+  if (state.live && !state.paused) state.live.frame(t / 1000, dt);
+  if (state.live && t - hudAt > 250) {
+    hudAt = t;
+    const s = state.live.stats();
+    $('hud').textContent =
+      `${state.live.name}  ${s.renderW}x${s.renderH}\n` +
+      `${String(s.fps).padStart(3)} FPS   theme ${s.cpuMs.toFixed(2)} ms/frame   blit ${s.blitMs.toFixed(2)} ms\n` +
+      `${s.threads} worker${s.threads > 1 ? 's' : ''} · ${s.lanes ? s.lanes + ' SIMD lanes' : 'SDK theme'} · ${s.variant}.wasm ${s.wasmKB.toFixed(1)} KB · ${s.blit}` +
+      (s.nan ? '\nNaN reported' : '') + (s.error ? `\nerror: ${s.error}` : '');
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+for (const id of ['theme', 'threads', 'rscale', 'blit']) $(id).addEventListener('change', startLive);
+$('pause').addEventListener('click', () => { state.paused = !state.paused; $('pause').textContent = state.paused ? 'Resume' : 'Pause'; });
+
+async function nativeRef(name) {
+  const [txt, png] = await Promise.all([
+    fetch(new URL(`${name}.native.txt`, base)).then((r) => (r.ok ? r.text() : null)).catch(() => null),
+    fetch(new URL(`${name}.native.png`, base)).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null),
+  ]);
+  return { txt, png };
+}
+
+const cls = (p) => (p === true ? 'ok' : p === false ? 'bad' : 'na');
+const word = (p) => (p === true ? 'PASS' : p === false ? 'FAIL' : 'not run');
+
+async function gateOne(name, { show = true } = {}) {
+  const t = $('threads').value;
+  const o = await runGates(name, { base, threads: t === 'auto' ? 'auto' : +t, onPhase: (p) => { $('gstatus').textContent = `${name}: ${p}…`; } });
+  const ref = await nativeRef(name);
+  o.native = { verdict: ref.txt ? ((ref.txt.match(/Verdict\s*:\s*(\w+)/) || [])[1] || (ref.txt.includes('error:') ? 'FAIL (compile)' : '?')) : null,
+    avgUs: ref.txt ? +((ref.txt.match(/Avg Frame Time\s*:\s*([\d.]+)/) || [])[1] || NaN) : NaN, text: ref.txt };
+  if (o.pixels && ref.png) {
+    try { const d = await decodePNG(ref.png); o.compare = comparePixels(o.pixels, d.rgba); } catch (e) { o.compare = { error: e.message }; }
+  }
+  state.gates[name] = o;
+  if (show) renderOne(o);
+  return o;
+}
+
+function renderOne(o) {
+  const rows = o.gates.map((g) => `<tr><td>${g.id}</td><td>${g.name}</td><td class="${cls(g.pass)}">${word(g.pass)}</td><td>${(g.detail || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').split('\n').slice(0, 3).join('<br>')}</td></tr>`).join('');
+  const cmp = o.compare ? (o.compare.error ? o.compare.error : `${o.compare.equal.toLocaleString()} / ${o.compare.pixels.toLocaleString()} pixels equal, max channel difference ${o.compare.maxDiff}`) : 'no native PNG to compare';
+  $('one').innerHTML = `
+    <p><b>${o.name}</b>: <span class="${o.pass ? 'ok' : 'bad'}">${o.pass ? 'PASS' : 'FAIL'}</span> in the browser
+      · native harness: <span class="${o.native.verdict === 'PASS' ? 'ok' : o.native.verdict ? 'bad' : 'na'}">${o.native.verdict || 'no reference'}</span>
+      · final frame vs native: ${cmp}</p>
+    <div class="wrap"><table><thead><tr><th>#</th><th>Gate</th><th>Result</th><th>Detail</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="two" style="margin-top:10px">
+      <div><div class="cap">Browser (wasm32)</div><pre>${o.text.replace(/</g, '&lt;')}</pre></div>
+      <div><div class="cap">Native harness (make harness, aarch64-macos)</div><pre>${(o.native.text || 'none: make web-wasm-refs writes it').replace(/</g, '&lt;')}</pre></div>
+    </div>`;
+}
+
+async function busy(f) {
+  for (const b of ['run1', 'runall']) $(b).disabled = true;
+  const wasPaused = state.paused;
+  state.paused = true; // the gates use every core; the live view waits
+  try { await f(); } finally {
+    state.paused = wasPaused;
+    for (const b of ['run1', 'runall']) $(b).disabled = false;
+    $('gstatus').textContent = '';
+  }
+}
+
+$('run1').addEventListener('click', () => busy(() => gateOne($('theme').value)));
+$('runall').addEventListener('click', () => busy(async () => {
+  const tb = $('all').querySelector('tbody');
+  tb.innerHTML = '';
+  $('all').hidden = false;
+  state.all = [];
+  for (const m of manifest) {
+    const o = await gateOne(m.name, { show: false });
+    state.all.push(o);
+    const failed = o.gates.filter((g) => g.pass === false).map((g) => g.id).join(', ') || '—';
+    const cmp = o.compare && !o.compare.error ? `${o.compare.equal === o.compare.pixels ? 'all ' : ''}${o.compare.equal.toLocaleString()} / ${o.compare.pixels.toLocaleString()} equal (max diff ${o.compare.maxDiff})` : '—';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${o.name}</td><td class="${o.pass ? 'ok' : 'bad'}">${o.pass ? 'PASS' : 'FAIL'}${o.timedOut ? ' (time limit, ' + o.timedOut + ')' : ''}</td><td>${failed}</td>
+      <td class="${o.native.verdict === 'PASS' ? 'ok' : o.native.verdict ? 'bad' : 'na'}">${o.native.verdict || '— (hangs natively)'}</td>
+      <td class="num">${o.report ? (o.report.avg_us / 1000).toFixed(2) : '—'}</td><td class="num">${isFinite(o.native.avgUs) ? (o.native.avgUs / 1000).toFixed(2) : '—'}</td>
+      <td class="num">${o.threads || '—'}</td><td>${cmp}</td>`;
+    tb.append(tr);
+  }
+}));
+
+await startLive();
+if (params.get('gates') === 'all') $('runall').click();
+else if (params.get('gates') === '1') $('run1').click();
+</script>
+</body>
+</html>

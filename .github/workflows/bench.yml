@@ -1,0 +1,131 @@
+name: Bench
+
+# ARGUS-BENCH on a pull request. Every theme the pull request adds or changes is graded and given
+# links that run it in the browser:
+# - a Zig theme (bench/submissions/*.zig, where the site's "Submit a pull request" button puts a
+#   model's answer, or themes/*.zig): the native harness (make harness, src/theme_harness.zig),
+#   the 8 gates as BENCHMARK.md states them, on the CPU;
+# - a Metal theme (themes/*.metal): the native harness on the runner's GPU;
+# - a WGSL theme (web/themes/*.wgsl, a Metal theme's browser port or a theme of its own): the link.
+# The links (tools/share.zig) open the theme on the home page, filling the screen, and on the
+# bench page, graded; the source rides in the link, nothing is uploaded. A Metal theme runs in a
+# browser through its WGSL port, web/themes/NAME.wgsl when the pull request has one, else the
+# automatic translation (tools/msl2wgsl.zig); a theme the translator cannot handle gets the
+# verdict, the translator's message, and no link.
+# Once merged, the site's build lists every theme here in the home page's picker.
+#
+# This job runs the submission's code, so it has no write access and no secrets. It uploads the
+# reports as an artifact; bench-comment.yml (workflow_run) posts them on the pull request
+# without checking out or running anything from it.
+
+on:
+  pull_request:
+    paths:
+      - 'bench/submissions/**.zig'
+      - 'themes/*.zig'
+      - 'themes/*.metal'
+      - 'web/themes/*.wgsl'
+
+permissions:
+  contents: read
+
+jobs:
+  harness:
+    # Apple silicon, as the harness and the leaderboard: the theme is built for aarch64-macos, and
+    # the runner has a (paravirtualized) Metal GPU for .metal themes.
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache Zig 0.17.0
+        uses: actions/cache@v4
+        with:
+          path: .toolchain
+          key: zig-0.17.0-aarch64-macos-${{ hashFiles('tools/get-zig.sh') }}
+
+      - name: Install the pinned Zig (tools/get-zig.sh, SHA-256 checked)
+        run: tools/get-zig.sh
+
+      - name: Grade each theme and make its links
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -u
+          mkdir -p out
+          echo "$PR_NUMBER" > out/pr.txt
+          echo "$HEAD_SHA" > out/head.txt
+          git diff --name-only --diff-filter=AM "$BASE_SHA" HEAD -- 'bench/submissions/*.zig' 'themes/*.zig' 'themes/*.metal' 'web/themes/*.wgsl' > out/files.txt
+          links() { ./.toolchain/zig run tools/share.zig -- "$1" > "out/$2.links.txt" 2>/dev/null || rm -f "out/$2.links.txt"; }
+          status=0
+          while read -r f; do
+            n=$(basename "$f"); ext=${n##*.}; n=${n%.*}
+            case "$n" in (*[!A-Za-z0-9_]*|'') echo "skipping $f: the name must be letters, digits and _" >> out/skipped.txt; continue ;; esac
+            case "$f" in (themes/argus_theme_sdk.zig) continue ;; esac
+            # A .wgsl next to a .metal of this pull request is that theme's port: one entry.
+            if [ "$ext" = wgsl ] && grep -qx "themes/$n.metal" out/files.txt; then continue; fi
+            theme="$f"
+            if [ "$ext" = zig ] && [ "${f#bench/submissions/}" != "$f" ]; then
+              # A submission imports argus_theme_sdk.zig from its own folder, as in themes/.
+              theme="themes/$n.zig"; cp "$f" "$theme"
+            fi
+            if [ "$ext" = wgsl ]; then
+              echo "$n wgsl LINK" >> out/verdicts.txt
+              echo "A WGSL theme: graded in the browser (the bench link below runs the Metal harness's checks on WebGPU)." > "out/$n.txt"
+              links "$f" "$n"
+              continue
+            fi
+            # The harness has no time limit of its own; a theme that hangs is stopped after 5 minutes.
+            if perl -e 'alarm shift; exec @ARGV' 300 make -s harness THEME="$theme" OUT="out/$n.png" > "out/$n.txt" 2>&1; then
+              echo "$n $ext PASS" >> out/verdicts.txt
+            else
+              code=$?
+              [ "$code" = 142 ] && echo "Stopped after 300 s (the theme did not return)." >> "out/$n.txt"
+              echo "$n $ext FAIL" >> out/verdicts.txt
+              status=1
+            fi
+            if [ "$ext" = zig ]; then links "$theme" "$n"
+            elif [ -f "web/themes/$n.wgsl" ]; then links "web/themes/$n.wgsl" "$n"
+            elif ./.toolchain/zig run tools/msl2wgsl.zig -- "$theme" -o "out/$n.wgsl" 2> "out/$n.translate.txt"; then
+              # It translates, so the pages can: the links carry the .metal itself, and the page
+              # translates it with the same translator built to wasm (web/msl2wgsl/).
+              echo "Browser: translated automatically from Metal to WGSL (tools/msl2wgsl.zig), in the page." >> "out/$n.txt"
+              links "$theme" "$n"
+            else
+              { echo "No browser link: the automatic Metal-to-WGSL translation stopped at"; sed 's|^[^:]*/||' "out/$n.translate.txt" | head -n 3
+                echo "The theme runs in the app; a hand-written web/themes/$n.wgsl takes it to the browser (web/README.md)."; } > "out/$n.nolink.txt"
+            fi
+            [ "$theme" != "$f" ] && rm -f "$theme"
+          done < out/files.txt
+          cat out/verdicts.txt 2>/dev/null || echo "no themes"
+          for t in out/*.txt; do echo "::group::$t"; cat "$t"; echo "::endgroup::"; done
+          exit $status
+
+      # The live board's reference grade (web/zigc/grade.mjs): each Zig theme compiled and graded
+      # as the bench page does, with the live site's compiler and gates (the ruler), giving the
+      # module's SHA-256 and gates 1-7 that a visitor's "Re-grade in my browser" must reproduce.
+      # It never decides the pull request: the native harness above does.
+      - uses: actions/setup-node@v4
+        if: always()
+        with:
+          node-version: 22
+
+      - name: Grade each Zig theme in the browser build (the live board's reference)
+        if: always()
+        continue-on-error: true
+        run: |
+          zig_files=$(grep -E '(^|/)[A-Za-z0-9_]+\.zig$' out/files.txt 2>/dev/null | grep -v '^themes/argus_theme_sdk\.zig$' || true)
+          [ -n "$zig_files" ] || { echo "no Zig themes"; exit 0; }
+          node web/zigc/grade.mjs --site https://gke0op.github.io/argus/ --out out $zig_files
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-reports
+          path: out/
+          retention-days: 30

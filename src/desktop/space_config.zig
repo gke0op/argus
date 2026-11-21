@@ -684,9 +684,16 @@ pub const SpaceConfig = struct {
 
     /// Loads a Metal-only theme: no dylib, the app compiles and runs it on the GPU.
     fn loadMetalTheme(self: *SpaceConfig, path: []const u8) bool {
+        // 128 KB head only, as in loadCodeFileIntoSpaceInternal: `argus_draw` must sit near the top.
         var buf: [131072]u8 = undefined;
-        const src = std.Io.Dir.cwd().readFile(g_io, path, &buf) catch return false;
-        if (std.mem.indexOf(u8, src, "argus_draw") == null) return false;
+        const src = std.Io.Dir.cwd().readFile(g_io, path, &buf) catch |err| {
+            std.debug.print("argus: {s}: metal theme not loaded: cannot read file ({s})\n", .{ path, @errorName(err) });
+            return false;
+        };
+        if (std.mem.indexOf(u8, src, "argus_draw") == null) {
+            std.debug.print("argus: {s}: metal theme not loaded: no `argus_draw` kernel in its first {d} bytes\n", .{ path, src.len });
+            return false;
+        }
         if (metal_validate) |validate| {
             if (!validate(src, path)) return false;
         }
@@ -716,7 +723,10 @@ pub const SpaceConfig = struct {
 
         self.dylib_gen +%= 1;
         var dir_buf: [512]u8 = undefined;
-        const cache_dir = dylibCacheDir(&dir_buf) orelse return false;
+        const cache_dir = dylibCacheDir(&dir_buf) orelse {
+            std.debug.print("argus: {s}: theme not loaded: no private dylib cache dir (~/Library/Caches/" ++ BUNDLE_ID ++ " missing, not ours, or open to others; HOME set?)\n", .{path});
+            return false;
+        };
         var dylib_buf: [600]u8 = undefined;
         // PID in the path: the live app, tests and harness must never overwrite each other's loaded dylibs.
         const dylib_z = std.fmt.bufPrintSentinel(&dylib_buf, "{s}/load_{d}_sp{d}_g{d}.dylib", .{
@@ -724,7 +734,10 @@ pub const SpaceConfig = struct {
             std.c.getpid(),
             space_idx,
             self.dylib_gen,
-        }, 0) catch return false;
+        }, 0) catch {
+            std.debug.print("argus: {s}: theme not loaded: dylib path too long under {s}\n", .{ path, cache_dir });
+            return false;
+        };
         // The loaded image stays mapped; the per-load copy is not needed after dlopen.
         defer _ = std.c.unlink(dylib_z.ptr);
 
@@ -764,7 +777,10 @@ pub const SpaceConfig = struct {
             const iname = (if (src_hash != 0)
                 std.fmt.bufPrint(&iname_buf, "@rpath/argus_theme_{x}.dylib", .{src_hash})
             else
-                std.fmt.bufPrint(&iname_buf, "@rpath/argus_theme_p{d}_s{d}_g{d}.dylib", .{ std.c.getpid(), space_idx, self.dylib_gen })) catch return false;
+                std.fmt.bufPrint(&iname_buf, "@rpath/argus_theme_p{d}_s{d}_g{d}.dylib", .{ std.c.getpid(), space_idx, self.dylib_gen })) catch {
+                std.debug.print("argus: {s}: theme not loaded: install name too long\n", .{path});
+                return false;
+            };
 
             if (!buildThemeDylib(path, dylib_z, iname, gpu_port)) {
                 std.debug.print("argus: {s}: compile failed (zig: {s})\n", .{ path, @tagName(zig_status) });
@@ -784,7 +800,11 @@ pub const SpaceConfig = struct {
             }
         }
 
-        const handle = std.c.dlopen(dylib_z.ptr, .{ .NOW = true }) orelse return false;
+        const handle = std.c.dlopen(dylib_z.ptr, .{ .NOW = true }) orelse {
+            const why: [*:0]const u8 = std.c.dlerror() orelse "no dlerror";
+            std.debug.print("argus: {s}: theme not loaded: dlopen {s} failed: {s}\n", .{ path, dylib_z, why });
+            return false;
+        };
 
         const fn_init: ?ThemeInitFn = if (std.c.dlsym(handle, "argus_theme_init")) |p| @ptrCast(@alignCast(p)) else null;
         const fn_deinit: ?ThemeDeinitFn = if (std.c.dlsym(handle, "argus_theme_deinit")) |p| @ptrCast(@alignCast(p)) else null;
@@ -795,6 +815,7 @@ pub const SpaceConfig = struct {
 
         const is_stateful = (fn_init != null and fn_deinit != null and fn_step != null and fn_draw != null);
         if (!is_stateful and fn_stateless == null) {
+            std.debug.print("argus: {s}: theme not loaded: dylib exports neither the argus_theme_* set nor argus_render_theme\n", .{path});
             _ = std.c.dlclose(handle);
             return false;
         }
@@ -802,6 +823,7 @@ pub const SpaceConfig = struct {
         var new_state: ?*anyopaque = null;
         if (is_stateful) {
             new_state = fn_init.?(@intCast(NATIVE_W), @intCast(NATIVE_H), NATIVE_SCALE) orelse {
+                std.debug.print("argus: {s}: theme not loaded: argus_theme_init returned null at {d}x{d}\n", .{ path, NATIVE_W, NATIVE_H });
                 _ = std.c.dlclose(handle);
                 return false;
             };

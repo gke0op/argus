@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Argus wasm blit test</title>
+<style>body { background: #0b0d12; color: #d7dbe6; font: 14px/1.5 ui-monospace, Menlo, monospace; margin: 16px; } .ok { color: #4ec98a; } .bad { color: #f06d6d; }</style>
+</head>
+<body>
+<h1>Blit test</h1>
+<p>What host.js puts on the canvas must be the frame the theme drew: every pixel, the right way up, nothing cropped or magnified. A blit that showed only a quarter of the frame at 2x passed every gate, because the gates read the frame, not the canvas.</p>
+<pre id="out">running…</pre>
+<script type="module">
+import { _blit } from './host.js';
+const { makeGL, blitGL, make2D, blit2D } = _blit;
+
+// A frame whose every pixel is distinct enough to catch a shift, a flip or a crop.
+function frame(w, h) {
+  const px = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const o = (y * w + x) * 4;
+    px[o] = x & 255; px[o + 1] = y & 255; px[o + 2] = (x * 7 + y * 13) & 255; px[o + 3] = 255;
+  }
+  return px;
+}
+// Four flat quadrants: red top-left, green top-right, blue bottom-left, white bottom-right.
+function quadrants(w, h) {
+  const px = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const o = (y * w + x) * 4, r = x >= w / 2, b = y >= h / 2;
+    const c = !r && !b ? [255, 0, 0] : r && !b ? [0, 255, 0] : !r && b ? [0, 0, 255] : [255, 255, 255];
+    px.set([...c, 255], o);
+  }
+  return px;
+}
+function readGL(canvas) {
+  const gl = canvas.getContext('webgl2');
+  const w = canvas.width, h = canvas.height, raw = new Uint8Array(w * h * 4), out = new Uint8Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+  for (let y = 0; y < h; y++) out.set(raw.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4); // bottom-up -> top-down
+  return out;
+}
+const read2D = (canvas) => new Uint8Array(canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data.buffer);
+function mismatches(a, b) {
+  let n = 0, first = null;
+  for (let i = 0; i < a.length; i += 4) if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) { n++; if (first === null) first = i / 4; }
+  return { n, first };
+}
+const at = (px, w, x, y) => Array.from(px.subarray((y * w + x) * 4, (y * w + x) * 4 + 3));
+const near = (a, b) => a.every((v, i) => Math.abs(v - b[i]) <= 2);
+
+const results = [];
+function check(name, ok, detail) { results.push({ name, ok, detail }); }
+
+for (const [w, h] of [[64, 40], [1920, 1200], [333, 211]]) {
+  for (const kind of ['webgl2', '2d']) {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = kind === 'webgl2' ? makeGL(c) : make2D(c);
+    if (!g) { check(`${kind} ${w}x${h} 1:1`, false, 'no context'); continue; }
+    const src = frame(w, h);
+    (kind === 'webgl2' ? blitGL : blit2D)(g, c, src, w, h);
+    const m = mismatches(kind === 'webgl2' ? readGL(c) : read2D(c), src);
+    check(`${kind} ${w}x${h} 1:1, every pixel equal`, m.n === 0, m.n ? `${m.n} pixels differ, first at index ${m.first}` : `${w * h} pixels equal`);
+  }
+}
+// Scaled up (renderScale 0.5): the whole frame fills the canvas, the right way up.
+for (const kind of ['webgl2', '2d']) {
+  const W = 400, H = 250, w = 200, h = 125;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = kind === 'webgl2' ? makeGL(c) : make2D(c);
+  (kind === 'webgl2' ? blitGL : blit2D)(g, c, quadrants(w, h), w, h);
+  const got = kind === 'webgl2' ? readGL(c) : read2D(c);
+  const want = [[5, 5, [255, 0, 0]], [W - 6, 5, [0, 255, 0]], [5, H - 6, [0, 0, 255]], [W - 6, H - 6, [255, 255, 255]]];
+  const bad = want.filter(([x, y, col]) => !near(at(got, W, x, y), col)).map(([x, y]) => `(${x},${y})=${at(got, W, x, y)}`);
+  check(`${kind} ${w}x${h} -> ${W}x${H}, four corners`, bad.length === 0, bad.length ? 'wrong: ' + bad.join(' ') : 'red, green, blue, white where they belong');
+}
+
+const pass = results.every((r) => r.ok);
+window.result = { pass, results };
+document.getElementById('out').innerHTML = results.map((r) => `<span class="${r.ok ? 'ok' : 'bad'}">${r.ok ? 'PASS' : 'FAIL'}</span>  ${r.name}: ${r.detail}`).join('\n') + `\n\n<b class="${pass ? 'ok' : 'bad'}">${pass ? 'PASS' : 'FAIL'}</b>`;
+</script>
+</body>
+</html>

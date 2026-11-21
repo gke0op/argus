@@ -6,7 +6,7 @@ THEME ?= themes/Cygnus_A.zig
 FRAMES ?= 120
 OUT ?= /tmp/argus_theme_out.png
 
-.PHONY: icon quasars all app desktop kronos harness linux check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
+.PHONY: icon quasars all app desktop kronos harness wgsl web-msl2wgsl share show linux web-wasm web-wasm-all web-wasm-refs web-wasm-serve web-zigc web-zigc-test check-themes claims ledger test run stop clean zig release gpu-bench gpu-probes metalfx-demo gpu-arch social
 
 all: app kronos
 
@@ -32,12 +32,106 @@ kronos:
 harness:
 	$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $(THEME) --frames $(FRAMES) --out $(OUT) $(if $(SEED),--seed $(SEED)) $(if $(FPS),--fps $(FPS)) $(if $(STATS),--stats $(STATS)) $(if $(DATE),--date $(DATE))
 
+# The browser's WGSL for a Metal THEME, translated automatically (tools/msl2wgsl.zig). The site
+# and the bench do this for every .metal theme without a hand-written web/themes/NAME.wgsl.
+wgsl:
+	@mkdir -p web/.auto
+	$(ZIG) run tools/msl2wgsl.zig -- $(THEME) -o $(if $(filter command line,$(origin OUT)),$(OUT),web/.auto/$(basename $(notdir $(THEME))).wgsl)
+
+# The same translator as a wasm module (tools/msl2wgsl_wasm.zig), so a page translates a dropped or
+# linked .metal theme itself (web/msl2wgsl/msl2wgsl.js). ~320 KB, 116 KB gzipped; built, not tracked.
+web-msl2wgsl:
+	$(ZIG) build-exe -O ReleaseSmall -target wasm32-freestanding -fno-entry -rdynamic -fstrip tools/msl2wgsl_wasm.zig -femit-bin=web/msl2wgsl/msl2wgsl.wasm
+
+# Two links for THEME (.zig, or a .wgsl port): the home page, where it fills the screen, and the
+# ARGUS-BENCH page, where it is compiled, run and graded. The source rides in the URL fragment:
+# nothing is uploaded (tools/share.zig).
+share:
+	@$(ZIG) run tools/share.zig -- $(THEME)
+
+# The finished render, in front of the user (BENCHMARK.md, "Show it"): the harness's verdict, its
+# last frame opened in the image viewer, and the theme live on the home page through a share link
+# (the bench link, printed too, grades it in the browser). Opens with `open` (macOS) or
+# `xdg-open` (Linux); NO_OPEN=1, or neither present, only prints. The exit status is the
+# harness's: a FAIL is still shown, and still fails.
+SHOW_OUT ?= /tmp/$(basename $(notdir $(THEME))).png
+show:
+	@$(MAKE) --no-print-directory harness THEME=$(THEME) OUT=$(SHOW_OUT); status=$$?; \
+	links=$$($(ZIG) run tools/share.zig -- $(THEME)); \
+	home=$$(echo "$$links" | sed -n 1p); bench=$$(echo "$$links" | sed -n 2p); \
+	opener=$$(command -v open || command -v xdg-open || true); \
+	echo "Last frame : $(SHOW_OUT)"; \
+	echo "Live       : $$home"; \
+	echo "Graded     : $$bench"; \
+	if [ -n "$$opener" ] && [ -z "$(NO_OPEN)" ]; then "$$opener" "$(SHOW_OUT)"; "$$opener" "$$home"; \
+	else echo "Nothing opened here: put the PNG and the live link in front of the user."; fi; \
+	exit $$status
+
 # Linux X11 live wallpaper (pure Zig, no libc): THEME is compiled in. ./argus-linux to run.
 # -fstrip: debug info is most of the LLVM time (rebuild 20 s -> 6 s) and size (4.7 MB -> 324 KB).
 # CPU=x86_64_v3 for a binary to hand out (AVX2; plain x86_64 is ~8x slower on kernel themes).
 CPU ?= native
 linux:
 	$(ZIG) build-exe -O ReleaseFast -fstrip -mcpu=$(CPU) --dep theme -Mroot=src/argus_linux.zig -Mtheme=$(THEME) -femit-bin=argus-linux
+
+# Browser (web/wasm/README.md): THEME compiled to WebAssembly with SIMD128, the same source the
+# harness builds, twice: NAME.mt.wasm (+atomics, shared memory: a page's Worker pool runs it on
+# every core) and NAME.st.wasm (one thread, for pages without cross-origin isolation).
+WEB_WASM_OUT ?= web/wasm/build
+WASM_FLAGS = -O ReleaseFast -target wasm32-freestanding -fno-entry -rdynamic -fstrip \
+	--import-memory --initial-memory=4194304 --max-memory=1073741824 \
+	--dep theme --dep harness_gates -Mroot=web/wasm/runtime.zig -Mtheme=$(THEME) -Mharness_gates=src/harness_gates.zig
+web-wasm:
+	@mkdir -p $(WEB_WASM_OUT)
+	@# Gate 1 as the native harness sees it: on wasm32 usize is 32 bits, so `const x: u32 = n_usize;`
+	@# compiles there and fails on aarch64-macos. Type-check for the app's target first.
+	$(ZIG) build-lib -dynamic -lc -fno-emit-bin -O ReleaseFast -target aarch64-macos $(THEME)
+	$(ZIG) build-exe -mcpu=generic+simd128+atomics+bulk_memory -fno-single-threaded --shared-memory $(WASM_FLAGS) -femit-bin=$(WEB_WASM_OUT)/$(basename $(notdir $(THEME))).mt.wasm
+	$(ZIG) build-exe -mcpu=generic+simd128 -fsingle-threaded $(WASM_FLAGS) -femit-bin=$(WEB_WASM_OUT)/$(basename $(notdir $(THEME))).st.wasm
+
+# Every theme the dev page lists, the BENCHMARK.md skeleton and the gate fixtures. A theme that
+# fails to compile is recorded (Gate 1) in build/NAME.compile.txt, not fatal. Then the manifest.
+WEB_WASM_THEMES ?= themes/cpu/Tutorial_Tides.zig themes/Cygnus_A.zig tests/fixtures/Fixture_Stateful.zig tests/fixtures/Fixture_Stateless.zig tests/fixtures/Fixture_Hang.zig $(sort $(wildcard tests/fixtures/Gate*.zig))
+# Every merged community theme (tracked themes/*.zig and bench/submissions/*.zig), built from a copy
+# next to the SDK, as the harness builds a submission; the home page lists those that compile.
+COMMUNITY_ZIG ?= $(filter-out themes/argus_theme_sdk.zig themes/Cygnus_A.zig,$(shell git ls-files ':(glob)themes/*.zig' ':(glob)bench/submissions/*.zig' 2>/dev/null))
+COMMUNITY_WGSL ?= $(shell git ls-files ':(glob)web/themes/*.wgsl' 2>/dev/null)
+web-wasm-all:
+	@mkdir -p $(WEB_WASM_OUT)/stage
+	@awk '/^### Minimal Working Skeleton/{s=1} s&&/^```zig/{c=1;next} c&&/^```/{exit} c' BENCHMARK.md > $(WEB_WASM_OUT)/stage/Bench_Skeleton.zig
+	@cp themes/argus_theme_sdk.zig $(WEB_WASM_OUT)/stage/argus_theme_sdk.zig
+	@for t in $(COMMUNITY_ZIG); do cp $$t $(WEB_WASM_OUT)/stage/$$(basename $$t); done
+	@for t in $(WEB_WASM_THEMES) $(WEB_WASM_OUT)/stage/Bench_Skeleton.zig $(addprefix $(WEB_WASM_OUT)/stage/,$(notdir $(COMMUNITY_ZIG))); do \
+		n=$$(basename $$t .zig); \
+		if $(MAKE) -s web-wasm THEME=$$t > $(WEB_WASM_OUT)/$$n.compile.txt 2>&1; then echo "  ok    $$n"; else echo "  FAIL  $$n (Gate 1: compile; see $(WEB_WASM_OUT)/$$n.compile.txt)"; fi; \
+	done
+	@cd $(WEB_WASM_OUT) && { printf '['; sep=''; for f in *.compile.txt; do n=$${f%.compile.txt}; \
+		if [ -f $$n.st.wasm ]; then ok=true; else ok=false; fi; \
+		printf '%s{"name":"%s","compiled":%s}' "$$sep" "$$n" "$$ok"; sep=','; done; printf ']\n'; } > manifest.json
+
+# Native harness reports and final frames for the dev page's comparison (build/NAME.native.*).
+# Fixture_Hang is left out: the native harness has no time limit and would never return.
+web-wasm-refs: web-wasm-all
+	@for t in $(filter-out tests/fixtures/Fixture_Hang.zig,$(WEB_WASM_THEMES)) $(WEB_WASM_OUT)/stage/Bench_Skeleton.zig; do \
+		n=$$(basename $$t .zig); \
+		$(ZIG) run $(ZFLAGS) src/theme_harness.zig -- $$t --frames 120 --out $(WEB_WASM_OUT)/$$n.native.png > $(WEB_WASM_OUT)/$$n.native.txt 2>&1; \
+		echo "  native $$n: $$(grep -o 'Verdict *: [A-Z]*' $(WEB_WASM_OUT)/$$n.native.txt || echo 'did not compile')"; \
+	done
+
+# The bench page's in-browser compiler (web/zigc/README.md): zig.wasm (Zig 0.17.0 for wasm32-wasi;
+# .github/workflows/pages.yml builds it from the official source tarball) and the std import
+# closure of the release's lib, into web/zigc/build/. web-zigc-test compiles and grades the gate
+# fixtures, the BENCHMARK.md skeleton and Tutorial_Tides with it in Node.
+ZIG_WASM ?=
+web-zigc:
+	ZIG="$(ZIG)" ZIG_WASM="$(ZIG_WASM)" web/zigc/build.sh
+web-zigc-test:
+	node web/zigc/test.mjs --pathological --zig "$(ZIG_WASM)" --lib "$$($(ZIG) env | sed -n 's/^ *\.lib_dir = "\(.*\)",$$/\1/p')"
+
+# The dev page needs cross-origin isolation for threads; this server sends the COOP/COEP headers
+# (GitHub Pages cannot; there coi-serviceworker.js adds them, see web/wasm/README.md).
+web-wasm-serve:
+	node web/wasm/serve.mjs
 
 # The harness on every tracked theme: CPU for each .zig, GPU for each .metal (skipped without a
 # Metal device). tools/check_themes.sh --all also checks untracked local themes.
@@ -92,6 +186,9 @@ else
 	$(ZIG) test $(ZFLAGS) src/linux/sandbox.zig
 	if command -v qemu-aarch64-static >/dev/null; then $(ZIG) test -target aarch64-linux src/linux/sandbox.zig --test-cmd qemu-aarch64-static --test-cmd-bin; fi
 endif
+	# The Metal -> WGSL translator: its tests, and every tracked .metal theme translates.
+	$(ZIG) test tools/msl2wgsl.zig
+	$(ZIG) run tools/msl2wgsl.zig -- --check $(shell git ls-files 'themes/*.metal')
 
 run: app
 	./Launch_Argus_Wallpaper.command

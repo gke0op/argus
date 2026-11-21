@@ -19,7 +19,17 @@ pub const Shm = struct {
     mem: []u32,
     w: usize,
     h: usize,
+    cap: usize, // pixels the segment holds: a later screen up to this size reuses it (reshape)
     pending: bool = false,
+
+    /// Reuses the segment for a w x h frame (after shmWait); false when it does not fit.
+    pub fn reshape(s: *Shm, w: usize, h: usize) bool {
+        if (w * h > s.cap) return false;
+        s.mem = s.mem.ptr[0 .. w * h];
+        s.w = w;
+        s.h = h;
+        return true;
+    }
 };
 
 pub const Conn = struct {
@@ -36,6 +46,9 @@ pub const Conn = struct {
     red_shift: u5,
     green_shift: u5,
     blue_shift: u5,
+    /// The screen's size from the last ConfigureNotify on the root (xrandr, a monitor plugged
+    /// in), until the caller takes it; may equal width x height. Needs selectScreenChanges.
+    resized: ?[2]u16 = null,
 
     pub fn newId(self: *Conn) u32 {
         self.next_id += 1;
@@ -78,6 +91,7 @@ pub const Conn = struct {
         var c: Conn = undefined;
         c.fd = fd;
         c.next_id = 0;
+        c.resized = null;
 
         // Setup request: little-endian ('l'), protocol 11.0, optional auth.
         var req: [12 + 20 + 16]u8 = @splat(0);
@@ -146,10 +160,11 @@ pub const Conn = struct {
         @memcpy(r[8..][0..name.len], name);
         try self.send(r[0 .. 8 + padded]);
         var rep: [32]u8 = undefined;
-        while (true) { // skip any queued events/errors until the reply
+        while (true) { // handle any queued events until the reply
             try self.recvExact(&rep);
             if (rep[0] == 1) break;
             if (rep[0] == 0) return error.ReadFailed;
+            self.handle(&rep);
         }
         return std.mem.readInt(u32, rep[8..12], .little);
     }
@@ -197,6 +212,28 @@ pub const Conn = struct {
         std.mem.writeInt(u32, r[20..24], @intCast(s.len), .little);
         @memcpy(r[24..][0..s.len], s);
         try self.send(r[0 .. 24 + padded]);
+    }
+
+    /// Asks for a ConfigureNotify when the root window (the screen) changes size; see `resized`.
+    pub fn selectScreenChanges(self: *Conn) Error!void {
+        var r: [16]u8 = @splat(0);
+        r[0] = 2; // ChangeWindowAttributes
+        std.mem.writeInt(u16, r[2..4], 4, .little);
+        std.mem.writeInt(u32, r[4..8], self.root, .little);
+        std.mem.writeInt(u32, r[8..12], 0x800, .little); // CWEventMask
+        std.mem.writeInt(u32, r[12..16], 0x20000, .little); // StructureNotifyMask
+        try self.send(&r);
+    }
+
+    pub fn resizeWindow(self: *Conn, win: u32, w: u16, h: u16) Error!void {
+        var r: [20]u8 = @splat(0);
+        r[0] = 12; // ConfigureWindow
+        std.mem.writeInt(u16, r[2..4], 5, .little);
+        std.mem.writeInt(u32, r[4..8], win, .little);
+        std.mem.writeInt(u16, r[8..10], 0x4 | 0x8, .little); // width, height
+        std.mem.writeInt(u32, r[12..16], w, .little);
+        std.mem.writeInt(u32, r[16..20], h, .little);
+        try self.send(&r);
     }
 
     pub fn mapWindow(self: *Conn, win: u32) Error!void {
@@ -247,8 +284,10 @@ pub const Conn = struct {
 
     /// MIT-SHM: a w x h frame in System V shared memory that the server reads in place, so a
     /// frame costs a 40-byte request instead of w*h*4 bytes through the socket. Null when the
-    /// server lacks the extension (or isn't local).
-    pub fn shmInit(self: *Conn, w: usize, h: usize) ?Shm {
+    /// server lacks the extension (or isn't local). `cap` (pixels, >= w*h) sizes the segment for
+    /// a larger screen later (`Shm.reshape`), reserved but not committed; when the kernel refuses
+    /// that much, the segment is w x h.
+    pub fn shmInit(self: *Conn, w: usize, h: usize, cap: usize) ?Shm {
         var q: [20]u8 = @splat(0);
         const name = "MIT-SHM";
         q[0] = 98; // QueryExtension
@@ -261,13 +300,18 @@ pub const Conn = struct {
             self.recvExact(&rep) catch return null;
             if (rep[0] == 1) break;
             if (rep[0] == 0) return null;
+            self.handle(&rep);
         }
         if (rep[8] == 0) return null; // not present
         const opcode = rep[9];
         const first_event = rep[10];
 
-        const bytes = w * h * 4;
-        const id_rc = linux.syscall3(.shmget, 0, bytes, 0o1000 | 0o600); // IPC_PRIVATE, IPC_CREAT | rw owner
+        var px_cap = @max(cap, w * h);
+        var id_rc = linux.syscall3(.shmget, 0, px_cap * 4, 0o10000 | 0o1000 | 0o600); // IPC_PRIVATE, SHM_NORESERVE | IPC_CREAT | rw owner
+        if (linux.errno(id_rc) != .SUCCESS and px_cap > w * h) {
+            px_cap = w * h;
+            id_rc = linux.syscall3(.shmget, 0, px_cap * 4, 0o10000 | 0o1000 | 0o600);
+        }
         if (linux.errno(id_rc) != .SUCCESS) return null;
         const shmid: u32 = @intCast(id_rc);
         const addr = linux.syscall3(.shmat, shmid, 0, 0);
@@ -289,7 +333,7 @@ pub const Conn = struct {
         _ = self.internAtom("WM_NAME") catch return null;
         _ = linux.syscall3(.shmctl, shmid, 0, 0); // IPC_RMID
         const mem: [*]u32 = @ptrFromInt(addr);
-        return .{ .seg = seg, .opcode = opcode, .completion = first_event, .mem = mem[0 .. w * h], .w = w, .h = h };
+        return .{ .seg = seg, .opcode = opcode, .completion = first_event, .mem = mem[0 .. w * h], .w = w, .h = h, .cap = px_cap };
     }
 
     /// Sends the shared frame (already in the server's pixel format) and asks for a completion
@@ -318,9 +362,20 @@ pub const Conn = struct {
         while (s.pending) {
             var ev: [32]u8 = undefined;
             try self.recvExact(&ev);
-            if ((ev[0] & 0x7F) == s.completion) s.pending = false;
-            if (ev[0] == 0) std.debug.print("x11 error code={d} major={d}\n", .{ ev[1], ev[10] });
+            if ((ev[0] & 0x7F) == s.completion) s.pending = false else self.handle(&ev);
         }
+    }
+
+    /// Detaches the shared frame from the server and this process (after shmWait); the segment
+    /// then goes away.
+    pub fn shmDeinit(self: *Conn, s: *Shm) Error!void {
+        var r: [8]u8 = @splat(0);
+        r[0] = s.opcode;
+        r[1] = 2; // ShmDetach
+        std.mem.writeInt(u16, r[2..4], 2, .little);
+        std.mem.writeInt(u32, r[4..8], s.seg, .little);
+        try self.send(&r);
+        _ = linux.syscall1(.shmdt, @intFromPtr(s.mem.ptr));
     }
 
     /// Writes an Argus frame ([R, G, B, A] bytes) into the shared frame in server pixel order.
@@ -330,13 +385,21 @@ pub const Conn = struct {
         }
     }
 
-    /// Reads and reports any queued X errors without blocking (events are not selected).
-    pub fn drainErrors(self: *Conn) void {
+    /// Handles any queued X errors and events without blocking.
+    pub fn drainEvents(self: *Conn) void {
         var pfd = [1]linux.pollfd{.{ .fd = self.fd, .events = linux.POLL.IN, .revents = 0 }};
         while (linux.poll(&pfd, 1, 0) == 1) {
             var ev: [32]u8 = undefined;
             self.recvExact(&ev) catch return;
-            if (ev[0] == 0) std.debug.print("x11 error code={d} major={d}\n", .{ ev[1], ev[10] });
+            self.handle(&ev);
+        }
+    }
+
+    /// One error or event off the wire: errors are reported, a new screen size is kept.
+    fn handle(self: *Conn, ev: *const [32]u8) void {
+        if (ev[0] == 0) std.debug.print("x11 error code={d} major={d}\n", .{ ev[1], ev[10] });
+        if ((ev[0] & 0x7F) == 22 and std.mem.readInt(u32, ev[8..12], .little) == self.root) { // ConfigureNotify
+            self.resized = .{ std.mem.readInt(u16, ev[20..22], .little), std.mem.readInt(u16, ev[22..24], .little) };
         }
     }
 };

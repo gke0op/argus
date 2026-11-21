@@ -49,10 +49,11 @@ const Ctl = extern struct {
 };
 
 /// `n` items in memory shared with a child forked later (private mappings turn copy-on-write
-/// across fork, so the child's writes would never reach the parent).
+/// across fork, so the child's writes would never reach the parent). Pages are committed when
+/// first touched, so `n` may reserve room for a larger screen later.
 pub fn sharedAlloc(comptime T: type, n: usize) ![]T {
     const bytes = n * @sizeOf(T);
-    const rc = linux.mmap(null, bytes, .{ .READ = true, .WRITE = true }, .{ .TYPE = .SHARED, .ANONYMOUS = true }, -1, 0);
+    const rc = linux.mmap(null, bytes, .{ .READ = true, .WRITE = true }, .{ .TYPE = .SHARED, .ANONYMOUS = true, .NORESERVE = true }, -1, 0);
     if (linux.errno(rc) != .SUCCESS) return error.OutOfMemory;
     const p: [*]T = @ptrFromInt(rc);
     return p[0..n];

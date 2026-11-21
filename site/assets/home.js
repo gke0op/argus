@@ -1,0 +1,266 @@
+// site/assets/home.js: the live hero (theme picker, telemetry), copy buttons, the sortable
+// leaderboard.
+import { THEMES, byId, mount, probeWebGPU } from './engines.js';
+import { sortable, copyButtons } from './ui.js';
+import { readShare, shareFragment, kindOf, themeName, unfence, zigToLive, wgslToLive, metalToLive } from './sources.js';
+
+const $ = (id) => document.getElementById(id);
+const stage = $('stage'), picker = $('picker'), caption = $('caption'), teleBody = $('teleBody'), poster = $('poster');
+const hero = $('hero');
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const q = new URLSearchParams(location.search);
+
+copyButtons();
+document.querySelectorAll('table.lb').forEach(sortable);
+
+// Solid top bar once the hero is scrolled past.
+new IntersectionObserver(([e]) => document.body.classList.toggle('solid', !e.isIntersecting), { rootMargin: '-60px 0px 0px 0px' }).observe(hero);
+
+let gpu = { ok: false, why: 'checking' };
+let current = null;   // the mounted handle
+let loading = null;   // id being loaded
+// Phones start at half resolution: native is 2.5-3 million pixels a frame there, which heats a
+// phone GPU and throttles it. ?res=native or the button switches back.
+const PHONE = matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 600;
+let half = q.has('res') ? q.get('res') === 'half' : PHONE;
+let note = '', err = '', errShown = false;
+let firstFrameMs = null;
+
+function chips() {
+  picker.textContent = '';
+  for (const t of THEMES) {
+    if (t.fallbackOnly && gpu.ok) continue;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.dataset.id = t.id;
+    b.innerHTML = `${t.label}${t.tag ? ` <small>${t.tag}</small>` : ''}`;
+    if (t.kind !== 'wasm' && !gpu.ok) { b.disabled = true; b.title = 'Needs WebGPU'; }
+    b.addEventListener('click', () => select(t.id));
+    picker.append(b);
+  }
+  // Your own theme: a .zig (compiled here by Zig 0.17.0), a .metal (translated here) or a .wgsl. So is a drop or a
+  // paste anywhere on the page, and a share link (#zig=, #metal= or #wgsl=; make share).
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'chip yours';
+  b.innerHTML = 'Run yours <small>.zig · .metal · .wgsl</small>';
+  b.title = 'Run a .zig, .metal or .wgsl theme here (or drop or paste one anywhere on the page)';
+  b.addEventListener('click', () => filePick.click());
+  picker.append(b);
+}
+const filePick = Object.assign(document.createElement('input'), { type: 'file', accept: '.zig,.wgsl,.metal,text/plain', hidden: true });
+document.body.append(filePick);
+filePick.addEventListener('change', () => { const f = filePick.files[0]; filePick.value = ''; if (f) f.text().then((text) => runFile(f.name, text)); });
+
+// ---- your theme: a share link, a dropped, picked or pasted file -------------------------------
+let yoursGen = 0;   // bumped by every start (yours or a chip): a theme still compiling for an older one is dropped
+function runFile(fileName, text) {
+  const src = unfence(text);
+  const kind = kindOf(fileName, src);
+  hero.scrollIntoView({ block: 'start' });
+  runYours(kind, themeName(fileName || (kind === 'wgsl' ? 'Your_Theme.wgsl' : 'Your_Theme.zig')), Promise.resolve(src));
+}
+async function runYours(kind, name, sourceP) {
+  const gen = ++yoursGen;
+  loading = `yours:${name}`;
+  note = ''; err = ''; errShown = false;
+  current?.stop();
+  current = null;
+  for (const b of picker.querySelectorAll('.chip')) b.setAttribute('aria-pressed', String(b.classList.contains('yours')));
+  const say = (html) => { if (gen === yoursGen) caption.innerHTML = `<b>${esc(name)}</b> · ${html}`; };
+  let benchLink = 'bench/';
+  try {
+    const src = await sourceP;
+    if (kind !== 'zig' && kind !== 'wgsl' && kind !== 'metal') throw new Error('this is not a .zig, .metal or .wgsl theme');
+    const frag = await shareFragment(kind, name, src);
+    benchLink = `bench/#${frag}`;
+    // The address bar holds a link to this theme (reload or share it); a chip clears it.
+    history.replaceState(null, '', `${location.pathname}${location.search.replace(/([?&])theme=[^&]*&?/, '$1').replace(/[?&]$/, '')}#${frag}`);
+    let theme, opts = {};
+    if (kind === 'zig') {
+      say('compiling in this page with Zig 0.17.0…');
+      ({ theme, opts } = await zigToLive(name, src, { onPhase: (p) => say(`${esc(p)}…`) }));
+    } else {
+      if (!gpu.ok) throw new Error(`a ${kind === 'metal' ? 'Metal' : 'WGSL'} theme needs WebGPU here, and ${gpu.why}`);
+      if (kind === 'metal') say('translating Metal to WGSL in this page…');
+      theme = kind === 'metal' ? await metalToLive(name, src) : wgslToLive(name, src);
+    }
+    if (gen !== yoursGen) return;
+    say('starting…');
+    const h = await mount(stage, theme, {
+      ...opts,
+      scale: (globalThis.devicePixelRatio || 1) * (half ? 0.5 : 1),
+      onFirstFrame: () => { if (firstFrameMs === null) firstFrameMs = performance.now(); poster.style.opacity = '0'; },
+      onError: (e) => { err = String(e.message ?? e); },
+    });
+    if (gen !== yoursGen) { h.stop(); return; }
+    current = h;
+    h.setPaused(!visible);
+    say(`${esc(theme.line)} <a href="${benchLink}">Grade it on the bench</a> · the address bar links to it.`);
+  } catch (e) {
+    if (gen !== yoursGen) return;
+    err = `${name}: ${e.message ?? e}${e.log ? `\n\n${String(e.log).slice(0, 2000)}` : ''}`;
+    say(`didn’t run: ${esc(e.message ?? e)}. <a href="${benchLink}">Open it on the bench</a> for the full report.`);
+    console.error(e);
+  } finally {
+    if (loading === `yours:${name}`) loading = null;
+  }
+}
+// Drop a file, or paste source outside a field, anywhere on the page.
+addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); });
+addEventListener('drop', (e) => {
+  const f = e.dataTransfer?.files?.[0];
+  if (!f) return;
+  e.preventDefault();
+  f.text().then((text) => runFile(f.name, text));
+});
+addEventListener('paste', (e) => {
+  if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable]')) return;
+  const text = e.clipboardData?.getData('text/plain') || '';
+  const kind = kindOf('', unfence(text));
+  if (kind !== 'zig' && kind !== 'wgsl' && kind !== 'metal') return;
+  e.preventDefault();
+  runFile('', text);
+});
+
+function mark(id) {
+  for (const b of picker.querySelectorAll('.chip')) b.setAttribute('aria-pressed', String(b.dataset.id === id));
+  const t = byId(id);
+  caption.innerHTML = t ? `<b>${t.label}${t.tag ? ` (${t.tag})` : ''}</b> · ${t.line} <a href="https://github.com/gke0op/argus/blob/main/${t.src}"><code>${t.src}</code></a>` : '';
+}
+
+async function select(id, { replace = false } = {}) {
+  const t = byId(id);
+  if (!t || loading === id) return;
+  if (t.kind !== 'wasm' && !gpu.ok) return;
+  loading = id;
+  yoursGen++;
+  mark(id);
+  note = ''; err = ''; errShown = false;
+  const u = new URL(location.href);
+  u.hash = '';
+  u.searchParams.set('theme', id);
+  history[replace ? 'replaceState' : 'pushState'](null, '', u);
+  current?.stop();
+  current = null;
+  try {
+    const h = await mount(stage, t, {
+      scale: (globalThis.devicePixelRatio || 1) * (half ? 0.5 : 1),
+      // performance.now() is time since navigation start: the page's time to first frame.
+      onFirstFrame: () => { if (firstFrameMs === null) firstFrameMs = performance.now(); poster.style.opacity = '0'; },
+      onError: (e) => { err = String(e.message ?? e); },
+    });
+    if (loading !== id) { h.stop(); return; }
+    current = h;
+    h.setPaused(!visible);
+    if (t.kind === 'wasm' && !crossOriginIsolated) {
+      note = 'One thread: this page is not cross-origin isolated, so wasm threads are off.';
+      // Threads need isolation: ask for it now (a service worker, then one reload back to this
+      // theme). If the browser refuses, the theme stays on one thread with this note.
+      if (!replace || q.get('theme') === id) enableThreads();
+    }
+  } catch (e) {
+    err = `${t.label}: ${e.message ?? e}`;
+    console.error(e);
+  } finally {
+    if (loading === id) loading = null;
+  }
+}
+
+const f = (x, d = 2) => (x == null || !Number.isFinite(x) ? '–' : x.toFixed(d));
+function row(k, v, cls = '') { return `<div class="row ${cls}"><span class="k">${k}</span><span class="v">${v}</span></div>`; }
+
+function tele() {
+  let html = '';
+  if (current) {
+    const r = current.readout();
+    html += row('engine', r.engine);
+    if (r.kind === 'wasm') {
+      html += row('CPU / frame', `${f(r.cpuMs)} ms`);
+      html += row('blit', `${f(r.blitMs)} ms`, 'wide');
+      html += row('wasm', `${f(r.wasmKB, 1)} KB · ${r.variant ?? '–'}`);
+      html += row('threads', `${r.threads ?? '–'}${r.isolated ? '' : ' (not isolated)'}`);
+      html += row('render', `${r.width}×${r.height}${r.width !== r.canvasW ? ` → ${r.canvasW}×${r.canvasH}` : ''}`, 'wide');
+    } else {
+      html += row('GPU / frame', r.gpuMs == null ? 'n/a here' : `${f(r.gpuMs)} ms`);
+      html += row('CPU / frame', `${f(r.cpuMs)} ms`);
+      if (r.kind === 'cygnus') {
+        html += row('wasm', `${r.wasmKB ?? '–'} KB · 1 thread`);
+        html += row('trace', r.traceMs == null ? `${r.rowsDone ?? 0} / ${r.traceH ?? '–'} rows` : `${f(r.traceMs / 1000)} s`);
+      } else {
+        html += row('wasm', 'none');
+      }
+      html += row('size', `${r.width}×${r.height}`, 'wide');
+    }
+    html += row('frame rate', `${f(r.fps, 0)} fps of ${f(r.hz, 0)} Hz`);
+    if (firstFrameMs != null) html += row('first frame', `${f(firstFrameMs, 0)} ms`, 'wide');
+    if (r.kind === 'wgsl' && r.gpuMs == null && r.cpuMs != null && current.engine.stats().frame > 60) note ||= 'No timestamp-query here, so GPU time is not measured.';
+    if (r.error && !err) err = `${current.theme.label} can’t run on this GPU: ${r.error}`;
+    if (r.statsSources && !r.statsSources.all) note ||= 'In the app these are your Mac’s; a browser knows only a few about itself.';
+  } else if (loading) {
+    html += row('engine', 'loading…');
+  }
+  if (!gpu.ok && gpu.why !== 'checking') html += `<div class="note">No WebGPU: ${gpu.why}. The GPU themes need it (Chrome or Edge 113+, Safari 26+); the Zig themes compiled to wasm run here instead.</div>`;
+  if (note) html += `<div class="note">${note}${note.startsWith('One thread') ? ' <button type="button" id="isoBtn">reload with threads</button>' : ''}</div>`;
+  if (err) html += `<div class="err">${err.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div>`;
+  teleBody.innerHTML = html;
+  // A folded readout (phones) would hide the error: unfold it once per failure.
+  if (err && !errShown) { errShown = true; $('tele').classList.remove('min'); $('teleBtn').textContent = '–'; }
+  if (current) {
+    const r = current.readout();
+    const ms = r.kind === 'wasm' ? `CPU ${f(r.cpuMs)} ms · ${r.threads ?? 1}T` : `GPU ${r.gpuMs == null ? 'n/a' : f(r.gpuMs) + ' ms'}`;
+    $('teleSum').textContent = `${ms} · ${f(r.fps, 0)}/${f(r.hz, 0)} fps`;
+  }
+  $('isoBtn')?.addEventListener('click', enableThreads);
+}
+setInterval(tele, 500);
+
+// Cross-origin isolation for wasm threads: coi-serviceworker.js registers a service worker that
+// adds COOP/COEP (GitHub Pages can't send headers) and reloads once. Only on request here, so the
+// first visit to the home page never reloads before its first frame.
+function enableThreads() {
+  const s = document.createElement('script');
+  s.src = new URL('../coi-serviceworker.js', import.meta.url).href;
+  document.head.append(s);
+}
+
+$('bareBtn').addEventListener('click', () => hero.classList.toggle('bare'));
+// The readout starts folded to one line on every screen; + unfolds it.
+$('tele').classList.add('min'); $('teleBtn').textContent = '+';
+$('teleBtn').addEventListener('click', () => { $('tele').classList.toggle('min'); $('teleBtn').textContent = $('tele').classList.contains('min') ? '+' : '–'; });
+$('resBtn').textContent = half ? 'half res' : 'native res';
+$('resBtn').addEventListener('click', () => {
+  half = !half;
+  $('resBtn').textContent = half ? 'half res' : 'native res';
+  const u = new URL(location.href);
+  if (half === PHONE) u.searchParams.delete('res'); else u.searchParams.set('res', half ? 'half' : 'native');
+  history.replaceState(null, '', u);
+  const id = current?.theme.id;
+  if (id) { loading = null; select(id, { replace: true }); }
+});
+addEventListener('keydown', (e) => {
+  if (e.target.closest?.('input, textarea, select') || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'h') hero.classList.toggle('bare');
+});
+addEventListener('popstate', () => { const id = new URLSearchParams(location.search).get('theme'); if (id && id !== current?.theme.id) select(id, { replace: true }); });
+// A hidden hero costs GPU for nothing: pause it while scrolled away or the tab is hidden.
+let visible = true;
+new IntersectionObserver(([e]) => { visible = e.isIntersecting; current?.setPaused(!visible); }).observe(hero);
+
+gpu = await probeWebGPU();
+// Every merged theme the build found (site/tools/community.zig) joins the picker after the
+// curated ones: a pull request that adds a theme puts it here once it is merged.
+try {
+  const community = await (await fetch(new URL('community.json', import.meta.url))).json();
+  for (const t of community) if (!byId(t.id)) THEMES.push({ ...t, tag: 'community', line: t.line || 'A community theme.' });
+} catch { /* no list: the curated themes only */ }
+chips();
+const shared = readShare(location.hash);
+const want = q.get('theme');
+const first = (want && byId(want) && (gpu.ok || byId(want).kind === 'wasm')) ? want : gpu.ok ? 'Cygnus_A' : 'Tutorial_Tides_wasm';
+tele();
+if (shared) await runYours(shared.kind, shared.name, shared.source);
+else await select(first, { replace: true });
+addEventListener('hashchange', () => { const s = readShare(location.hash); if (s) runYours(s.kind, s.name, s.source); });
+window.__site = { current: () => current, firstFrameMs: () => firstFrameMs, gpu: () => gpu, visible: () => visible };
