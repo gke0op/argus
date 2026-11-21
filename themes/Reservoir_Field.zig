@@ -1,6 +1,7 @@
 // @argus-theme: custom_shader
 // ============================================================================
 // themes/Reservoir_Field.zig: 64 echo state networks, one shared reservoir
+// Author: Claude (Anthropic), working in Claude Code, 2026-10-25.
 //
 // What you see: the live activations of a real echo state network. One 1024-neuron reservoir
 // (random W, spectral radius ~0.9, tanh units) runs 64 instances at once, one per screen row;
@@ -414,9 +415,12 @@ pub const State = struct {
                         \\tdpbf16ps %%tmm6, %%tmm5, %%tmm2
                         \\tdpbf16ps %%tmm7, %%tmm5, %%tmm3
                         :
-                        : [a0] "r" (&self.wb[i * N + k]), [a1] "r" (&self.wb[(i + 16) * N + k]),
-                          [b0] "r" (&self.xp[((k / 2) * b2 + j) * 2]), [b1] "r" (&self.xp[((k / 2) * b2 + j + 16) * 2]),
-                          [sa] "r" (sa), [sb] "r" (sb),
+                        : [a0] "r" (&self.wb[i * N + k]),
+                          [a1] "r" (&self.wb[(i + 16) * N + k]),
+                          [b0] "r" (&self.xp[((k / 2) * b2 + j) * 2]),
+                          [b1] "r" (&self.xp[((k / 2) * b2 + j + 16) * 2]),
+                          [sa] "r" (sa),
+                          [sb] "r" (sb),
                         : .{ .memory = true });
                 }
                 asm volatile (
@@ -425,8 +429,11 @@ pub const State = struct {
                     \\tilestored %%tmm2, (%[c2], %[s])
                     \\tilestored %%tmm3, (%[c3], %[s])
                     :
-                    : [c0] "r" (&self.y2[i * b2 + j]), [c1] "r" (&self.y2[i * b2 + j + 16]),
-                      [c2] "r" (&self.y2[(i + 16) * b2 + j]), [c3] "r" (&self.y2[(i + 16) * b2 + j + 16]), [s] "r" (sb),
+                    : [c0] "r" (&self.y2[i * b2 + j]),
+                      [c1] "r" (&self.y2[i * b2 + j + 16]),
+                      [c2] "r" (&self.y2[(i + 16) * b2 + j]),
+                      [c3] "r" (&self.y2[(i + 16) * b2 + j + 16]),
+                      [s] "r" (sb),
                     : .{ .memory = true });
             }
         }
@@ -488,9 +495,12 @@ pub const State = struct {
                         \\tdpbssd %%tmm6, %%tmm5, %%tmm2
                         \\tdpbssd %%tmm7, %%tmm5, %%tmm3
                         :
-                        : [a0] "r" (&self.wq[((i / 16) * (N / 64) + k / 64) * 1024]), [a1] "r" (&self.wq[((i / 16 + 1) * (N / 64) + k / 64) * 1024]),
-                          [b0] "r" (&xq[((k / 4) * b2 + j) * 4]), [b1] "r" (&xq[((k / 4) * b2 + j + 16) * 4]),
-                          [sa] "r" (sa), [sb] "r" (sb),
+                        : [a0] "r" (&self.wq[((i / 16) * (N / 64) + k / 64) * 1024]),
+                          [a1] "r" (&self.wq[((i / 16 + 1) * (N / 64) + k / 64) * 1024]),
+                          [b0] "r" (&xq[((k / 4) * b2 + j) * 4]),
+                          [b1] "r" (&xq[((k / 4) * b2 + j + 16) * 4]),
+                          [sa] "r" (sa),
+                          [sb] "r" (sb),
                         : .{ .memory = true });
                 }
                 asm volatile (
@@ -499,8 +509,11 @@ pub const State = struct {
                     \\tilestored %%tmm2, (%[c2], %[s])
                     \\tilestored %%tmm3, (%[c3], %[s])
                     :
-                    : [c0] "r" (&acc[i * b2 + j]), [c1] "r" (&acc[i * b2 + j + 16]),
-                      [c2] "r" (&acc[(i + 16) * b2 + j]), [c3] "r" (&acc[(i + 16) * b2 + j + 16]), [s] "r" (sb),
+                    : [c0] "r" (&acc[i * b2 + j]),
+                      [c1] "r" (&acc[i * b2 + j + 16]),
+                      [c2] "r" (&acc[(i + 16) * b2 + j]),
+                      [c3] "r" (&acc[(i + 16) * b2 + j + 16]),
+                      [s] "r" (sb),
                     : .{ .memory = true });
             }
         }
@@ -613,7 +626,10 @@ fn amxConfig() void {
         cfg.rows[t] = 16;
         cfg.colsb[t] = 64;
     }
-    asm volatile ("ldtilecfg (%[c])" : : [c] "r" (&cfg) : .{ .memory = true });
+    asm volatile ("ldtilecfg (%[c])"
+        :
+        : [c] "r" (&cfg),
+        : .{ .memory = true });
 }
 
 comptime {
