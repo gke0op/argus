@@ -6,27 +6,38 @@ Instead of grading models on boilerplate CRUD apps or subjective web shaders, `A
 
 Every submission that passes the automated harness (`src/theme_harness.zig`) is also a live wallpaper: drop the file on a Desktop Space from Argus's menu bar and the app compiles it to an `aarch64-macos` `.dylib`, checks it in an isolated watchdog process, and runs it.
 
+**Run it in your browser:** <https://gke0op.github.io/argus/bench/>. The page compiles a theme with
+Zig 0.17.0 built to WebAssembly, runs it, and grades it with the same gates, in seconds and with
+nothing uploaded. It also has the prompt to copy.
+
 ---
 
 ## How to run it
 
 There are two modes. Say which one you ran when you report a result: they are not comparable.
 
+**A run ends with the user watching the finished theme.** Whatever the mode, the person who
+asked must see the render move, and see its verdict, before the run counts as done. A scorecard
+with no render shown is an unfinished run: report it as unfinished.
+
 ### Zero-shot (a model in a chat window, no tools)
 
-1. Give the model this whole file and the prompt below.
-2. Save its answer as `themes/<Model>_<Name>.zig` in a clone of the repository.
-3. Run `make harness THEME=themes/<Model>_<Name>.zig`. The result is the first verdict: no retries,
-   no edits by hand.
+1. Give the model this whole file and the prompt below (the bench page's "Copy prompt +
+   BENCHMARK.md" button copies both).
+2. **Watch it.** Paste the model's whole answer at <https://gke0op.github.io/argus/bench/>: the page
+   takes the ` ```zig ` block, compiles it, runs it live and grades it.
+3. **Score it.** For the official verdict, save the file as `themes/<Model>_<Name>.zig` in a clone
+   and run `make show THEME=themes/<Model>_<Name>.zig` (or open a pull request: CI runs the native
+   harness). The first verdict is the result: no retries, no edits by hand.
 
-> *"Read `BENCHMARK.md` carefully. Write a single, complete, plug-and-play Zig 0.17.0 theme file for Argus following all 8 Hard Harness Gates (`Allocs at Init == 1`, `Allocs after Init == 0`, `Watchdog 320x200: PASS`, `y * stride + x` indexing, `0xFF` alpha on every pixel, zero NaNs, `Temporal Motion >= 2000 animated pixels`, `< 16.6 ms/frame` at `1920x1200` on CPU). Prefer `sdk.addRGB`, `sdk.scaleRGB`, `sdk.lerpRGB`, and `sdk.Canvas` to avoid Zig 0.17 peer-type narrowing and unsigned subtraction underflow. Output ONLY the complete `.zig` source file ready to save as `themes/<YourModel>_<ThemeName>.zig`."*
+> *"Read `BENCHMARK.md` carefully. Write a single, complete, plug-and-play Zig 0.17.0 theme file for Argus following all 8 Hard Harness Gates (`Allocs at Init == 1`, `Allocs after Init == 0`, `Watchdog 320x200: PASS`, `y * stride + x` indexing, `0xFF` alpha on every pixel, zero NaNs, `Temporal Motion >= 2000 animated pixels`, `< 16.6 ms/frame` at `1920x1200` on CPU). Prefer `sdk.addRGB`, `sdk.scaleRGB`, `sdk.lerpRGB`, and `sdk.Canvas` to avoid Zig 0.17 peer-type narrowing and unsigned subtraction underflow. Output the complete `.zig` source in one fenced zig code block, ready to save as `themes/<YourModel>_<ThemeName>.zig`, then one line telling the user to paste your whole answer at https://gke0op.github.io/argus/bench/ to watch it run and get graded."*
 
 ### Agentic (a coding agent with a shell, in a clone)
 
-For Claude Code, Codex, Gemini CLI and the like. The agent runs the harness itself and iterates.
-The prompt is one line:
+For Claude Code, Codex, Gemini CLI and the like. The agent runs the harness itself, iterates, and
+shows the user what it made. The prompt is one line:
 
-> *"Run ARGUS-BENCH in agentic mode: follow the agentic steps in `BENCHMARK.md` and pick a track from §5."*
+> *"Run ARGUS-BENCH in agentic mode: follow the agentic steps in `BENCHMARK.md`, pick a track from §5, and finish by showing me the render."*
 
 1. **Set up.** `git clone https://github.com/gke0op/argus.git && cd argus && make zig` (installs
    the pinned Zig 0.17.0 into `.toolchain/`, checksum-verified).
@@ -36,10 +47,21 @@ The prompt is one line:
 3. **Pick a track** (§5) and a real system to simulate.
 4. **Build it in small steps.** Run the harness after each change. A failing gate names itself on
    its line of the report; §1 says what usually causes each one, §4 lists the Zig 0.17.0 traps.
-5. **Look at it.** `make harness THEME=... OUT=/tmp/<Name>.png` writes the last frame. Open it.
-   Passing the gates proves the theme runs, not that it looks like anything.
-6. **Report** the final scorecard (verdict, average frame time and tier from §2), how many harness
-   runs it took to the first PASS, and the PNG.
+5. **Look at it yourself.** `make harness THEME=... OUT=/tmp/<Name>.png` writes the last frame. Open
+   it and judge it. Passing the gates proves the theme runs, not that it looks like anything.
+6. **Show it to the user. Required.** Run `make show THEME=themes/<Model>_<Name>.zig`. It runs the
+   harness, opens the last frame in the image viewer, and opens a link that plays the theme live on
+   the home page, full screen (the source rides in the link; nothing is uploaded). It also prints
+   a second link that grades it on the bench page. `make share THEME=...` prints both links alone. Then put the render in front of the user wherever
+   they are talking to you: attach or display the PNG if your interface can show images, and give
+   the live link. If nothing could open (a server, a container), say so and hand over the PNG path
+   and the link. On a Mac with Argus, also tell them how to keep it: drop the file on a Space from
+   the menu bar. On Linux, `make linux THEME=... && ./argus-linux` runs it as the desktop.
+7. **Report** the final scorecard (verdict, average frame time and tier from §2), how many harness
+   runs it took to the first PASS, the PNG and the live link. Then tell us how the run went, PASS or
+   FAIL, in a [Bench run report](https://github.com/gke0op/argus/issues/new?template=bench_run_report.yml)
+   (the bench page's "Report this run" link fills in the scorecard). What broke and what cost time
+   is what we fold back into this file.
 
 To go beyond the gates, to a theme good enough to ship, the bar and the render-and-critique loop
 are in [`.claude/skills/THEME_CRAFT.md`](.claude/skills/THEME_CRAFT.md).
@@ -404,7 +426,12 @@ No topic restrictions: design the most visually hypnotic, mathematically deep, h
    ========================================================================
    ```
    Frame times depend on the machine; the tiers in §2 were measured on Apple Silicon (M3).
-4. Run it live: click the eye in the menu bar and drop the file on a Space.
+4. Show it: `make show THEME=themes/<Model>_<Name>.zig` runs the harness, opens the PNG and opens the
+   theme live in the browser (<https://gke0op.github.io/argus/bench/>). In Argus: click the eye in the
+   menu bar and drop the file on a Space.
 5. Submit it, if you like: open a pull request, or an issue with the "Theme submission" template,
-   with the scorecard, the PNG and the mode you ran (zero-shot or agentic). See
-   [CONTRIBUTING.md](CONTRIBUTING.md).
+   with the scorecard, the PNG, the live link (`make share`) and the mode you ran (zero-shot or
+   agentic). See [CONTRIBUTING.md](CONTRIBUTING.md).
+6. Whether or not you submit the theme, a
+   [Bench run report](https://github.com/gke0op/argus/issues/new?template=bench_run_report.yml)
+   about the run itself (what broke, what went smoothly) helps us improve the benchmark.

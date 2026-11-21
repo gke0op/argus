@@ -1541,12 +1541,18 @@ const MacBridge = struct {
             if (line.len == 0) continue;
             var cols = std.mem.splitScalar(u8, line, '\t');
             const idx_str = cols.next() orelse continue;
-            const mode_str = cols.next() orelse continue;
+            const mode_str = cols.next() orelse {
+                std.debug.print("argus: {s}: skipped state line with no mode column: {s}\n", .{ DEFAULT_STATE_PATH, line });
+                continue;
+            };
             const label_str = cols.next() orelse "";
             const path_str = cols.next() orelse "";
             const sid_str = cols.next() orelse "";
 
-            const parsed_idx = std.fmt.parseInt(usize, idx_str, 10) catch continue;
+            const parsed_idx = std.fmt.parseInt(usize, idx_str, 10) catch {
+                std.debug.print("argus: {s}: skipped state line with bad Space index: {s}\n", .{ DEFAULT_STATE_PATH, line });
+                continue;
+            };
             const saved_sid = if (sid_str.len > 0) (std.fmt.parseInt(u64, sid_str, 10) catch 0) else 0;
             var idx: usize = parsed_idx;
             if (saved_sid > 0) {
@@ -1557,8 +1563,14 @@ const MacBridge = struct {
                     }
                 }
             }
-            if (idx >= self.obs.n_spaces) continue;
-            const mode = SpaceMode.fromModeName(mode_str) orelse continue;
+            if (idx >= self.obs.n_spaces) {
+                std.debug.print("argus: {s}: skipped state line for Space {d} (only {d} Spaces now): {s}\n", .{ DEFAULT_STATE_PATH, idx, self.obs.n_spaces, line });
+                continue;
+            }
+            const mode = SpaceMode.fromModeName(mode_str) orelse {
+                std.debug.print("argus: {s}: skipped state line with unknown mode '{s}': {s}\n", .{ DEFAULT_STATE_PATH, mode_str, line });
+                continue;
+            };
 
             var sp = &self.obs.spaces[idx];
             switch (mode) {
@@ -1783,9 +1795,18 @@ const MacBridge = struct {
     }
 
     pub fn loadCodeFileIntoSpaceInternal(self: *MacBridge, space_idx: usize, path: []const u8, save_state: bool) bool {
+        // readFile fills at most 128 KB and returns the head of a larger file without error. That
+        // is enough only because every marker below sits near the top of a theme (its imports or
+        // first exports); a marker past 128 KB would make a valid theme look like a non-theme.
         var buf: [131072]u8 = undefined;
-        const content = std.Io.Dir.cwd().readFile(g_io, path, &buf) catch return false;
-        if (content.len == 0) return false;
+        const content = std.Io.Dir.cwd().readFile(g_io, path, &buf) catch |err| {
+            std.debug.print("argus: {s}: theme not loaded: cannot read file ({s})\n", .{ path, @errorName(err) });
+            return false;
+        };
+        if (content.len == 0) {
+            std.debug.print("argus: {s}: theme not loaded: file is empty\n", .{path});
+            return false;
+        }
 
         // Live Hot-Compilable Custom .zig Shader (`sdk.exportTheme` or `export fn argus_render_theme`),
         // or a Metal-only theme (`.metal` with `kernel void argus_draw`)
@@ -1802,9 +1823,12 @@ const MacBridge = struct {
                 if (save_state) self.saveStateToDisk();
                 return true;
             }
+            // compileAndLoadShader printed its own reason.
+            return false;
         }
 
-        // Not an Argus SDK theme (or it failed to compile/verify): leave the Space as it was.
+        // Not an Argus SDK theme: leave the Space as it was.
+        std.debug.print("argus: {s}: theme not loaded: no Argus theme marker in its first {d} bytes\n", .{ path, content.len });
         return false;
     }
 

@@ -23,7 +23,8 @@ extern fn argus_theme_deinit(st: ?*anyopaque) callconv(.c) void;
 
 /// Direct path: draw straight into display memory in the display's channel order. CPU kernel
 /// themes (themes/cpu/argus_kernel.zig, recognised by their `pub fn draw(frame, gid)`) all have
-/// it; an SDK theme opts in with `pub export fn argus_theme_draw_target`. Null otherwise. (A weak symbol would do this at link time, but LLVM folds
+/// it; an SDK theme opts in with `pub export fn argus_theme_draw_target`. Null otherwise.
+/// (A weak symbol would do this at link time, but LLVM folds
 /// `weak_sym != null` to true, so the choice is made here, where it is known for certain.)
 const DrawTarget = *const fn (?*anyopaque, *const cage.Target) callconv(.c) void;
 const draw_target: ?DrawTarget = if (@hasDecl(theme, "draw") or @hasDecl(theme, "argus_theme_draw_target")) @extern(DrawTarget, .{ .name = "argus_theme_draw_target" }) else null;
@@ -31,6 +32,10 @@ extern fn argus_theme_step(st: ?*anyopaque, dt: f64) callconv(.c) void;
 extern fn argus_theme_draw(st: ?*anyopaque, px: [*]u32, len: usize, stride: usize) callconv(.c) void;
 
 const ZIG_TICK_DT: f64 = 0.008; // desktop/frame_rate.zig: one SDK step per frame
+
+/// Pixels reserved per frame buffer for a caged theme, the largest screen it can follow: 8192 is
+/// the widest row `upscale` handles. 256 MiB of address space each, committed only when drawn.
+const reserve_px = 8192 * 8192;
 
 fn nowNs() u64 {
     var ts: linux.timespec = undefined;
@@ -165,8 +170,8 @@ pub fn main(init: std.process.Init) !void {
     const cookie = if (xauth_path) |p| (if (readFile(p, &xauth_buf)) |b| x11.findCookie(b, display) else null) else null;
 
     var c = try x11.Conn.open(display, cookie);
-    const w: usize = c.width;
-    const h: usize = c.height;
+    var w: usize = c.width;
+    var h: usize = c.height;
 
     const win = try c.createWindow();
     const wm_type = try c.internAtom("_NET_WM_WINDOW_TYPE");
@@ -178,16 +183,23 @@ pub fn main(init: std.process.Init) !void {
     try c.mapWindow(win);
     const gc = try c.createGC(win);
 
-    var auto = div == 0;
+    const auto_scale = div == 0;
+    var auto = auto_scale;
     if (auto) div = 1;
     var rw = w / div;
     var rh = h / div;
 
     const alloc = std.heap.page_allocator;
-    const px = try cage.sharedAlloc(u32, w * h); // what the window shows (shared with a caged theme)
-    const small = try cage.sharedAlloc(u32, w * h); // the theme's render when div > 1
+    // Caged, the frame buffers are shared with the theme process, and once the cage is shut
+    // neither process may map new shared memory: they are reserved here for the largest screen
+    // the host will follow, committed only as pages are touched. Uncaged, a resize remakes them.
+    const cap = if (sandboxed) @max(w * h, reserve_px) else w * h;
+    var px_mem = if (sandboxed) try cage.sharedAlloc(u32, cap) else try alloc.alloc(u32, cap);
+    var small = if (sandboxed) try cage.sharedAlloc(u32, cap) else try alloc.alloc(u32, cap); // the theme's render when div > 1
+    var px = px_mem[0 .. w * h]; // what the window shows
     const scratch = try alloc.alloc(u8, c.max_req_bytes);
-    var shm = c.shmInit(w, h); // null: frames go through the socket (PutImage)
+    var shm = c.shmInit(w, h, cap); // null: frames go through the socket (PutImage)
+    try c.selectScreenChanges();
     std.debug.print("argus-linux: {d}x{d} depth {d}, {d} FPS, {s}\n", .{ w, h, c.depth, fps, if (shm != null) "MIT-SHM" else "PutImage" });
 
     // Everything the host needs is open. Caged: the theme runs in its own process with no X
@@ -218,13 +230,62 @@ pub fn main(init: std.process.Init) !void {
     var stage: [6]u64 = @splat(0); // step, draw, upscale, wait, fill, send
     const shift = [3]u5{ c.red_shift, c.green_shift, c.blue_shift };
     while (frames == 0 or f < frames) : (f += 1) {
+        // The screen changed size (xrandr, a monitor plugged in): start over at the new size.
+        if (c.resized) |size| resize: {
+            c.resized = null;
+            if (size[0] == w and size[1] == h) break :resize;
+            const n: usize = @as(usize, size[0]) * size[1];
+            if (shm) |*s| try c.shmWait(s);
+            if (sandboxed) {
+                // Caged: reuse the buffers reserved before the cage shut (no new shared memory).
+                if (n > px_mem.len) {
+                    std.debug.print("argus-linux: screen resized to {d}x{d}, larger than the {d} pixels reserved for the caged theme: staying at {d}x{d}\n", .{ size[0], size[1], px_mem.len, w, h });
+                    break :resize;
+                }
+                if (shm) |*s| {
+                    if (!s.reshape(size[0], size[1])) {
+                        // the segment is only the first screen's size (the kernel refused the
+                        // reserve): frames go through the socket from now on (the server lets
+                        // go of the segment; here the filter refuses shmdt, so it stays mapped)
+                        try c.shmDeinit(s);
+                        shm = null;
+                    }
+                }
+                px = px_mem[0..n];
+            } else {
+                if (shm) |*s| try c.shmDeinit(s);
+                alloc.free(px_mem);
+                alloc.free(small);
+                px_mem = try alloc.alloc(u32, n);
+                small = try alloc.alloc(u32, n);
+                px = px_mem;
+                shm = c.shmInit(size[0], size[1], n);
+            }
+            c.width = size[0];
+            c.height = size[1];
+            w = size[0];
+            h = size[1];
+            try c.resizeWindow(win, size[0], size[1]);
+            auto = auto_scale;
+            if (auto) div = 1;
+            try th.deinit();
+            rw = w / div;
+            rh = h / div;
+            try initTheme(&th, rw, rh, scale);
+            std.debug.print("argus-linux: screen resized to {d}x{d}\n", .{ w, h });
+            work_ns = 0;
+            stage = @splat(0);
+            f = 0;
+            next = nowNs();
+        }
+
         const t0 = nowNs();
         var mark = t0;
         try th.step(ZIG_TICK_DT);
         stage[0] += lap(&mark);
 
         // The display's own memory (MIT-SHM), once the server is done reading the last frame.
-        // shmWait also reports X errors (drainErrors would eat the completion event).
+        // shmWait also handles X errors and events (drainEvents would eat the completion event).
         const dst: ?[]u32 = if (shm) |*s| blk: {
             try c.shmWait(s);
             break :blk s.mem;
@@ -260,7 +321,7 @@ pub fn main(init: std.process.Init) !void {
             try c.shmPut(s, win, gc);
         } else {
             try c.putFrame(win, gc, px, w, h, scratch);
-            c.drainErrors();
+            c.drainEvents();
         }
         stage[5] += lap(&mark);
         const dt_ns = mark - t0;

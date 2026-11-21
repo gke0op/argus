@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Argus WebGPU — compile every theme</title>
+<style>
+  body { background: #0b0d10; color: #cfd6de; font: 13px/1.45 ui-monospace, Menlo, monospace; margin: 16px; }
+  .ok { color: #8fd18f; } .bad { color: #ff8a80; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<p>Builds every theme in <code>themes/index.json</code> in this browser, renders three frames at 320x200 and checks them
+for NaN. <code>?shot=Name&amp;seconds=6</code> then runs that theme in real time with the browser's own stats
+(as the dev page does, offscreen at 1920x1200) and returns the last frame. <code>?report=1</code> also POSTs the result to <code>/__report</code> (what <code>tools/verify.mjs --browser</code> serves).</p>
+<pre id="log">running…</pre>
+<script type="module">
+import { create, getDevice } from './argus_gpu.js';
+
+const q = new URLSearchParams(location.search);
+const log = document.getElementById('log');
+const lines = [];
+const out = { status: 'running', userAgent: navigator.userAgent, themes: [] };
+window.__compile = out;
+const show = () => { log.textContent = `${navigator.userAgent}\n\n${lines.join('\n')}`; };
+
+try {
+  const device = await getDevice();
+  out.features = [...device.features].sort();
+  const manifest = await (await fetch('../themes/index.json')).json();
+  const only = q.get('theme') ?? null;
+  for (const t of manifest.themes) {
+    if (only !== null && t.name !== only) continue;
+    const r = { name: t.name };
+    const t0 = performance.now();
+    try {
+      const e = await create(null, { theme: t.name, stats: 'synthetic', offscreen: { width: 320, height: 200, format: 'rgba32float' } });
+      r.buildMs = Math.round(performance.now() - t0);
+      for (let i = 0; i < 3; i++) e.harnessFrame();
+      const px = await e.readback();
+      let bad = 0;
+      for (let i = 0; i < px.length; i++) if (!Number.isFinite(px[i])) bad++;
+      r.nanInf = bad;
+      r.ok = bad === 0;
+      r.outFormat = e.info.outFormat;
+      e.destroy();
+    } catch (err) {
+      r.ok = false;
+      r.error = String(err && err.message || err);
+    }
+    out.themes.push(r);
+    lines.push(r.ok ? `ok   ${r.name} (${r.buildMs} ms)` : `FAIL ${r.name}\n${r.error ?? `${r.nanInf} NaN/Inf values`}`);
+    show();
+  }
+  const shot = q.get('shot');
+  if (shot) {
+    // real time, browser stats (ArgusVitals mode 1): what a visitor's page shows
+    const w = 1920, h = 1200;
+    const e = await create(null, { theme: shot, offscreen: { width: w, height: h, format: 'rgba8unorm' } });
+    const until = performance.now() + 1000 * parseFloat(q.get('seconds') ?? '6');
+    // A timer, not requestAnimationFrame: a tab the driver opened may be hidden, where rAF stops (so
+    // the frame rate on this frame is the timer's, not the display's).
+    await new Promise((done) => {
+      let last = null;
+      const tick = () => {
+        const now = performance.now();
+        e.frame(now / 1000, last === null ? 1 / 30 : (now - last) / 1000); last = now;
+        if (now < until) setTimeout(tick, 16); else done();
+      };
+      tick();
+    });
+    const px = await e.readback();
+    let bin = '';
+    for (let i = 0; i < px.length; i += 0x8000) bin += String.fromCharCode.apply(null, px.subarray(i, i + 0x8000));
+    out.shot = { name: shot, width: w, height: h, stats: e.stats(), sources: e.statsSources(), rgba: btoa(bin) };
+    lines.push(`shot ${shot}: GPU ${e.stats().gpuMs?.toFixed(2)} ms, draw ${e.stats().drawMs?.toFixed(2)} ms`);
+    e.destroy();
+  }
+  out.status = 'done';
+} catch (err) {
+  out.status = 'error';
+  out.error = String(err && err.message || err);
+  lines.push(`ERROR ${out.error}`);
+}
+show();
+if (q.has('report')) await fetch('/__report', { method: 'POST', body: JSON.stringify(out) }).catch(() => {});
+</script>
+</body>
+</html>

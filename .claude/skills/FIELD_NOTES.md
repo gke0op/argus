@@ -264,3 +264,14 @@ Copy this template:
 > §2 the seed model. In the render, the "out of focus" city draws as hard-edged rectangles,
 > bokeh discs are cut in half at the skyline, and drops read as grey bubbles. That is in
 > `THEME_CRAFT.md` as the missing-photo-reference failure.
+
+### 2026-11-06 · a stateful complex Ginzburg–Landau spiral-turbulence theme (unreleased) · author withheld
+
+- **Kind:** Zig · **Outcome:** harness PASS (native, x86 Linux VM) and PASS 8/8 on the bench page (.st.wasm)
+- **How it looks:** The first version passed all 8 gates and was still unreadable: at b = 2, c = −1 the field sat deep in defect turbulence and looked like camouflage, with no spiral visible. Moving to just past the Benjamin–Feir line (b = 2, c = −0.6) and giving each feature more grid cells made the spiral cores and their arms legible. Only opening the PNG (BENCHMARK.md step 5) caught it.
+- **Skill used:** BENCHMARK.md only (§1, §3, §4); argus-theme / THEME_CRAFT not read.
+- **Went smoothly:** The §3 skeleton passed unchanged on the first run. No §4 trap was hit. `make harness` runs on Linux x86 (`-target native`), so an agent without a Mac can iterate. `make web-wasm`'s aarch64-macos type-check ran before the wasm build.
+- **Cost me time:** The run went through the browser page, not the theme code. From the browser assistant, BENCHMARK.md fetched by the page reached the agent blocked by the extension's output filter, and the copy button goes to the clipboard, which an agent can't read either. I cloned from GitHub instead. The upload button only takes files the user attached, so the wasm had to be injected with a script. My environment refused to run `make zig` (`tools/get-zig.sh`) as downloaded code, so I installed 0.17.0 from ziglang.org, checked against the `index.json` shasum. There was also no place to report any of this: added the Bench run report template for that.
+- **Skill gaps / errors:** My own: I wrote a wrong Euler stability number (|1+z| ≈ 0.88; it is ≈ 0.98 for b = 2) in a source comment and fixed it before building. Not a skill error, but nothing in §4 asks for the explicit-scheme stability check that a PDE theme needs.
+- **Numbers:** Skeleton control 2,951 µs on the VM (BENCHMARK.md quotes ~1,540 µs on an M3). Theme 7,136 µs native on the VM; 5,134 µs in the page, single thread. 1 alloc at init: 739,784 B native, 739,776 B wasm32 (`usize` width). 5 harness runs, the first PASS of my own theme on its first run.
+- **Suggestion:** Show BENCHMARK.md as visible text on the bench page (not only a fetch-to-clipboard), so a browser agent can read the contract.
