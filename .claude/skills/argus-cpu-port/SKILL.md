@@ -78,3 +78,12 @@ themes draw [R, G, B, A] and are reordered. Test it headless: `Xvfb :99 &`, `ope
 On Xfce it sits under every window but over xfdesktop's icons. GNOME on Wayland (Ubuntu's
 default) shows it through Xwayland, under windows, top bar and dock (seen on GNOME 46 headless);
 a compositor without Xwayland can't run it.
+
+The theme runs caged (`src/linux/cage.zig`): in its own process with no X socket, under a
+seccomp allowlist and Landlock (`src/linux/sandbox.zig`), talking to the host through shared
+memory and a futex. A port therefore must not open files or sockets, fork or exec, not even in
+`init` (all fail with EPERM); threads are fine. AMX permission (`arch_prctl` XCOMP_PERM) is
+allowed. A caged call costs ~0.1-0.3 ms per frame (an idle vCPU takes ~100 us to wake).
+`tests/fixtures/Fixture_Hostile.zig` must stay at 0 escapes and 0 reachable descriptors.
+Caged, the frame buffers are reserved before the cage shuts (8192 x 8192 pixels, committed as
+drawn), so a resize up to that follows the screen and the theme is re-initialised in its cage.

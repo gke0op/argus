@@ -19,7 +19,17 @@ pub const Shm = struct {
     mem: []u32,
     w: usize,
     h: usize,
+    cap: usize, // pixels the segment holds: a later screen up to this size reuses it (reshape)
     pending: bool = false,
+
+    /// Reuses the segment for a w x h frame (after shmWait); false when it does not fit.
+    pub fn reshape(s: *Shm, w: usize, h: usize) bool {
+        if (w * h > s.cap) return false;
+        s.mem = s.mem.ptr[0 .. w * h];
+        s.w = w;
+        s.h = h;
+        return true;
+    }
 };
 
 pub const Conn = struct {
@@ -274,8 +284,10 @@ pub const Conn = struct {
 
     /// MIT-SHM: a w x h frame in System V shared memory that the server reads in place, so a
     /// frame costs a 40-byte request instead of w*h*4 bytes through the socket. Null when the
-    /// server lacks the extension (or isn't local).
-    pub fn shmInit(self: *Conn, w: usize, h: usize) ?Shm {
+    /// server lacks the extension (or isn't local). `cap` (pixels, >= w*h) sizes the segment for
+    /// a larger screen later (`Shm.reshape`), reserved but not committed; when the kernel refuses
+    /// that much, the segment is w x h.
+    pub fn shmInit(self: *Conn, w: usize, h: usize, cap: usize) ?Shm {
         var q: [20]u8 = @splat(0);
         const name = "MIT-SHM";
         q[0] = 98; // QueryExtension
@@ -294,8 +306,12 @@ pub const Conn = struct {
         const opcode = rep[9];
         const first_event = rep[10];
 
-        const bytes = w * h * 4;
-        const id_rc = linux.syscall3(.shmget, 0, bytes, 0o1000 | 0o600); // IPC_PRIVATE, IPC_CREAT | rw owner
+        var px_cap = @max(cap, w * h);
+        var id_rc = linux.syscall3(.shmget, 0, px_cap * 4, 0o10000 | 0o1000 | 0o600); // IPC_PRIVATE, SHM_NORESERVE | IPC_CREAT | rw owner
+        if (linux.errno(id_rc) != .SUCCESS and px_cap > w * h) {
+            px_cap = w * h;
+            id_rc = linux.syscall3(.shmget, 0, px_cap * 4, 0o10000 | 0o1000 | 0o600);
+        }
         if (linux.errno(id_rc) != .SUCCESS) return null;
         const shmid: u32 = @intCast(id_rc);
         const addr = linux.syscall3(.shmat, shmid, 0, 0);
@@ -317,7 +333,7 @@ pub const Conn = struct {
         _ = self.internAtom("WM_NAME") catch return null;
         _ = linux.syscall3(.shmctl, shmid, 0, 0); // IPC_RMID
         const mem: [*]u32 = @ptrFromInt(addr);
-        return .{ .seg = seg, .opcode = opcode, .completion = first_event, .mem = mem[0 .. w * h], .w = w, .h = h };
+        return .{ .seg = seg, .opcode = opcode, .completion = first_event, .mem = mem[0 .. w * h], .w = w, .h = h, .cap = px_cap };
     }
 
     /// Sends the shared frame (already in the server's pixel format) and asks for a completion
