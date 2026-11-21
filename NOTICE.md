@@ -49,6 +49,9 @@ The git history records who did what; this is the summary.
 - `themes/Aventurine_Horoscope.metal` and its data file `themes/Aventurine_Horoscope.bin`:
   written by Claude Opus. The sky right now, read as Western astrology reads it (signs,
   aspects, retrogrades, the Moon's phase), on an aventurine dial.
+- `themes/Reservoir_Field.zig`: written by Claude, in Claude Code. A real echo state network
+  (1024 neurons, 64 instances driven by a Mackey-Glass series) as an activation field; on x86
+  CPUs with AMX it steps on the tile unit, elsewhere on portable SIMD.
 - Earlier themes by Google Gemini, Claude Sonnet, Claude Fable, Claude Opus and
   Claude Haiku (species) did not ship in this release. They remain in the git
   history, with their credits in this file's history.
