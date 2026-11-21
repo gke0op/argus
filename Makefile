@@ -243,7 +243,7 @@ release: app
 	cp docs/AGENTS_DOWNLOAD.md $(STAGE)/AGENTS.md
 	printf '@AGENTS.md\n' > $(STAGE)/CLAUDE.md
 	for t in $$(git ls-files 'themes/*.zig'); do \
-		[ "$$(basename $$t)" = argus_theme_sdk.zig ] && continue; \
+		case "$$(basename $$t)" in argus_theme_sdk.zig|argus_kernel.zig) continue ;; esac; \
 		./argus-desktop --precompile $(STAGE)/$$t $(STAGE)/Argus.app/Contents/Resources/prebuilt || exit 1; \
 	done
 	codesign --force --deep --sign - $(STAGE)/Argus.app
