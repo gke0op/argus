@@ -133,9 +133,21 @@ export function compare(ref, mine) {
     return { tone: 'info', text: `a different ruler (the site changed since the reference: ${short(ref.ruler)} → ${short(mine.ruler)}), so the modules are not comparable; gates 1–7 here ${myGates}, reference ${gatesText(ref.gates)}` };
   }
   const sameModule = !!mine.moduleSha256 && mine.moduleSha256 === ref.moduleSha256;
-  const sameGates = JSON.stringify((mine.gates || []).slice(0, 7)) === JSON.stringify((ref.gates || []).slice(0, 7)) && (mine.outcome === 'deferred') === (ref.outcome === 'deferred');
-  if (sameModule && sameGates) return { tone: 'ok', text: `reproduced: same module (${short(mine.moduleSha256, 16)}), same gates 1–7 (${myGates})` };
-  return { tone: 'bad', text: `NOT reproduced under the same ruler: module ${short(mine.moduleSha256, 16)} vs ${short(ref.moduleSha256, 16)}, gates 1–7 ${myGates} vs ${gatesText(ref.gates)}` };
+  if (!sameModule) return { tone: 'bad', text: `NOT reproduced under the same ruler: module ${short(mine.moduleSha256, 16)} vs ${short(ref.moduleSha256, 16)}, gates 1–7 ${myGates} vs ${gatesText(ref.gates)}` };
+  // The same module under the same ruler is the same program: its gates 1-7 follow from it. A side
+  // that deferred them did so because that machine was slow (a speed probe), not because of the
+  // theme, so a deferral is not a disagreement; only two run results can disagree.
+  if (mine.outcome === 'deferred' && ref.outcome === 'deferred') {
+    return { tone: 'ok', text: `reproduced: same module (${short(mine.moduleSha256, 16)}); gates 2–7 were too slow for the browser build on both sides (the native harness grades them)` };
+  }
+  if (mine.outcome === 'deferred' || ref.outcome === 'deferred') {
+    const ran = mine.outcome === 'deferred' ? gatesText(ref.gates) : myGates;
+    const where = mine.outcome === 'deferred' ? 'this browser was too slow to run gates 2–7 now; the reference ran them' : 'the reference deferred gates 2–7; this browser ran them';
+    return { tone: 'ok', text: `reproduced: same module (${short(mine.moduleSha256, 16)}); ${where}: ${ran}` };
+  }
+  const sameGates = JSON.stringify((mine.gates || []).slice(0, 7)) === JSON.stringify((ref.gates || []).slice(0, 7));
+  if (sameGates) return { tone: 'ok', text: `reproduced: same module (${short(mine.moduleSha256, 16)}), same gates 1–7 (${myGates})` };
+  return { tone: 'bad', text: `same module (${short(mine.moduleSha256, 16)}) but different gates 1–7: ${myGates} here vs ${gatesText(ref.gates)} in the reference (a time limit hit on one machine, or a nondeterministic theme)` };
 }
 
 export function mountLive({ root, grade, shown }) {
