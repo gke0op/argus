@@ -2,6 +2,10 @@
 
 **Live wallpapers for macOS that you write yourself: one Zig or Metal file per Desktop Space, running on the bare metal.**
 
+**In your browser:** [the themes, live](https://gke0op.github.io/argus/) ·
+[ARGUS-BENCH](https://gke0op.github.io/argus/bench/): paste or drop a `.zig` or `.metal` file and watch
+it compile, run and get graded, with nothing to install.
+
 Our programs live in terminals and editors. We rarely get to see them run in their full glory,
 right there on the desktop. Argus fixes that: ignite a relativistic quasar behind your windows
 for a few milliseconds of GPU a frame, or really anything you can write a pixel for.
@@ -118,6 +122,8 @@ make stop                                 # quit it
 make test                                 # run the test suites
 make harness THEME=themes/Cygnus_A.zig    # verify and benchmark a theme headlessly
 make harness THEME=themes/Tutorial_Tides.metal   # same, on the GPU for Metal themes
+make show THEME=themes/You_Name.zig       # the harness, then its last frame and the theme live on the site
+make share THEME=themes/You_Name.zig      # just the links: live on the home page, graded on the bench
 make check-themes                         # the harness on every theme
 make release                              # dist/Argus-v<version>-macos-arm64.zip for a GitHub Release
 ```
@@ -209,8 +215,19 @@ creativity and metal affinity it has.
 one Zig 0.17.0 file that simulates something real and passes eight automated gates (compiles,
 one allocation, survives a 320x200 watchdog, respects the row stride, opaque pixels, no NaN,
 visible motion, under 16.7 ms a frame on one CPU core). A submission that passes is, at the
-same moment, a wallpaper you can drop on a Space. Run it zero-shot (paste the file into a chat)
-or agentic (an agent in a clone runs the harness itself); BENCHMARK.md has the steps for both.
+same moment, a wallpaper you can drop on a Space.
+
+Two modes, and both end with you watching what your model made:
+
+- **Zero-shot**, a model in a chat: copy the prompt from the
+  [bench page](https://gke0op.github.io/argus/bench/), then paste the model's whole answer back
+  there. Zig 0.17.0, built to WebAssembly, compiles it in the page; you see it run and get graded
+  in seconds.
+- **Agentic**, an agent in a clone: it runs the harness itself, iterates, and finishes with
+  `make show`, which opens the last frame and a link that plays the theme live in your browser.
+  An agent that hands you a scorecard without the render hasn't finished.
+
+BENCHMARK.md has the steps for both.
 
 Several earlier themes, now in the git history, started as answers to it, and the table in
 BENCHMARK.md records who wrote each one.
@@ -233,7 +250,9 @@ record, and [NOTICE.md](NOTICE.md) credits each piece.
 
 ## Contributing
 
-Coding agents: start at [AGENTS.md](AGENTS.md), the map of the repository. Themes are the best way in. [CONTRIBUTING.md](CONTRIBUTING.md) covers the contract, the
+Coding agents: start at [AGENTS.md](AGENTS.md), the map of the repository. Themes are the best way in. Open a
+pull request with a `.zig` or `.metal` theme (Metal is translated to WGSL for the browser): CI runs the harness and
+comments links that run it on the site, and once merged it joins the home page's picker. [CONTRIBUTING.md](CONTRIBUTING.md) covers the contract, the
 harness gates, the frame budget, honest headers and credit lines. If you think a physics claim
 is wrong, open a "physics claim challenge" issue with a source; that is the most useful report
 this project can get.

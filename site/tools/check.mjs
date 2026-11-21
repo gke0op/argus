@@ -120,7 +120,7 @@ if (ONLY.includes('home')) {
     files: files.map((x) => `${x.len}\t${x.url.replace(BASE, '')}`),
     themes: [],
   };
-  const all = await b.evaluate('[...document.querySelectorAll("#picker .chip")].map((c) => c.dataset.id)');
+  const all = await b.evaluate('[...document.querySelectorAll("#picker .chip[data-id]")].map((c) => c.dataset.id)');
   const ids = args.themes ? all.filter((id) => String(args.themes).split(',').includes(id)) : all;
   // Each theme on its own page load (?theme=), as a shared link opens it; up to 3 minutes each:
   // a cold shader cache makes the big WGSL themes' first build slow (Roulette_Chrome: 19 s).

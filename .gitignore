@@ -17,4 +17,8 @@ dist/
 __pycache__/
 .sign_identity
 web/wasm/build/
+web/zigc/build/
+.zig-wasm/
 _site/
+web/.auto/
+web/msl2wgsl/*.wasm

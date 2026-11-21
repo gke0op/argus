@@ -30,6 +30,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+/// The float mode of the hot paths: .optimized, except under Zig's self-hosted wasm backend (the
+/// compiler the bench page runs, web/zigc), which has no optimized float mode in 0.17.0 and
+/// fails the build on it. There the same code runs in .strict. LLVM builds are unchanged.
+const fast_math: std.lang.FloatMode = if (builtin.zig_backend == .stage2_wasm) .strict else .optimized;
+
 /// Lanes per call. Zig suggests 8 on many AVX-512 parts (it prefers 256-bit vectors); for this
 /// ALU-bound work 16 lanes measured 1.5x faster on a Xeon (22.9 vs 34.2 ms, 1920x1200 Tides).
 pub const N: comptime_int = if (builtin.cpu.arch == .x86_64 and std.Target.x86.featureSetHas(builtin.cpu.features, .avx512f))
@@ -167,7 +172,7 @@ inline fn reduce(x: F) F {
 
 /// sin of a reduced angle in [-pi, pi]: folded to [-pi/2, pi/2], odd degree 11.
 inline fn sinReduced(r0: F) F {
-    @setFloatMode(.optimized);
+    @setFloatMode(fast_math);
     var r = r0;
     const hi = f(std.math.pi / 2.0);
     r = sel(r > hi, f(std.math.pi) - r, sel(r < -hi, f(-std.math.pi) - r, r));
@@ -191,7 +196,7 @@ pub inline fn cos(x: F) F {
 
 /// 2^x: integer part into the exponent bits, fraction (in [-0.5, 0.5]) by a degree-6 polynomial.
 pub inline fn exp2(x0: F) F {
-    @setFloatMode(.optimized);
+    @setFloatMode(fast_math);
     const x = minc(maxc(x0, -126), 127);
     const n = round(x);
     const r = x - n;
@@ -210,7 +215,7 @@ pub inline fn exp(x: F) F {
 }
 /// log2 for x > 0: exponent bits plus a polynomial in the mantissa mapped to [sqrt(1/2), sqrt(2)).
 pub inline fn log2(x: F) F {
-    @setFloatMode(.optimized);
+    @setFloatMode(fast_math);
     const bits: U = @bitCast(x);
     var e: F = @floatFromInt(@as(I, @bitCast((bits >> @splat(23)) & u(0xFF))) - @as(I, @splat(127)));
     var m: F = @bitCast((bits & u(0x007F_FFFF)) | u(0x3F80_0000)); // [1, 2)
@@ -287,7 +292,7 @@ pub inline fn cell(p: V2, k: i32) Cell {
 }
 
 pub inline fn noise(p: V2) F {
-    @setFloatMode(.optimized);
+    @setFloatMode(fast_math);
     const i = p.floor();
     const fr = p.sub(i);
     const ux = fr.x * fr.x * (f(3) - f(2) * fr.x);
@@ -325,7 +330,7 @@ pub inline fn fbm(p0: V2, comptime octaves: u32) F {
 }
 
 pub inline fn palette(t: F, a: V3, b: V3, c: V3, d: V3) V3 {
-    @setFloatMode(.optimized);
+    @setFloatMode(fast_math);
     const tau = f(6.2831853);
     return .{
         .x = a.x + b.x * cos(tau * (c.x * t + d.x)),
@@ -476,7 +481,7 @@ pub fn exportKernelTheme(comptime K: type) void {
             }
 
             fn run(job: *Job) void {
-                @setFloatMode(.optimized);
+                @setFloatMode(fast_math);
                 const fr = &job.th.frame;
                 const w: usize = fr.width;
                 const sr: Shift = @splat(@intCast(job.shift[0]));

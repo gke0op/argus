@@ -11,29 +11,29 @@ const WEB = new URL('../web/', import.meta.url);
 // One line each, from the README's theme list. `kind`: 'cygnus' | 'wgsl' | 'wasm'.
 export const THEMES = [
   { id: 'Cygnus_A', label: 'Cygnus A', kind: 'cygnus', src: 'themes/Cygnus_A.zig',
-    line: 'The quasar hidden in Cygnus A: a spinning (Kerr) black hole and its disk. Every pixel’s light is traced along exact Kerr light paths.' },
+    line: 'The quasar in Cygnus A: a spinning black hole and its disk, every pixel traced along exact Kerr light paths.' },
   { id: 'Night_Tide', label: 'Night Tide', kind: 'wgsl', src: 'themes/Night_Tide.metal',
     line: 'A night on the coast; the flashes in the surf follow published dinoflagellate research.' },
   { id: 'Lizard_Island', label: 'Lizard Island', kind: 'wgsl', src: 'themes/Lizard_Island.metal',
     line: 'A diver’s drift over a real Great Barrier Reef lagoon at metre scale.' },
   { id: 'Orion_Nebula', label: 'Orion Nebula', kind: 'wgsl', src: 'themes/Orion_Nebula.metal',
-    line: 'The heart of M42, built from what telescopes measured of it; as the view swings round, the 3D shape behind the image appears.' },
+    line: 'The heart of M42, built from telescope measurements; as the view swings round, its 3D shape appears.' },
   { id: 'Ebru_Studio', label: 'Ebru Studio', kind: 'wgsl', src: 'themes/Ebru_Studio.metal',
-    line: 'A Turkish marbling bath worked by a restless random hand, under a glass ceiling of studio lights.' },
+    line: 'A Turkish marbling bath worked by a restless hand under studio lights.' },
   { id: 'Roulette_Chrome', label: 'Roulette Chrome', kind: 'wgsl', src: 'themes/Roulette_Chrome.metal',
-    line: 'A single-zero wheel seen from above; the ball’s laps, its bounces and the winning pocket come out of the physics.' },
+    line: 'A single-zero wheel from above; the ball’s laps, bounces and pocket come from the physics.' },
   { id: 'Aventurine_Horoscope', label: 'Aventurine Horoscope', kind: 'wgsl', src: 'themes/Aventurine_Horoscope.metal',
-    line: 'The sky for today’s real date, read the way Western astrology reads it: planets in their signs, retrogrades, aspects, the Moon’s phase.' },
+    line: 'Today’s real sky as Western astrology reads it: planets in signs, retrogrades, aspects, the Moon’s phase.' },
   { id: 'Phosphor_Terminal', label: 'Phosphor Terminal', kind: 'wgsl', src: 'themes/Phosphor_Terminal.metal',
-    line: 'Vital signs on a green-phosphor terminal in the DEC VT320’s dot font. In the app they are your Mac’s; a browser can read only a few, so the rest are the harness’s synthetic feed.' },
+    line: 'Vital signs on a green-phosphor VT320 terminal. In the app they are your Mac’s; here, what a browser knows about itself.' },
   { id: 'Tutorial_Reef', label: 'Tutorial Reef', kind: 'wgsl', src: 'themes/Tutorial_Reef.metal',
     line: 'The second tutorial: a reaction-diffusion reef that remembers between frames.' },
   { id: 'Tutorial_Tides', label: 'Tutorial Tides', kind: 'wgsl', src: 'themes/Tutorial_Tides.metal',
     line: 'The first tutorial: an aurora over a night sea in five small steps.' },
   { id: 'Tutorial_Tides_wasm', label: 'Tutorial Tides', tag: 'Zig → wasm', kind: 'wasm', build: 'Tutorial_Tides', src: 'themes/cpu/Tutorial_Tides.zig',
-    line: 'The same aurora from its CPU port in Zig, compiled to SIMD128 wasm and run on every core in Worker threads. The GPU only shows the finished frame.' },
+    line: 'The same aurora from its Zig CPU port, as SIMD128 wasm on every core.' },
   { id: 'Cygnus_A_wasm', label: 'Cygnus A', tag: 'CPU · wasm', kind: 'wasm', build: 'Cygnus_A', src: 'themes/Cygnus_A.zig', fallbackOnly: true,
-    line: 'Cygnus A’s Zig theme compiled to wasm and drawn on the CPU, on one thread as it is natively (the app draws it on the GPU by default).' },
+    line: 'Cygnus A’s Zig theme as wasm on one CPU thread (the app draws it on the GPU).' },
 ];
 
 export const byId = (id) => THEMES.find((t) => t.id === id);
@@ -46,7 +46,7 @@ export function probeWebGPU() {
       if (!navigator.gpu) return { ok: false, why: 'this browser has no WebGPU (navigator.gpu is missing)' };
       try {
         const a = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-        if (!a) return { ok: false, why: 'WebGPU is present but found no GPU adapter' };
+        if (!a) return { ok: false, why: 'WebGPU is present but found no GPU adapter (after a GPU crash the browser turns it off for the page: reopen the tab)' };
         return { ok: true, adapter: a };
       } catch (e) {
         return { ok: false, why: `WebGPU: ${e.message ?? e}` };
@@ -90,13 +90,14 @@ export async function mount(stage, t, opts = {}) {
     } else {
       const { create } = await import(new URL('wasm/host.js', WEB));
       const [w, h] = px();
-      // Zig themes draw every pixel on the CPU: past the harness's 1920x1200 they render at that
-      // many pixels and the blit scales them up (shown in the readout).
-      const renderScale = Math.min(1, Math.sqrt((1920 * 1200) / (w * h)));
+      // Zig themes draw every pixel on the CPU: past the harness's 1920x1200 (or opts.maxPixels,
+      // for a slower build) they render at that many pixels and the blit scales them up (shown
+      // in the readout).
+      const renderScale = Math.min(1, Math.sqrt((opts.maxPixels ?? 1920 * 1200) / (w * h)));
       canvas.width = w; canvas.height = h;
       engine = await create(canvas, { theme: t.build, base: new URL('wasm/build/', WEB), renderScale, module: opts.module });
       engine.resize(w, h);
-      label = 'wasm SIMD128 (CPU)';
+      label = opts.label ?? 'wasm SIMD128 (CPU)';
       sizeObs = new ResizeObserver(() => { const [nw, nh] = px(); if (nw !== canvas.width || nh !== canvas.height) engine.resize(nw, nh); });
       sizeObs.observe(canvas);
     }
@@ -129,12 +130,16 @@ export async function mount(stage, t, opts = {}) {
     canvas,
     readout() {
       const s = engine.stats() || {};
+      // hz: the display's refresh (median interval). fps: frames actually drawn over the same
+      // window, so a theme that misses vsyncs shows fewer fps than hz.
       const iv = median(intervals);
+      const span = intervals.reduce((a, b) => a + b, 0);
       const r = {
         engine: label, kind,
         width: s.width ?? s.renderW ?? canvas.width, height: s.height ?? s.renderH ?? canvas.height,
         canvasW: canvas.width, canvasH: canvas.height,
         hz: Number.isFinite(iv) ? 1000 / iv : NaN, frameMs: iv,
+        fps: span > 0 ? (1000 * intervals.length) / span : NaN,
         gpuMs: s.gpuMs, cpuMs: s.cpuMs, blitMs: s.blitMs,
         wasmKB: s.wasmFileKB ?? s.wasmKB, threads: s.threads, variant: s.variant, isolated: globalThis.crossOriginIsolated === true,
         firstMs: firstMs > 0 ? firstMs : null, error: s.error,

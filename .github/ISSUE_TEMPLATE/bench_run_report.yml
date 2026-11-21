@@ -34,8 +34,8 @@ body:
     attributes:
       label: Where the verdict came from
       options:
-        - bench page, Zig (.wasm)
-        - bench page, WGSL (WebGPU)
+        - bench page, Zig
+        - bench page, Metal or WGSL (WebGPU)
         - native harness (make harness)
         - pull-request bench workflow
         - did not get a verdict

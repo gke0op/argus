@@ -28,7 +28,7 @@ export async function getDevice() {
     devicePromise = (async () => {
       if (!navigator.gpu) throw new Error('WebGPU is not available in this browser (navigator.gpu is missing)');
       const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-      if (!adapter) throw new Error('WebGPU: no GPU adapter');
+      if (!adapter) throw new Error('WebGPU found no GPU adapter. After a GPU crash, the browser turns WebGPU off for the page: close this tab and open the page again, or restart the browser.');
       const want = ['timestamp-query', 'float32-filterable', 'bgra8unorm-storage'];
       const requiredFeatures = want.filter((x) => adapter.features.has(x));
       const L = adapter.limits;
@@ -44,11 +44,27 @@ export async function getDevice() {
           maxTextureDimension2D: L.maxTextureDimension2D,
         },
       });
-      device.lost.then((info) => { console.error(`WebGPU device lost: ${info.reason} ${info.message}`); devicePromise = null; });
+      // A driver that gives up (a shader it cannot compile, a dispatch it kills) shows up only as a
+      // lost device or an uncaptured error; keep both so the running engine can report them.
+      // argusStage: what the running engine last asked of the GPU, so a loss says where it happened.
+      device.argusErrors = { lost: null, gpu: null };
+      device.argusStage = { what: 'idle', t0: performance.now() };
+      device.lost.then((info) => {
+        console.error(`WebGPU device lost: ${info.reason} ${info.message}`);
+        const st = device.argusStage;
+        const where = `while ${st.what}, ${((performance.now() - st.t0) / 1000).toFixed(1)} s in, on ${device.argusAdapter || 'an unnamed GPU'}`;
+        device.argusErrors.lost = `the GPU device was lost (${info.reason || 'unknown'}) ${where}${info.message ? `: ${info.message}` : ''}`;
+        devicePromise = null;
+      });
+      device.addEventListener('uncapturederror', (e) => {
+        console.error('WebGPU error:', e.error.message);
+        device.argusErrors.gpu ??= `GPU error: ${e.error.message}`;
+      });
       const ai = adapter.info ?? {};
       device.argusAdapter = `${ai.vendor ?? ''} ${ai.architecture ?? ''} ${ai.description ?? ''}`.trim();
       return device;
     })();
+    devicePromise.catch(() => { devicePromise = null; });   // a failed attempt is not cached: the next theme asks again
   }
   return devicePromise;
 }
@@ -127,6 +143,19 @@ function formatCompileMessages(msgs, label, preludeLines) {
  */
 export async function create(canvas, opts = {}) {
   const device = opts.device ?? await getDevice();
+  try {
+    return await createOn(device, canvas, opts);
+  } catch (e) {
+    // A device lost mid-compile throws a generic error here; the loss says what happened.
+    await new Promise((r) => setTimeout(r, 0));
+    const lost = device.argusErrors?.lost;
+    if (lost && !String(e.message).includes(lost)) throw new Error(`${e.message} (${lost})`);
+    throw e;
+  }
+}
+
+async function createOn(device, canvas, opts) {
+  if (device.argusErrors) device.argusErrors.gpu = null; // the previous theme's, not this one's
   const label = opts.theme ? `${String(opts.theme).replace(/^.*\//, '').replace(/\.wgsl$/, '')}.wgsl` : 'theme.wgsl';
   const name = label.replace(/\.wgsl$/, '');
 
@@ -195,6 +224,8 @@ export async function create(canvas, opts = {}) {
   const preludeLines = head.split('\n').length; // the theme starts on the line after
   const code = `${head}\n${src}`;
   device.pushErrorScope('validation');
+  const stage = (what) => { if (device.argusStage) device.argusStage = { what, t0: performance.now() }; };
+  stage(`compiling ${label}`);
   const module = device.createShaderModule({ label, code });
   const info = await module.getCompilationInfo();
   const scopeErr = await device.popErrorScope();
@@ -236,6 +267,7 @@ export async function create(canvas, opts = {}) {
       throw new Error(`${label}: ${entry}: ${e.message}`);
     }
   }
+  stage(`building ${label}'s pipelines`);
   const [drawP, initP, stepP, clearP] = await Promise.all([
     pipe('argus_draw', [L.draw, L.out]),
     hasInit ? pipe('argus_init', [L.init]) : null,
@@ -338,6 +370,9 @@ export async function create(canvas, opts = {}) {
   function encodeTimes(clockDt, stepDt) {
     if (destroyed) return;
     const t0 = performance.now();
+    // Frames 0-9 by number (init and the first steps are the heaviest), then "running".
+    if (fr.frame < 10) stage(fr.frame === 0 ? `running ${label}'s init and first frame` : `drawing ${label}'s frame ${fr.frame}`);
+    else if (fr.frame === 10) stage(`running ${label}`);
     fr.forEncode(stepDt !== null);
     fr.fillWall();
     fr.pack(frameView, stepDt ?? clockDt);
@@ -431,7 +466,8 @@ export async function create(canvas, opts = {}) {
       if (stateFollowsOutput) { dir.stateW = w; dir.stateH = h; fr.stateW = w; fr.stateH = h; makeState(); }
     },
     stats() {
-      return { gpuMs: median(timing.gpuHist), drawMs: median(timing.drawHist), cpuMs: median(timing.cpuHist), width: outW, height: outH, frame: fr.frame, time: fr.time };
+      const error = device.argusErrors ? (device.argusErrors.lost ?? device.argusErrors.gpu ?? undefined) : undefined;
+      return { gpuMs: median(timing.gpuHist), drawMs: median(timing.drawHist), cpuMs: median(timing.cpuHist), width: outW, height: outH, frame: fr.frame, time: fr.time, error };
     },
     gpuSamples() { return [...timing.gpuHist]; },
     statsSources() { return vitals ? vitals.sources : (dir.stats ? { all: 'synthetic (the Metal harness feed)' } : null); },
