@@ -57,6 +57,22 @@ $('copyWgslFull').addEventListener('click', async (e) => {
   copyText(`${wgslPrompt}\n\n----- The contract (web/README.md) -----\n\n${contract}\n\n----- web/prelude.wgsl (prepended to your file) -----\n\n${prelude}\n\n----- Example: web/themes/Tutorial_Tides.wgsl -----\n\n${tides}`, e.currentTarget);
 });
 
+// "Report this run": one quiet link under a finished result, to the Bench run report issue form
+// (.github/ISSUE_TEMPLATE/bench_run_report.yml), pre-filled from what the result shows. `where` and
+// `scorecard` are the form's field ids; `where` must be one of its dropdown's labels.
+const REPORT_WHERE = { zig: 'bench page, Zig', wgsl: 'bench page, Metal or WGSL (WebGPU)' };
+function reportLink(kind) {
+  const verdict = $(`${kind}Badge`).textContent, title = $(`${kind}Title`).textContent;
+  const u = new URL(`https://github.com/${REPO}/issues/new`);
+  u.searchParams.set('template', 'bench_run_report.yml');
+  u.searchParams.set('title', `Bench run: ${title || 'a theme'} · ${REPORT_WHERE[kind]} · ${verdict}`);
+  u.searchParams.set('where', REPORT_WHERE[kind]);
+  const card = [`${verdict}${title ? ` · ${title}` : ''}`, $(`${kind}Phase`).textContent, $(`${kind}Report`).textContent].filter((t) => t.trim()).join('\n');
+  u.searchParams.set('scorecard', card.slice(0, 6000));
+  $(`${kind}ReportLink`).href = u.toString();
+  $(`${kind}ReportRow`).hidden = false;
+}
+
 // ---- shared result rendering -----------------------------------------------------------------
 function renderGates(tbody, gates) {
   tbody.innerHTML = gates.map((g) => {
@@ -139,6 +155,7 @@ function endRun(r, text) {
   $('zigCancel').hidden = true;
   tick(r);
   if (text !== undefined) $('zigPhase').textContent = text;
+  reportLink('zig');
 }
 const cancelled = (r) => r.ac.signal.aborted || run !== r;
 $('zigCancel').addEventListener('click', () => {
@@ -162,6 +179,7 @@ function resetZigResult(title) {
   badge($('zigBadge'), 'RUNNING');
   $('zigTitle').textContent = title;
   $('zigReport').textContent = '';
+  $('zigReportRow').hidden = true;
   $('zigDiag').hidden = true;
   $('zigDiag').style.borderLeftColor = '';
   $('zigMore').hidden = true;
@@ -204,8 +222,8 @@ async function gradeZig(r, name, opts = {}) {
     if (opts.inPage && pass) $('zigBadge').textContent = 'PASS 1–7';
     const g8here = opts.inPage && res.report ? ` · Gate 8 here: ${res.gates[7].pass ? 'PASS' : 'FAIL'}, ${(res.report.avg_us / 1000).toFixed(1)} ms/frame in this build; the native harness decides it` : '';
     const how = res.crashed ? ` · the theme crashed in ${res.crashed.phase}` : res.timedOut ? ` · stopped: the theme hung in ${res.timedOut}` : '';
-    endRun(r, `graded in ${took} · ${res.threads || 1} thread${res.threads === 1 ? '' : 's'} (${res.variant || '–'})${how}${g8here}`);
     $('zigReport').textContent = res.text;
+    endRun(r, `graded in ${took} · ${res.threads || 1} thread${res.threads === 1 ? '' : 's'} (${res.variant || '–'})${how}${g8here}`);
     drawFinal($('zigFinal'), res.pixels, res.width, res.height);
     window.__bench = { kind: 'zig', name, outcome: 'verdict', pass, gates: res.gates.map((g) => g.pass), text: res.text, secs: Number(((performance.now() - tg) / 1000).toFixed(1)), crashed: res.crashed || null, timedOut: res.timedOut || null, ...(opts.extra || {}) };
     if (res.pixels && !res.timedOut && !res.crashed) await startZigLive(r, name, opts);
@@ -561,7 +579,7 @@ $('runWgsl').addEventListener('click', async () => {
   let src = unfence($('wgslSrc').value);   // a chat answer pasted whole: its fenced block
   const isMetal = kindOf('', src) === 'metal';   // a .metal: translated here first (tools/msl2wgsl.zig)
   if (!src.trim()) { $('wgslSrc').focus(); return; }
-  if (!gpu.ok) { $('wgslResult').classList.add('on'); badge($('wgslBadge'), 'FAIL'); $('wgslReport').textContent = `No WebGPU in this browser: ${gpu.why}`; return; }
+  if (!gpu.ok) { $('wgslResult').classList.add('on'); badge($('wgslBadge'), 'FAIL'); $('wgslReport').textContent = `No WebGPU in this browser: ${gpu.why}`; reportLink('wgsl'); return; }
   wgslBusy = true;
   stopLive();
   const name = $('wgslName').value.trim().replace(/[^A-Za-z0-9_]/g, '_') || 'Model_Theme';
@@ -569,6 +587,7 @@ $('runWgsl').addEventListener('click', async () => {
   badge($('wgslBadge'), 'RUNNING');
   $('wgslTitle').textContent = isMetal ? `${name}.metal, translated to WGSL here` : `${name}.wgsl`;
   $('wgslReport').textContent = '';
+  $('wgslReportRow').hidden = true;
   $('wgslLiveCap').textContent = 'Live, after the checks.';
   drawFinal($('wgslFinal'), null);
   $('wgslResult').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -583,6 +602,7 @@ $('runWgsl').addEventListener('click', async () => {
     badge($('wgslBadge'), res.pass ? 'PASS' : 'FAIL');
     $('wgslPhase').textContent = `graded in ${secs} s${res.runError ? ` · run failed: ${res.runError}` : ''}`;
     $('wgslReport').textContent = res.text;
+    reportLink('wgsl');
     drawFinal($('wgslFinal'), res.last, res.width, res.height);
     window.__bench = { kind: 'wgsl', name, pass: res.pass, gates: res.gates.map((g) => g.pass), text: res.text, secs: Number(secs), gpu: res.gpu };
     if (res.gates[0]?.pass && !res.runError) {
@@ -591,6 +611,7 @@ $('runWgsl').addEventListener('click', async () => {
   } catch (e) {
     badge($('wgslBadge'), 'FAIL');
     $('wgslReport').textContent = `ERROR: ${e.message ?? e}`;
+    reportLink('wgsl');
     window.__bench = { kind: 'wgsl', name, error: String(e.message ?? e) };
   } finally { wgslBusy = false; }
 });

@@ -28,6 +28,15 @@ body:
       render: text
     validations:
       required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Bench mode
+      description: If a model wrote it as an ARGUS-BENCH run (BENCHMARK.md §6 asks for this).
+      options:
+        - not a bench run
+        - zero-shot
+        - agentic
   - type: textarea
     id: claims
     attributes:
