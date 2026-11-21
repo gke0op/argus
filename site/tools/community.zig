@@ -54,6 +54,20 @@ pub fn caption(gpa: std.mem.Allocator, text: []const u8) ![]u8 {
     return firstSentence(gpa, words.items);
 }
 
+/// A `// @argus web off: <why>` line in the header: a theme that ships in the app but does not
+/// run well in a browser yet (too heavy for one wasm thread, say) stays out of the site's picker.
+pub fn webOff(text: []const u8) bool {
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len == 0) continue;
+        if (!std.mem.startsWith(u8, line, "//")) return false; // the header is over
+        const body = std.mem.trim(u8, std.mem.trimStart(u8, line, "/!"), " \t");
+        if (std.mem.startsWith(u8, body, "@argus web off")) return true;
+    }
+    return false;
+}
+
 /// "themes/X.zig: text" -> "text": a header that opens with its own path (no spaces before the
 /// colon, a slash and a dot in it). Anything else is returned as it is.
 fn dropPath(s: []const u8) []const u8 {
@@ -108,6 +122,7 @@ pub fn main(init: std.process.Init) !void {
         const ext = std.fs.path.extension(path);
         const id = std.fs.path.stem(path);
         const text = cwd.readFileAlloc(io, path, arena, .unlimited) catch continue;
+        if (webOff(text)) continue; // the theme says it does not run well in a browser (yet)
         const line = try caption(arena, text);
         if (std.mem.eql(u8, ext, ".zig")) {
             const ok = for (built) |b| {
@@ -188,4 +203,10 @@ test "caption: directives, Author: lines and a leading path are skipped" {
     const p = try caption(gpa, "//! Night Tide: a coast at night. More.\n");
     defer gpa.free(p);
     try std.testing.expectEqualStrings("Night Tide: a coast at night.", p);
+}
+
+test "webOff: the header directive, and only in the header" {
+    try std.testing.expect(webOff("// Reservoir\n// @argus web off: too heavy for one wasm thread\nconst x = 1;\n"));
+    try std.testing.expect(!webOff("// Reservoir\nconst x = 1;\n// @argus web off: after the header\n"));
+    try std.testing.expect(!webOff("//! A theme. @argus web off is mentioned, not declared.\n"));
 }

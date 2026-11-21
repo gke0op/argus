@@ -132,7 +132,8 @@ A theme in a pull request runs in the browser before anyone merges it, and on th
 - **WGSL** alone (`web/themes/*.wgsl`) runs on the website only.
 
 The picker's caption is the first sentence of the file's header comment, so make it say what
-the theme is.
+the theme is. A theme that ships in the app but does not run well in a browser yet can say so with
+a header line, `// @argus web off: <why>`, and the site leaves it out of the picker.
 
 ### 8. Theme PR checklist
 

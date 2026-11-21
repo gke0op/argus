@@ -59,7 +59,9 @@ jobs:
           mkdir -p out
           echo "$PR_NUMBER" > out/pr.txt
           echo "$HEAD_SHA" > out/head.txt
-          git diff --name-only --diff-filter=AM "$BASE_SHA" HEAD -- 'bench/submissions/*.zig' 'themes/*.zig' 'themes/*.metal' 'web/themes/*.wgsl' > out/files.txt
+          # The PR's own changes (three dots: from the merge base, so a moved or retargeted base adds
+          # nothing), top-level files only (:(glob), so themes/*.zig is not themes/cpu/argus_kernel.zig).
+          git diff --name-only --diff-filter=AM "$BASE_SHA"...HEAD -- ':(glob)bench/submissions/*.zig' ':(glob)themes/*.zig' ':(glob)themes/*.metal' ':(glob)web/themes/*.wgsl' > out/files.txt
           links() { ./.toolchain/zig run tools/share.zig -- "$1" > "out/$2.links.txt" 2>/dev/null || rm -f "out/$2.links.txt"; }
           status=0
           while read -r f; do
