@@ -1280,10 +1280,43 @@ const MacBridge = struct {
         }
     }
 
-    pub fn openThemesFolder(_: *MacBridge) void {
-        _ = std.process.spawn(g_io, .{
-            .argv = &[_][]const u8{ "/usr/bin/open", "themes" },
-        }) catch {};
+    /// Shows the themes folder (beside Argus.app; the process runs in that folder) in Finder, in
+    /// front. In-process through NSWorkspace: it used to spawn `open themes`, which ran (the clicks
+    /// left `open` zombies behind) but, from a menu-bar app that is not frontmost, macOS 14's
+    /// cooperative activation can open Finder's window behind the app in front, so nothing seemed
+    /// to happen. The click on the popover lets Argus activate, and it hands activation to Finder
+    /// first. Returns false (and says why on stderr) when the folder could not be opened.
+    pub fn openThemesFolder(self: *MacBridge) bool {
+        const sel = self.sel_registerName;
+        const sendIdRetBool: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) bool = @ptrCast(self.msg0);
+        const fail = struct {
+            fn f(why: []const u8) bool {
+                std.debug.print("argus: themes folder: {s}\n", .{why});
+                return false;
+            }
+        }.f;
+        const NSFileManager = self.objc_getClass("NSFileManager") orelse return fail("no NSFileManager");
+        const NSURL = self.objc_getClass("NSURL") orelse return fail("no NSURL");
+        const NSWorkspace = self.objc_getClass("NSWorkspace") orelse return fail("no NSWorkspace");
+        const NSApplication = self.objc_getClass("NSApplication") orelse return fail("no NSApplication");
+        const fm = self.msg0(NSFileManager, sel("defaultManager")) orelse return fail("no file manager");
+        const cwd = self.msg0(fm, sel("currentDirectoryPath")) orelse return fail("no current directory");
+        const name = self.msgUTF8(self.NSString, self.sel_str_utf8, "themes") orelse return fail("no string");
+        const path = self.msgIdRetId(cwd, sel("stringByAppendingPathComponent:"), name) orelse return fail("no path");
+        if (!sendIdRetBool(fm, sel("fileExistsAtPath:"), path)) return fail("no themes folder beside Argus.app");
+        const url = self.msgIdRetId(NSURL, sel("fileURLWithPath:"), path) orelse return fail("no URL");
+        const ws = self.msg0(NSWorkspace, sel("sharedWorkspace")) orelse return fail("no workspace");
+
+        // Activation: Argus may take it (the user just clicked its popover), then yield it to
+        // Finder, so Finder's window comes up in front (macOS 14+; older macOS lets openURL do it).
+        if (self.msg0(NSApplication, sel("sharedApplication"))) |app| {
+            if (sendIdRetBool(app, sel("respondsToSelector:"), sel("activate"))) self.msgVoid(app, sel("activate")) else self.msgBool(app, sel("activateIgnoringOtherApps:"), true);
+            if (sendIdRetBool(app, sel("respondsToSelector:"), sel("yieldActivationToApplicationWithBundleIdentifier:"))) {
+                self.msgId(app, sel("yieldActivationToApplicationWithBundleIdentifier:"), self.msgUTF8(self.NSString, self.sel_str_utf8, "com.apple.finder"));
+            }
+        }
+        if (!sendIdRetBool(ws, sel("openURL:"), url)) return fail("NSWorkspace openURL: refused");
+        return true;
     }
 
     /// Renders `face` into a PNG at `dir/name` (dev aid: `--snapshot-popover`).
@@ -2357,8 +2390,7 @@ fn handlePopoverHit(b: *MacBridge, hit: pl.Hit) void {
     const sel = @min(b.sel_space, b.obs.n_spaces -| 1);
     switch (hit) {
         .open_themes => {
-            b.openThemesFolder();
-            enterDropMode(b);
+            if (b.openThemesFolder()) enterDropMode(b) else b.setNote(true, "Couldn't open the themes folder", .{});
         },
         .toggle_pause => b.setPaused(!b.obs.paused),
         .open_settings => {
